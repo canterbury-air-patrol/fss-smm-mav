@@ -1,3 +1,6 @@
+#pragma once
+#include "../fmu-types.hpp"
+#include <bits/stdint-uintn.h>
 
 enum FSSCommand {
     fss_cmd_unknown,
@@ -13,6 +16,10 @@ enum FSSCommand {
 
 class FSS {
 private:
+    uint16_t assigned_altitude;
+    Point goto_point;
 public:
     FSS();
+    Point getGoto();
+    uint16_t getAltitude();
 };

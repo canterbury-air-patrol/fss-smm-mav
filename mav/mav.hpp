@@ -1,3 +1,7 @@
+#pragma once
+#include "../fmu-types.hpp"
+#include <bits/stdint-uintn.h>
+
 enum flight_mode {
     flight_mode_unknown,
     flight_mode_manual,
@@ -11,8 +15,15 @@ class MAV {
 private:
     flight_mode mode{flight_mode_unknown};
     bool armed{false};
+    Point goto_position{};
+    uint16_t target_altitude{0};
 public:
     MAV() {};
     flight_mode getFlightMode() { return this->mode; };
     bool getArmed() { return this->armed; };
+    bool setMode(flight_mode fm);
+    void disarm();
+    void terminate();
+    void gotoPosition(Point to);
+    void setAltitude(uint16_t alt);
 };

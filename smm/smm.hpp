@@ -1,15 +1,8 @@
+#pragma once
 #include <bits/stdint-uintn.h>
 #include <list>
 
-class Point {
-private:
-    double latitude;
-    double longitude;
-public:
-    Point(double lat, double lng) : latitude(lat), longitude(lng) {};
-    double getLatitude() { return latitude; };
-    double getLongitude() { return longitude; };
-};
+#include "../fmu-types.hpp"
 
 class SMMSearch {
 private:
@@ -33,4 +26,5 @@ private:
     SMMSearch *current_search{nullptr};
 public:
     SMM() {};
+    void search();
 };

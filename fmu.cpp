@@ -86,29 +86,37 @@ FMUStateMachine::actionState(FMUState state)
     {
         case fmu_state_manual:
             /* Tell MAV to exit auto mode */
+            this->mav->setMode(flight_mode_manual);
             break;
         case fmu_state_searching:
             /* Tell SMM to implement the search */
+            this->smm->search();
             break;
         case fmu_state_rtl:
         case fmu_state_failsafe:
         case fmu_state_low_battery:
             /* Tell MAV to RTL */
+            this->mav->setMode(flight_mode_rtl);
             break;
         case fmu_state_goto:
             /* Tell MAV to Goto the fss position */
+            this->mav->gotoPosition(this->fss->getGoto());
             break;
         case fmu_state_hold:
             /* Tell MAV to Circle/Hold Position */
+            this->mav->setMode(flight_mode_hold);
             break;
         case fmu_state_altitude_adjust:
             /* Tell MAV to adjust the altitude */
+            this->mav->setAltitude(this->fss->getAltitude());
             break;
         case fmu_state_disarmed:
             /* Tell MAV to disarm the aircraft */
+            this->mav->disarm();
             break;
         case fmu_state_terminate:
             /* Tell MAV to terminate the flight */
+            this->mav->terminate();
             break;
     }
 }

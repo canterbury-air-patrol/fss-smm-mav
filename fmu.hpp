@@ -1,5 +1,7 @@
+#pragma once
 #include "fss/fss.hpp"
 #include "smm/smm.hpp"
+#include "mav/mav.hpp"
 
 enum FMUState {
     fmu_state_manual,
@@ -23,8 +25,11 @@ private:
     SMMCommand smm_command{smm_cmd_none};
     bool low_battery{false};
     bool fss_comms_lost{false};
+    MAV *mav{nullptr};
+    SMM *smm{nullptr};
+    FSS *fss{nullptr};
 public:
-    FMUStateMachine();
+    FMUStateMachine(MAV *t_mav, SMM *t_smm, FSS *t_fss);
     FMUState getCurrentstate();
 
     void FSSNewCommand(FSSCommand cmd);
