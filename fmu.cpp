@@ -1,0 +1,136 @@
+#include "fmu.hpp"
+
+FMUState map_smm_state(SMMCommand cmd)
+{
+    FMUState new_state = fmu_state_rtl;
+
+    switch (cmd) {
+        case smm_cmd_abandon_search:
+        case smm_cmd_none:
+            new_state = fmu_state_searching;
+            break;
+        case smm_cmd_mission_complete:
+        default:
+            new_state = fmu_state_rtl;
+            break;
+    }
+    return new_state;
+}
+
+FMUState map_fss_state(FSSCommand cmd)
+{
+    FMUState new_state = fmu_state_searching;
+    switch (cmd)
+    {
+        case fss_cmd_rtl:
+            new_state = fmu_state_rtl;
+            break;
+        case fss_cmd_goto:
+            new_state = fmu_state_goto;
+            break;
+        case fss_cmd_hold:
+            new_state = fmu_state_hold;
+            break;
+        case fss_cmd_altitude:
+            new_state = fmu_state_altitude_adjust;
+            break;
+        case fss_cmd_disarm:
+            new_state = fmu_state_disarmed;
+            break;
+        case fss_cmd_manual:
+            new_state = fmu_state_manual;
+            break;
+        case fss_cmd_terminate:
+            new_state = fmu_state_terminate;
+            break;
+        case fss_cmd_continue:
+        case fss_cmd_unknown:
+            new_state = fmu_state_searching;
+            break;
+    }
+    return new_state;
+}
+
+void
+FMUStateMachine::updateState()
+{
+    FMUState new_state = fmu_state_failsafe;
+
+    if (this->low_battery)
+    {
+        new_state = fmu_state_low_battery;
+    }
+    else if (this->fss_comms_lost)
+    {
+        new_state = fmu_state_failsafe;
+    }
+    else
+    {
+        new_state = map_fss_state(this->fss_command);
+        if (new_state == fmu_state_searching)
+        {
+            new_state = map_smm_state(this->smm_command);
+        }
+    }
+    if (new_state != this->current_state)
+    {
+        this->current_state = new_state;
+        this->actionState(this->current_state);
+    }
+}
+
+void
+FMUStateMachine::actionState(FMUState state)
+{
+    switch(state)
+    {
+        case fmu_state_manual:
+            /* Tell MAV to exit auto mode */
+            break;
+        case fmu_state_searching:
+            /* Tell SMM to implement the search */
+            break;
+        case fmu_state_rtl:
+        case fmu_state_failsafe:
+        case fmu_state_low_battery:
+            /* Tell MAV to RTL */
+            break;
+        case fmu_state_goto:
+            /* Tell MAV to Goto the fss position */
+            break;
+        case fmu_state_hold:
+            /* Tell MAV to Circle/Hold Position */
+            break;
+        case fmu_state_altitude_adjust:
+            /* Tell MAV to adjust the altitude */
+            break;
+        case fmu_state_disarmed:
+            /* Tell MAV to disarm the aircraft */
+            break;
+        case fmu_state_terminate:
+            /* Tell MAV to terminate the flight */
+            break;
+    }
+}
+
+
+void
+FMUStateMachine::FSSNewCommand(FSSCommand cmd)
+{
+    this->fss_command = cmd;
+    this->updateState();
+}
+
+void
+FMUStateMachine::SMMNewCommand(SMMCommand cmd)
+{
+    this->smm_command = cmd;
+    this->updateState();
+}
+
+void
+FMUStateMachine::setLowBattery()
+{
+    this->low_battery = true;
+    this->updateState();
+}

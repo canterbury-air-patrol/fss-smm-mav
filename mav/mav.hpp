@@ -1,8 +1,3 @@
-#include <bits/stdint-uintn.h>
-#include <string>
-#include <list>
-#include "fmu.hpp"
-
 enum flight_mode {
     flight_mode_unknown,
     flight_mode_manual,
@@ -21,8 +16,3 @@ public:
     flight_mode getFlightMode() { return this->mode; };
     bool getArmed() { return this->armed; };
 };
-
-int main(int argc, char *argv[])
-{
-
-}
