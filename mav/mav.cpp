@@ -44,3 +44,8 @@ void MAV::setAltitude(uint16_t alt)
 {
     this->target_altitude = alt;
 }
+
+MAV::MAV(std::string t_addr, uint16_t t_port)
+{
+
+}

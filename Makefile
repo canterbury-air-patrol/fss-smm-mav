@@ -12,8 +12,13 @@ CXXFLAGS+= -Imavlink
 CXXFLAGS+= -pthread
 LDFLAGS+= -pthread
 
+CXXFLAGS+= `pkg-config --cflags fss`
+LDFLAGS+= `pkg-config --libs fss-client fss-transport`
+
+CXXFLAGS+= -ggdb
+
 CPP_CODE=main.cpp fmu.cpp \
-		$(addprefix fss/, fss.cpp) \
+		$(addprefix fss/, fss.cpp fss-client.cpp) \
 		$(addprefix smm/, smm.cpp) \
 		$(addprefix mav/, mav.cpp mavlink.cpp mav-sys.cpp)
 C_CODE=
