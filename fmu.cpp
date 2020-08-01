@@ -142,3 +142,13 @@ FMUStateMachine::setLowBattery()
     this->low_battery = true;
     this->updateState();
 }
+
+void
+FMUStateMachine::setCommsFailure(bool failed)
+{
+    this->fss_comms_lost = failed;
+}
+
+FMUStateMachine::FMUStateMachine(MAV *t_mav, SMM *t_smm, FSS *t_fss) : mav(t_mav), smm(t_smm), fss(t_fss)
+{
+}

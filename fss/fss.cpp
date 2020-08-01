@@ -11,7 +11,42 @@ Point FSS::getGoto()
     return this->goto_point;
 }
 
+void FSS::setGoto(Point p)
+{
+    this->goto_point = p;
+}
+
+void FSS::registerCommandCB(notify_fss_command_cb cb, void *priv)
+{
+    if (this->client != nullptr)
+    {
+        this->client->registerCommandCB(cb, priv);
+    }
+};
+
+void FSS::registerCommsStatusCB(notify_fss_comms_cb cb, void *priv)
+{
+    if (this->client != nullptr)
+    {
+        this->client->registerCommsStatusCB(cb, priv);
+    }
+};
+
+static void
+goto_updated (void *priv, Point p)
+{
+    if (priv != nullptr)
+    {
+        FSS *fss = (FSS *)priv;
+        fss->setGoto(p);
+    }
+}
+
 FSS::FSS(const char *config_file)
 {
     this->client = new fss_client(config_file);
+    if (this->client != nullptr)
+    {
+        this->client->registerGotoUpdateCB(goto_updated, this);
+    }
 }

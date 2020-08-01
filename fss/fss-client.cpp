@@ -69,7 +69,7 @@ fss_client::report_command(FSSCommand cmd)
 {
     if (this->command_cb != nullptr)
     {
-        this->command_cb(cmd);
+        this->command_cb(this->command_cb_priv, cmd);
     }
 }
 
@@ -78,7 +78,7 @@ fss_client::report_comms_status(FSSCommsStatus status)
 {
     if (this->comms_status_cb != nullptr)
     {
-        this->comms_status_cb (status);
+        this->comms_status_cb (this->comms_status_cb_priv, status);
     }
 }
 
@@ -87,6 +87,6 @@ fss_client::report_goto_update(Point p)
 {
     if (this->goto_cb != nullptr)
     {
-        this->goto_cb (p);
+        this->goto_cb (this->goto_cb_priv, p);
     }
 }

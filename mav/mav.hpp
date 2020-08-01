@@ -13,8 +13,11 @@ enum flight_mode {
     flight_mode_hold,
 };
 
+class mav_connection;
+
 class MAV {
 private:
+    mav_connection *connection;
     flight_mode mode{flight_mode_unknown};
     bool armed{false};
     Point goto_position{};

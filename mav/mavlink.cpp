@@ -106,6 +106,39 @@ mav_connection::commandGoto(double lat, double lng)
 }
 
 void
+mav_connection::commandManual()
+{
+    /* Map type to RTL mode */
+    auto sys = this->systems.findSystem(TARGET_SYS_ID);
+    uint8_t fmode = 0;
+    switch (sys->getAutoPilotType())
+    {
+        case MAV_TYPE_FIXED_WING:
+            fmode = PLANE_MODE_FLY_BY_WIRE_B;
+            break;
+        case MAV_TYPE_QUADROTOR:
+        case MAV_TYPE_COAXIAL:
+        case MAV_TYPE_HELICOPTER:
+        case MAV_TYPE_HEXAROTOR:
+        case MAV_TYPE_OCTOROTOR:
+        case MAV_TYPE_TRICOPTER:
+            fmode = COPTER_MODE_STABILIZE;
+            break;
+        case MAV_TYPE_GROUND_ROVER:
+            fmode = ROVER_MODE_MANUAL;
+            break;
+        default:
+            fmode = 0;
+            break;
+    }
+    if (fmode != 0)
+    {
+        this->setFlightMode(fmode);
+    }
+
+}
+
+void
 mav_connection::commandHold()
 {
     /* Map type to LOITER/HOLD mode */
@@ -172,6 +205,20 @@ mav_connection::commandContinue()
             this->last_action_was_continue = true;
         }
     }
+}
+
+void
+mav_connection::commandTerminate()
+{
+    /* Do nothing for now */
+    /* TODO: Implement terminate */
+}
+
+void
+mav_connection::loadSearch()
+{
+    /* Load the existing search into the FC, and jump to the current target point */
+    /* TODO: Implement search loading */
 }
 
 void
@@ -508,7 +555,7 @@ void mav_connection::report_battery_status(int8_t remaining, int32_t consumed)
 {
     if (this->battery_cb != nullptr)
     {
-        this->battery_cb(remaining, consumed);
+        this->battery_cb(this->battery_cb_priv, remaining, consumed);
     }
 }
 
@@ -516,7 +563,7 @@ void mav_connection::report_position(double lat, double lng, double alt, uint16_
 {
     if (this->position_cb != nullptr)
     {
-        this->position_cb(lat, lng, alt, hdg, vh, vv);
+        this->position_cb(this->position_cb_priv, lat, lng, alt, hdg, vh, vv);
     }
 }
 
@@ -524,6 +571,6 @@ void mav_connection::report_reached(int point)
 {
     if (this->reached_cb != nullptr)
     {
-        this->reached_cb(point);
+        this->reached_cb(this->reached_cb_priv, point);
     }
 }

@@ -35,4 +35,5 @@ public:
     void FSSNewCommand(FSSCommand cmd);
     void SMMNewCommand(SMMCommand cmd);
     void setLowBattery();
+    void setCommsFailure(bool failed);
 };

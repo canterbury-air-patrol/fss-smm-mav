@@ -52,8 +52,11 @@ class mav_connection {
         std::thread recv_thread{};
         mav_systems systems{};
         notify_position_cb position_cb{nullptr};
+        void *position_cb_priv{nullptr};
         notify_battery_status_cb battery_cb{nullptr};
+        void *battery_cb_priv{nullptr};
         notify_reached_cb reached_cb{nullptr};
+        void *reached_cb_priv{nullptr};
         bool last_action_was_continue{false};
         bool sendMavLinkMsg(mavlink_message_t *msg);
         void setFlightMode(uint8_t fmode);
@@ -75,6 +78,9 @@ class mav_connection {
         void commandContinue();
         void commandAltitute();
         void commandDisARM();
+        void commandManual();
+        void commandTerminate();
+        void loadSearch();
         void sendADSB(uint32_t icao_address, double lat, double lng, uint32_t altitude, uint8_t altitude_type, uint16_t heading, uint16_t hor_vel, uint16_t ver_vel, char *callsign, uint8_t emitter_type, uint8_t tslc, uint16_t flags, uint16_t squawk);
         void requestStream(int sysid, int compid, uint32_t command, uint32_t interval);
 };
