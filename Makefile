@@ -1,9 +1,21 @@
 GCC?=gcc
-GPP?=g++
+GXX?=g++
 CFLAGS?=
-CXXFLAGS?= -Wall -Wextra -Wshadow -Wnon-virtual-dtor -pedantic -Wsign-conversion -Wduplicated-cond -Wduplicated-branches -Wconversion -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
+CXXFLAGS?= -std=c++20
+LDFLAGS?=
+CXXFLAGS+= -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wduplicated-cond -Wduplicated-branches -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
+# Required to handle mavlink
+#CXXFLAGS+= -pedantic -Wconversion -Wsign-conversion 
+CXXFLAGS+= -Wno-address-of-packed-member
+# Ends
+CXXFLAGS+= -Imavlink
+CXXFLAGS+= -pthread
+LDFLAGS+= -pthread
 
-CPP_CODE=main.cpp fmu.cpp $(addprefix fss/, fss.cpp) $(addprefix smm/, smm.cpp) $(addprefix mav/, mav.cpp)
+CPP_CODE=main.cpp fmu.cpp \
+		$(addprefix fss/, fss.cpp) \
+		$(addprefix smm/, smm.cpp) \
+		$(addprefix mav/, mav.cpp mavlink.cpp mav-sys.cpp)
 C_CODE=
 OBJS=
 OBJS+=$(C_CODE:.c=.o)
@@ -16,8 +28,8 @@ all: fmu
 	$(GCC) -c -o $(@) $(<) $(CFLAGS)
 
 %.o: %.cpp
-	$(GPP) -c -o $(@) $(<) $(CXXFLAGS)
+	$(GXX) -c -o $(@) $(<) $(CXXFLAGS)
 
 
 fmu: $(OBJS)
-	$(GPP) -o $(@) $(OBJS)
+	$(GXX) -o $(@) $(OBJS) $(LDFLAGS)

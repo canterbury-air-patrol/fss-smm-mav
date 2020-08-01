@@ -2,6 +2,8 @@
 #include "../fmu-types.hpp"
 #include <bits/stdint-uintn.h>
 
+#include <string>
+
 enum flight_mode {
     flight_mode_unknown,
     flight_mode_manual,
@@ -18,7 +20,7 @@ private:
     Point goto_position{};
     uint16_t target_altitude{0};
 public:
-    MAV() {};
+    MAV(std::string t_addr, uint16_t t_port);
     flight_mode getFlightMode() { return this->mode; };
     bool getArmed() { return this->armed; };
     bool setMode(flight_mode fm);
