@@ -1,5 +1,6 @@
 #pragma once
 #include "../fmu-types.hpp"
+#include "../smm/smm-types.hpp"
 #include <bits/stdint-uintn.h>
 
 #include <string>
@@ -31,4 +32,6 @@ public:
     void terminate();
     void gotoPosition(Point to);
     void setAltitude(uint16_t alt);
+    Point getCurrentPosition();
+    void loadSearch(SMMSearch *);
 };

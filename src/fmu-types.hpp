@@ -1,10 +1,5 @@
 #pragma once
 
-#include "fss/fmu-fss-types.hpp"
-#include "smm/smm-types.hpp"
-#include <bits/stdint-uintn.h>
-#include <bits/stdint-intn.h>
-
 class Point {
 private:
     bool valid{false};
@@ -16,6 +11,11 @@ public:
     double getLatitude() { return latitude; };
     double getLongitude() { return longitude; };
 };
+
+#include "fss/fmu-fss-types.hpp"
+#include "smm/smm-types.hpp"
+#include <bits/stdint-uintn.h>
+#include <bits/stdint-intn.h>
 
 typedef void (*notify_fss_command_cb)(void *priv, FSSCommand cmd);
 typedef void (*notify_fss_comms_cb)(void *priv, FSSCommsStatus status);

@@ -1,4 +1,5 @@
 #include "internal.hpp"
+#include "mav.hpp"
 
 #include <bits/stdint-intn.h>
 #include <iostream>
@@ -219,6 +220,13 @@ mav_connection::loadSearch()
 {
     /* Load the existing search into the FC, and jump to the current target point */
     /* TODO: Implement search loading */
+}
+
+void
+mav_connection::loadSearch(SMMSearch *search)
+{
+    this->search = search;
+    this->loadSearch();
 }
 
 void

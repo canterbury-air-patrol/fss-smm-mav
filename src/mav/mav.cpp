@@ -54,3 +54,13 @@ void MAV::setAltitude(uint16_t alt)
 MAV::MAV(std::string t_addr, uint16_t t_port) : connection(new mav_connection(t_addr, t_port))
 {
 }
+
+Point MAV::getCurrentPosition()
+{
+    return this->connection->getLastPosition();
+}
+
+void MAV::loadSearch(SMMSearch *search)
+{
+    this->connection->loadSearch(search);
+}

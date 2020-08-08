@@ -5,6 +5,7 @@
 #include <list>
 
 #include "../fmu-types.hpp"
+#include "../smm/smm.hpp"
 
 class mav_comp {
     private:
@@ -51,6 +52,8 @@ class mav_connection {
         std::mutex send_lock{};
         std::thread recv_thread{};
         mav_systems systems{};
+        Point last_position{};
+        SMMSearch *search{nullptr};
         notify_position_cb position_cb{nullptr};
         void *position_cb_priv{nullptr};
         notify_battery_status_cb battery_cb{nullptr};
@@ -83,4 +86,6 @@ class mav_connection {
         void loadSearch();
         void sendADSB(uint32_t icao_address, double lat, double lng, uint32_t altitude, uint8_t altitude_type, uint16_t heading, uint16_t hor_vel, uint16_t ver_vel, char *callsign, uint8_t emitter_type, uint8_t tslc, uint16_t flags, uint16_t squawk);
         void requestStream(int sysid, int compid, uint32_t command, uint32_t interval);
+        Point getLastPosition() { return this->last_position; };
+        void loadSearch(SMMSearch *search);
 };

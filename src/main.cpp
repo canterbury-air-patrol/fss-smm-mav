@@ -61,8 +61,8 @@ int main(int argc, char *argv[])
     signal (SIGPIPE, SIG_IGN);
 
     FSS *fss = new FSS(argv[1]);
-    SMM *smm = new SMM();
     MAV *mav = new MAV(argv[2], atoi(argv[3]));
+    SMM *smm = new SMM(mav);
 
     /* Get the asset name */
     asset_name = fss->getAssetName();

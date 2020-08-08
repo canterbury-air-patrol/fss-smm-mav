@@ -90,7 +90,7 @@ FMUStateMachine::actionState(FMUState state)
             break;
         case fmu_state_searching:
             /* Tell SMM to implement the search */
-            this->smm->search();
+            this->smm->search(this->mav->getCurrentPosition());
             break;
         case fmu_state_rtl:
         case fmu_state_failsafe:

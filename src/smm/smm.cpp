@@ -3,7 +3,7 @@
 #include "smm.hpp"
 #include <smm-asset.h>
 
-SMM::SMM()
+SMM::SMM(MAV *t_mav) : mav(t_mav)
 {
     smm_asset_debugging_set (true);
 }
@@ -81,7 +81,40 @@ SMM::connect(std::string t_host, std::string t_user, std::string t_pass, std::st
     }
 }
 
-void SMM::search()
+void SMM::search(Point current_pos)
 {
     /* Search, or find a search to perform */
+    if (this->asset == nullptr)
+    {
+        return;
+    }
+    while (this->current_search == nullptr)
+    {
+        smm_search new_search = smm_asset_get_search(this->asset, current_pos.getLongitude(), current_pos.getLongitude());
+        if (new_search == nullptr)
+        {
+            /* No search to perform */
+            /* Enter RTL and exit */
+            return;
+        }
+        if (smm_search_accept (new_search))
+        {
+            this->current_search = new SMMSearch(new_search);
+        }
+    }
+    /* Load the search into AP */
+    this->mav->loadSearch(this->current_search);
+}
+
+SMMSearch::SMMSearch(smm_search search)
+{
+    smm_waypoints wps = nullptr;
+	size_t wps_count = 0;
+    smm_search_get_waypoints (search, &wps, &wps_count);
+	for (size_t i = 0; i < wps_count; i++)
+	{
+		Point wp;
+        this->addPoint(wp);
+	}
+	smm_waypoints_free (wps, wps_count);
 }

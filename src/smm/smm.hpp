@@ -4,20 +4,10 @@
 #include <string>
 
 #include "../fmu-types.hpp"
+#include "../mav/mav.hpp"
 
 extern "C" {
 #include <smm-asset.h>
-};
-
-class SMMSearch {
-private:
-    std::list<Point> points{};
-    uint64_t search_id{0};
-public:
-    SMMSearch(uint64_t id) : search_id(id) {};
-    void addPoint(Point p) { this->points.push_back(p); };
-    uint64_t getSearchId() { return this->search_id; };
-    const std::list<Point> getPoints() { return this->points; };
 };
 
 enum SMMCommand {
@@ -28,19 +18,20 @@ enum SMMCommand {
 
 class SMM {
 private:
+    MAV *mav{nullptr};
     smm_connection conn{nullptr};
     std::string smm_host{};
     std::string smm_user{};
     std::string smm_pass{};
     std::string asset_name{};
     SMMSearch *current_search{nullptr};
-    smm_assets assets_list;
-    size_t assets_list_count;
-    smm_asset asset;
+    smm_assets assets_list{nullptr};
+    size_t assets_list_count{0};
+    smm_asset asset{nullptr};
     void connect();
     void disconnect();
 public:
-    SMM();
+    SMM(MAV *t_mav);
     void connect(std::string host, std::string user, std::string pass, std::string asset_name);
-    void search();
+    void search(Point current_pos);
 };
