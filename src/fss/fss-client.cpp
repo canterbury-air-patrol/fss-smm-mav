@@ -65,6 +65,12 @@ fss_client::handlePositionReport(flight_safety_system::transport::fss_message_po
 }
 
 void
+fss_client::handleSMMSettings(flight_safety_system::transport::fss_message_smm_settings *msg)
+{
+    this->report_smm_settings(SMMSettings(msg->getServerURL(), msg->getUsername(), msg->getPassword()));
+}
+
+void
 fss_client::report_command(FSSCommand cmd)
 {
     if (this->command_cb != nullptr)
@@ -88,5 +94,14 @@ fss_client::report_goto_update(Point p)
     if (this->goto_cb != nullptr)
     {
         this->goto_cb (this->goto_cb_priv, p);
+    }
+}
+
+void
+fss_client::report_smm_settings(SMMSettings settings)
+{
+    if (this->smm_settings_cb != nullptr)
+    {
+        this->smm_settings_cb (this->smm_settings_cb_priv, settings);
     }
 }

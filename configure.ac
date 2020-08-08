@@ -23,6 +23,7 @@ PKG_INSTALLDIR
 # Check for required pkg-config
 PKG_CHECK_MODULES([FSS_CLIENT], [fss-client])
 PKG_CHECK_MODULES([FSS_TRANSPORT], [fss-transport])
+PKG_CHECK_MODULES([SMM_ASSET], [smm-asset])
 
 AC_CHECK_LIB([pthread], [pthread_create], [
        have_pthread=yes

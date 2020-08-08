@@ -1,6 +1,15 @@
 #include "fmu-fss.hpp"
 #include "internal.hpp"
 
+std::string FSS::getAssetName()
+{
+    if (this->client != nullptr)
+    {
+        return this->client->getAssetName();
+    }
+    return "";
+}
+
 uint16_t FSS::getAltitude()
 {
     return this->assigned_altitude;
@@ -31,6 +40,14 @@ void FSS::registerCommsStatusCB(notify_fss_comms_cb cb, void *priv)
         this->client->registerCommsStatusCB(cb, priv);
     }
 };
+
+void FSS::registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv)
+{
+    if (this->client != nullptr)
+    {
+        this->client->registerSMMSettingsCB(cb, priv);
+    }
+}
 
 static void
 goto_updated (void *priv, Point p)

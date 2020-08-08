@@ -13,6 +13,6 @@ cap_fmu_SOURCES += fss/fss.cpp fss/fmu-fss.hpp fss/fmu-fss-types.hpp fss/fss-cli
 cap_fmu_SOURCES += mav/internal.hpp mav/mav.cpp mav/mav.hpp mav/mav-sys.cpp mav/mavlink.cpp
 cap_fmu_SOURCES += smm/smm.cpp smm/smm.hpp
 
-cap_fmu_CXXFLAGS = $(AM_CXXFLAGS) $(FSS_CLIENT_CFLAGS)
-cap_fmu_CFLAGS = $(AM_CFLAGS) $(FSS_CLIENT_CFLAGS)
-cap_fmu_LDADD = $(JSONCPP_LIBS) $(FSS_CLIENT_LIBS) $(FSS_TRANSPORT_LIBS)
+cap_fmu_CXXFLAGS = $(AM_CXXFLAGS) $(FSS_CLIENT_CFLAGS) $(SMM_ASSET_CFLAGS)
+cap_fmu_CFLAGS = $(AM_CFLAGS) $(FSS_CLIENT_CFLAGS) $(SMM_ASSET_CFLAGS)
+cap_fmu_LDADD = $(JSONCPP_LIBS) $(FSS_CLIENT_LIBS) $(FSS_TRANSPORT_LIBS) $(SMM_ASSET_LIBS)

@@ -13,9 +13,11 @@ private:
     Point goto_point{};
 public:
     FSS(const char *config_file);
+    std::string getAssetName();
     Point getGoto();
     void setGoto(Point);
     uint16_t getAltitude();
     void registerCommandCB(notify_fss_command_cb cb, void *priv);
     void registerCommsStatusCB(notify_fss_comms_cb cb, void *priv);
+    void registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv);
 };

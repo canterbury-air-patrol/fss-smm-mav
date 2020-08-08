@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fss/fmu-fss-types.hpp"
+#include "smm/smm-types.hpp"
 #include <bits/stdint-uintn.h>
 #include <bits/stdint-intn.h>
 
@@ -22,3 +23,5 @@ typedef void (*notify_fss_comms_cb)(void *priv, FSSCommsStatus status);
 typedef void (*notify_position_cb)(void *priv, double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver);
 typedef void (*notify_battery_status_cb)(void *priv, int8_t remaining, int32_t consumed);
 typedef void (*notify_reached_cb)(void *priv, int point);
+
+typedef void (*notify_smm_settings_cb)(void *priv, SMMSettings settings);

@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include "fmu.hpp"
 #include "fss/fmu-fss-types.hpp"
+#include "smm/smm-types.hpp"
+
+std::string asset_name = "";
 
 bool running = true;
 
@@ -34,6 +37,17 @@ fss_comms_status_cb (void *priv, FSSCommsStatus status)
     }
 }
 
+static void
+smm_settings_cb (void *priv, SMMSettings settings)
+{
+    if (priv != nullptr)
+    {
+        SMM *smm = (SMM *)priv;
+        std::cout << "Trying to connect to " << settings.getURL() << std::endl;
+        smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 4)
@@ -50,12 +64,16 @@ int main(int argc, char *argv[])
     SMM *smm = new SMM();
     MAV *mav = new MAV(argv[2], atoi(argv[3]));
 
+    /* Get the asset name */
+    asset_name = fss->getAssetName();
+
     /* Setup the State Machine */
     FMUStateMachine *state_machine = new FMUStateMachine(mav, smm, fss);
 
     /* Connect up the notifications */
     fss->registerCommandCB(fss_command_cb, state_machine);
     fss->registerCommsStatusCB(fss_comms_status_cb, state_machine);
+    fss->registerSMMSettingsCB(smm_settings_cb, smm);
 
     while (running)
     {
