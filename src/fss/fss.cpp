@@ -1,3 +1,4 @@
+#include "fmu-fss-types.hpp"
 #include "fmu-fss.hpp"
 #include "internal.hpp"
 

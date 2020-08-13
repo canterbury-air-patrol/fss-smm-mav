@@ -43,7 +43,6 @@ smm_settings_cb (void *priv, SMMSettings settings)
     if (priv != nullptr)
     {
         SMM *smm = (SMM *)priv;
-        std::cout << "Trying to connect to " << settings.getURL() << std::endl;
         smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
     }
 }

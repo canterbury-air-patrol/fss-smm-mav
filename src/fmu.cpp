@@ -72,7 +72,8 @@ FMUStateMachine::updateState()
             new_state = map_smm_state(this->smm_command);
         }
     }
-    if (new_state != this->current_state)
+
+    if (new_state != this->current_state || new_state == fmu_state_searching)
     {
         this->current_state = new_state;
         this->actionState(this->current_state);
