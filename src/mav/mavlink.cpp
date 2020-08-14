@@ -216,17 +216,99 @@ mav_connection::commandTerminate()
 }
 
 void
+mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
+{
+    /* Find the point */
+    auto points = this->search->getPoints();
+    mavlink_message_t msg;
+    if (seq >= points.size())
+    {
+        mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+                    seq, /* Which waypoint is this */
+                    MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                    MAV_CMD_NAV_RETURN_TO_LAUNCH, /* Return home */
+                    0, /* Not the current point */
+                    0, /* Auto continue: No */
+                    0, 0, 0, 0, 0, 0, 0, /* Parameters ignored */
+                    mission_type);
+    }
+    else
+    {
+        Point p = points[seq];
+        mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+                    seq, /* Which waypoint is this */
+                    MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                    MAV_CMD_NAV_WAYPOINT, /* Navigate to a point */
+                    0, /* This waypoint is the current target */
+                    1, /* Auto continue */
+                    0, /* Hold time: 0s */
+                    5, /* Accept radius: 5m */
+                    0, /* Pass radius: 0m */
+                    NAN, /* Yaw: NaN for dont care */
+                    p.getLatitude() / 0.0000001, /* Latitude */
+                    p.getLongitude() / 0.0000001, /* Longitude */
+                    this->search->getAltitude(),  /* Altitude (m) */
+                    mission_type);
+    }
+    this->sendMavLinkMsg(&msg);
+}
+
+void
+mav_connection::setCurrentWP(uint16_t seq)
+{
+    mavlink_message_t msg;
+    mavlink_msg_mission_set_current_pack(SYS_ID, COMP_ID, &msg, 0, 1, seq);
+    this->sendMavLinkMsg(&msg);
+}
+
+void
+mav_connection::mission_ack(bool accepted)
+{
+    if (this->search_loading)
+    {
+        this->search_loading = false;
+        if (accepted)
+        {
+            this->search_loaded = true;
+            this->commandContinue();
+            this->setCurrentWP(this->search->getCurrentPointIdx());
+        }
+        else
+        {
+            this->search = nullptr;
+        }
+    }
+    else
+    {
+        std::cout << "Mission ack when I wasn't loading a search" << std::endl;
+    }
+}
+
+void
 mav_connection::loadSearch()
 {
     /* Load the existing search into the FC, and jump to the current target point */
-    /* TODO: Implement search loading */
+    /* Tell the FC how many points there are */
+    this->search_loaded = false;
+    this->search_loading = true;
+    mavlink_message_t msg;
+    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints().size(), MAV_MISSION_TYPE_MISSION);
+    this->sendMavLinkMsg(&msg);
+    /* Enter RTL while loading the search */
+    this->commandRTL();
 }
 
 void
 mav_connection::loadSearch(SMMSearch *search)
 {
-    this->search = search;
-    this->loadSearch();
+    if (this->search != search || !this->search_loaded)
+    {
+        this->search = search;
+        if (this->search != nullptr)
+        {
+            this->loadSearch();
+        }
+    }
 }
 
 void
@@ -288,6 +370,34 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
                 /* Reached a new waypoint, update the current search progress */
                 uint16_t seq = mavlink_msg_mission_item_reached_get_seq(msg);
                 this->report_reached(seq);
+            } break;
+        case MAVLINK_MSG_ID_MISSION_REQUEST:
+            {
+                if (mavlink_msg_mission_request_get_target_system(msg) == SYS_ID && mavlink_msg_mission_request_get_target_component(msg) == COMP_ID)
+                {
+                    /* Getting asked for a specific point in mission */
+                    uint16_t seq = mavlink_msg_mission_request_get_seq(msg);
+                    uint8_t mt = mavlink_msg_mission_request_get_mission_type(msg);
+                    this->send_waypoint(seq, mt);
+                }
+            } break;
+        case MAVLINK_MSG_ID_MISSION_REQUEST_INT:
+            {
+                if (mavlink_msg_mission_request_get_target_system(msg) == SYS_ID && mavlink_msg_mission_request_get_target_component(msg) == COMP_ID)
+                {
+                    /* Getting asked for a specific point in mission */
+                    uint16_t seq = mavlink_msg_mission_request_int_get_seq(msg);
+                    uint8_t mt = mavlink_msg_mission_request_int_get_mission_type(msg);
+                    this->send_waypoint(seq, mt);
+                }
+            } break;
+        case MAVLINK_MSG_ID_MISSION_ACK:
+            {
+                if (mavlink_msg_mission_ack_get_target_system(msg) == SYS_ID && mavlink_msg_mission_ack_get_target_component(msg) == COMP_ID)
+                {
+                    /* Our mission was acknowledged */
+                    this->mission_ack(mavlink_msg_mission_ack_get_type(msg) == MAV_MISSION_ACCEPTED);
+                }
             } break;
         case MAVLINK_MSG_ID_ADSB_VEHICLE:
         case MAVLINK_MSG_ID_COLLISION:

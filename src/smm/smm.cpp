@@ -113,8 +113,9 @@ SMMSearch::SMMSearch(smm_search search)
     smm_search_get_waypoints (search, &wps, &wps_count);
 	for (size_t i = 0; i < wps_count; i++)
 	{
-		Point wp;
+		Point wp(wps[i]->lat, wps[i]->lon);
         this->addPoint(wp);
 	}
 	smm_waypoints_free (wps, wps_count);
+    this->altitude = smm_search_sweep_width (search);
 }

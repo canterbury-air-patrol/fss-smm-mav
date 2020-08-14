@@ -24,6 +24,7 @@ class SMMSearch {
 private:
     std::vector<Point> points{};
     int current_point{0};
+    int altitude{0};
 public:
     SMMSearch() {};
     SMMSearch(smm_search);
@@ -31,4 +32,5 @@ public:
     int getCurrentPointIdx() { return this->current_point; };
     Point getCurrentPoint() { return this->points[this->current_point]; };
     const std::vector<Point> getPoints() { return this->points; };
+    uint16_t getAltitude() { return this->altitude; };
 };

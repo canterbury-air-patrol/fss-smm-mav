@@ -61,6 +61,8 @@ class mav_connection {
         notify_reached_cb reached_cb{nullptr};
         void *reached_cb_priv{nullptr};
         bool last_action_was_continue{false};
+        bool search_loading{false};
+        bool search_loaded{false};
         bool sendMavLinkMsg(mavlink_message_t *msg);
         void setFlightMode(uint8_t fmode);
         void processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *status);
@@ -69,6 +71,9 @@ class mav_connection {
         void report_position(double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver);
         void report_battery_status(int8_t, int32_t);
         void report_reached(int);
+        void send_waypoint(uint16_t, uint8_t);
+        void mission_ack(bool);
+        void setCurrentWP(uint16_t seq);
     public:
         mav_connection(std::string t_addr, uint16_t t_port);
         ~mav_connection();
