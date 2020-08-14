@@ -692,3 +692,9 @@ void mav_connection::report_reached(int point)
         this->reached_cb(this->reached_cb_priv, point);
     }
 }
+
+void mav_connection::registerPositionCB(notify_position_cb cb, void *priv)
+{
+    this->position_cb_priv = priv;
+    this->position_cb = cb;
+}

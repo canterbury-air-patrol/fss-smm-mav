@@ -81,6 +81,15 @@ SMM::connect(std::string t_host, std::string t_user, std::string t_pass, std::st
     }
 }
 
+void
+SMM::reportPosition(double latitude, double longitude, unsigned int altitude, uint16_t bearing)
+{
+    if (this->asset)
+    {
+        smm_asset_report_position (this->asset, latitude, longitude, altitude, bearing, 3);
+    }
+}
+
 void SMM::search(Point current_pos)
 {
     /* Search, or find a search to perform */

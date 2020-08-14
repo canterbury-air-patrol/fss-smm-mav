@@ -71,6 +71,36 @@ fss_client::handleSMMSettings(flight_safety_system::transport::fss_message_smm_s
 }
 
 void
+fss_client::fss_send_position(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
+{
+    static uint64_t position_last_sent = 0;
+    uint64_t curr_ts = flight_safety_system::fss_current_timestamp();
+    bool res = curr_ts > (position_last_sent + 1000);
+    if (res)
+    {
+        auto msg_pos = new flight_safety_system::transport::fss_message_position_report(lat, lng, alt, heading, hor_vel, ver_vel,
+            /* No ICAO Code assigned */
+            0,
+            /* Use our name as the callsign */
+            this->getAssetName(),
+            /* Sqawk VFR */
+            1200,
+            /* Time since last contact (0), we are annoncing now */
+            0,
+            /* Report valid for: coords, altitude, heading, velocity, callsign, squawk */
+            1 | 2 | 4 | 8 | 16 | 32,
+            /* Using GPS for altitude */
+            1,
+            /* Type is UAV */
+            14,
+            curr_ts);
+        this->sendMsgAll(msg_pos);
+        delete msg_pos;
+        position_last_sent = curr_ts;
+    }
+}
+
+void
 fss_client::report_command(FSSCommand cmd)
 {
     if (this->command_cb != nullptr)

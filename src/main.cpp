@@ -4,6 +4,7 @@
 #include <iostream>
 #include <csignal>
 #include <unistd.h>
+#include "fmu-types.hpp"
 #include "fmu.hpp"
 #include "fss/fmu-fss-types.hpp"
 #include "smm/smm-types.hpp"
@@ -47,6 +48,20 @@ smm_settings_cb (void *priv, SMMSettings settings)
     }
 }
 
+struct fss_smm_s {
+    FSS *fss;
+    SMM *smm;
+};
+
+static void
+mav_position_cb (void *priv, double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver)
+{
+    struct fss_smm_s *fss_smm = (struct fss_smm_s *)priv;
+    fss_smm->fss->reportPosition(t_lat, t_lng, alt, t_hdg, t_vel_hor, t_vel_ver);
+
+    fss_smm->smm->reportPosition(t_lat, t_lng, alt, t_hdg / 100);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 4)
@@ -73,6 +88,12 @@ int main(int argc, char *argv[])
     fss->registerCommandCB(fss_command_cb, state_machine);
     fss->registerCommsStatusCB(fss_comms_status_cb, state_machine);
     fss->registerSMMSettingsCB(smm_settings_cb, smm);
+
+    struct fss_smm_s *fss_smm = (struct fss_smm_s *) calloc (1, sizeof (struct fss_smm_s));
+    fss_smm->fss = fss;
+    fss_smm->smm = smm;
+
+    mav->registerPositionCB(mav_position_cb, fss_smm);
 
     while (running)
     {

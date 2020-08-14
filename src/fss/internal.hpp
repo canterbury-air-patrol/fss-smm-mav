@@ -31,4 +31,5 @@ public:
     void registerCommsStatusCB(notify_fss_comms_cb cb, void *priv) { this->comms_status_cb = cb; this->comms_status_cb_priv = priv; };
     void registerGotoUpdateCB(notify_goto_update_cb cb, void *priv) { this->goto_cb = cb; this->goto_cb_priv = priv; };
     void registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv) { this->smm_settings_cb = cb; this->smm_settings_cb_priv = priv; };
+    void fss_send_position(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel);
 };

@@ -64,3 +64,8 @@ void MAV::loadSearch(SMMSearch *search)
 {
     this->connection->loadSearch(search);
 }
+
+void MAV::registerPositionCB(notify_position_cb cb, void *priv)
+{
+    this->connection->registerPositionCB(cb, priv);
+}

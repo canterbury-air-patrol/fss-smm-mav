@@ -34,4 +34,5 @@ public:
     void setAltitude(uint16_t alt);
     Point getCurrentPosition();
     void loadSearch(SMMSearch *);
+    void registerPositionCB(notify_position_cb cb, void *priv);
 };

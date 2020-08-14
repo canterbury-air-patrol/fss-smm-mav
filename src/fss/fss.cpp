@@ -50,6 +50,14 @@ void FSS::registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv)
     }
 }
 
+void FSS::reportPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
+{
+    if (this->client != nullptr)
+    {
+        this->client->fss_send_position(lat, lng, alt, heading, hor_vel, ver_vel);
+    }
+}
+
 static void
 goto_updated (void *priv, Point p)
 {

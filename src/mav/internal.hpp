@@ -93,4 +93,5 @@ class mav_connection {
         void requestStream(int sysid, int compid, uint32_t command, uint32_t interval);
         Point getLastPosition() { return this->last_position; };
         void loadSearch(SMMSearch *search);
+        void registerPositionCB(notify_position_cb cb, void *priv);
 };
