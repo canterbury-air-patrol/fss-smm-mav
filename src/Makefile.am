@@ -11,7 +11,7 @@ AM_CXXFLAGS+= -I ../mavlink
 cap_fmu_SOURCES = main.cpp fmu.cpp fmu.hpp fmu-types.hpp
 cap_fmu_SOURCES += fss/fss.cpp fss/fmu-fss.hpp fss/fmu-fss-types.hpp fss/fss-client.cpp fss/internal.hpp
 cap_fmu_SOURCES += mav/internal.hpp mav/mav.cpp mav/mav.hpp mav/mav-sys.cpp mav/mavlink.cpp
-cap_fmu_SOURCES += smm/smm.cpp smm/smm.hpp
+cap_fmu_SOURCES += smm/smm.cpp smm/smm.hpp smm/smm-types.hpp
 
 cap_fmu_CXXFLAGS = $(AM_CXXFLAGS) $(FSS_CLIENT_CFLAGS) $(SMM_ASSET_CFLAGS)
 cap_fmu_CFLAGS = $(AM_CFLAGS) $(FSS_CLIENT_CFLAGS) $(SMM_ASSET_CFLAGS)
