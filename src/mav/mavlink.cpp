@@ -218,6 +218,10 @@ mav_connection::commandTerminate()
 void
 mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
 {
+    if (this->search == nullptr)
+    {
+        return;
+    }
     /* Find the point */
     auto points = this->search->getPoints();
     mavlink_message_t msg;
