@@ -99,7 +99,7 @@ void SMM::search(Point current_pos)
     }
     while (this->current_search == nullptr)
     {
-        smm_search new_search = smm_asset_get_search(this->asset, current_pos.getLongitude(), current_pos.getLongitude());
+        smm_search new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
         if (new_search == nullptr)
         {
             /* No search to perform */
