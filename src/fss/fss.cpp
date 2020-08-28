@@ -54,7 +54,15 @@ void FSS::reportPosition(double lat, double lng, int16_t alt, uint16_t heading, 
 {
     if (this->client != nullptr)
     {
-        this->client->fss_send_position(lat, lng, alt, heading, hor_vel, ver_vel);
+        this->client->sendPosition(lat, lng, alt, heading, hor_vel, ver_vel);
+    }
+}
+
+void FSS::reachedPoint(int point, int total_points)
+{
+    if (this->client != nullptr)
+    {
+        this->client->reachedPoint(point, total_points);
     }
 }
 

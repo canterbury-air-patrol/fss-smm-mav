@@ -71,7 +71,7 @@ fss_client::handleSMMSettings(flight_safety_system::transport::fss_message_smm_s
 }
 
 void
-fss_client::fss_send_position(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
+fss_client::sendPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
 {
     static uint64_t position_last_sent = 0;
     uint64_t curr_ts = flight_safety_system::fss_current_timestamp();
@@ -98,6 +98,14 @@ fss_client::fss_send_position(double lat, double lng, int16_t alt, uint16_t head
         delete msg_pos;
         position_last_sent = curr_ts;
     }
+}
+
+void
+fss_client::reachedPoint(int point, int total_points)
+{
+    auto msg_search = new flight_safety_system::transport::fss_message_search_status(0, point, total_points);
+    this->sendMsgAll(msg_search);
+    delete msg_search;
 }
 
 void

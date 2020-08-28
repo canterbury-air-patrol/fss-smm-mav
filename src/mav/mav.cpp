@@ -69,3 +69,8 @@ void MAV::registerPositionCB(notify_position_cb cb, void *priv)
 {
     this->connection->registerPositionCB(cb, priv);
 }
+
+void MAV::registerReachedCB(notify_reached_cb cb, void *priv)
+{
+    this->connection->registerReachedCB(cb, priv);
+}

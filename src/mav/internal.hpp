@@ -94,4 +94,5 @@ class mav_connection {
         Point getLastPosition() { return this->last_position; };
         void loadSearch(SMMSearch *search);
         void registerPositionCB(notify_position_cb cb, void *priv);
+        void registerReachedCB(notify_reached_cb cb, void *priv);
 };

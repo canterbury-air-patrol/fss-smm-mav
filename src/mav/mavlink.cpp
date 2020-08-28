@@ -703,3 +703,9 @@ void mav_connection::registerPositionCB(notify_position_cb cb, void *priv)
     this->position_cb_priv = priv;
     this->position_cb = cb;
 }
+
+void mav_connection::registerReachedCB(notify_reached_cb cb, void *priv)
+{
+    this->reached_cb_priv = priv;
+    this->reached_cb = cb;
+}

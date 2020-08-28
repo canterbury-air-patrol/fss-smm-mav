@@ -21,4 +21,5 @@ public:
     void registerCommandCB(notify_fss_command_cb cb, void *priv);
     void registerCommsStatusCB(notify_fss_comms_cb cb, void *priv);
     void registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv);
+    void reachedPoint(int point, int total_points);
 };

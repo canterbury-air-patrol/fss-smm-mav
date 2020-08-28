@@ -35,4 +35,6 @@ public:
     void connect(std::string host, std::string user, std::string pass, std::string asset_name);
     void search(Point current_pos);
     void reportPosition(double latitude, double longitude, unsigned int altitude, uint16_t bearing);
+    void reachedPoint(int point);
+    int currentSearchPoints();
 };

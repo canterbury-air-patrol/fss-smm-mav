@@ -5,7 +5,7 @@
 
 SMM::SMM(MAV *t_mav) : mav(t_mav)
 {
-    smm_asset_debugging_set (true);
+//    smm_asset_debugging_set (true);
 }
 
 void
@@ -115,8 +115,30 @@ void SMM::search(Point current_pos)
     this->mav->loadSearch(this->current_search);
 }
 
+void SMM::reachedPoint(int point)
+{
+    /* See if we have completed this search or not */
+    if (this->current_search != nullptr)
+    {
+        if (this->current_search->reachedPoint(point))
+        {
+            delete this->current_search;
+            this->current_search = nullptr;
+        }
+    }
+}
+
+int SMM::currentSearchPoints()
+{
+    if (this->current_search != nullptr)
+    {
+        return this->current_search->getPointsCount();
+    }
+}
+
 SMMSearch::SMMSearch(smm_search search)
 {
+    this->search = search;
     smm_waypoints wps = nullptr;
 	size_t wps_count = 0;
     smm_search_get_waypoints (search, &wps, &wps_count);
@@ -127,4 +149,21 @@ SMMSearch::SMMSearch(smm_search search)
 	}
 	smm_waypoints_free (wps, wps_count);
     this->altitude = smm_search_sweep_width (search);
+}
+
+int SMMSearch::getPointsCount()
+{
+    return this->points.size();
+}
+
+bool SMMSearch::reachedPoint(int point)
+{
+    if (point >= this->points.size())
+    {
+        /* Search completed, yay */
+        smm_search_complete (this->search);
+        return true;
+    }
+    this->current_point = point;
+    return false;
 }

@@ -62,6 +62,15 @@ mav_position_cb (void *priv, double t_lat, double t_lng, double alt, uint16_t t_
     fss_smm->smm->reportPosition(t_lat, t_lng, alt, t_hdg / 100);
 }
 
+static void
+mav_reached_cb (void *priv, int point)
+{
+    struct fss_smm_s *fss_smm = (struct fss_smm_s *)priv;
+
+    fss_smm->fss->reachedPoint(point, fss_smm->smm->currentSearchPoints());
+    fss_smm->smm->reachedPoint(point);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 4)
@@ -94,6 +103,7 @@ int main(int argc, char *argv[])
     fss_smm->smm = smm;
 
     mav->registerPositionCB(mav_position_cb, fss_smm);
+    mav->registerReachedCB(mav_reached_cb, fss_smm);
 
     while (running)
     {
