@@ -28,6 +28,7 @@ private:
     smm_assets assets_list{nullptr};
     size_t assets_list_count{0};
     smm_asset asset{nullptr};
+    uint64_t position_report_last_ts{0};
     void connect();
     void disconnect();
 public:

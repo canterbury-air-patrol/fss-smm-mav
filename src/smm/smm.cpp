@@ -81,12 +81,27 @@ SMM::connect(std::string t_host, std::string t_user, std::string t_pass, std::st
     }
 }
 
+#include <sys/time.h>
+
+static uint64_t
+current_ts()
+{
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
+}
+
 void
 SMM::reportPosition(double latitude, double longitude, unsigned int altitude, uint16_t bearing)
 {
     if (this->asset)
     {
-        smm_asset_report_position (this->asset, latitude, longitude, altitude, bearing, 3);
+        uint64_t curr_ts = current_ts();
+        if (this->position_report_last_ts + 1000 <= curr_ts)
+        {
+            smm_asset_report_position (this->asset, latitude, longitude, altitude, bearing, 3);
+            this->position_report_last_ts = curr_ts;
+        }
     }
 }
 
