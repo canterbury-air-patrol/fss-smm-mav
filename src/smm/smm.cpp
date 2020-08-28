@@ -125,6 +125,10 @@ void SMM::search(Point current_pos)
         {
             this->current_search = new SMMSearch(new_search);
         }
+        else
+        {
+            smm_search_destroy (new_search);
+        }
     }
     /* Load the search into AP */
     this->mav->loadSearch(this->current_search);
@@ -173,11 +177,16 @@ int SMMSearch::getPointsCount()
 
 bool SMMSearch::reachedPoint(int point)
 {
-    if (point >= this->points.size())
+    if (this->search != nullptr)
     {
-        /* Search completed, yay */
-        smm_search_complete (this->search);
-        return true;
+        if (point >= (this->getPointsCount() - 1))
+        {
+            /* Search completed, yay */
+            smm_search_complete (this->search);
+            smm_search_destroy (this->search);
+            this->search = nullptr;
+            return true;
+        }
     }
     this->current_point = point;
     return false;
