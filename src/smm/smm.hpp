@@ -2,6 +2,7 @@
 #include <bits/stdint-uintn.h>
 #include <list>
 #include <string>
+#include <mutex>
 
 #include "../fmu-types.hpp"
 #include "../mav/mav.hpp"
@@ -24,6 +25,7 @@ private:
     std::string smm_user{};
     std::string smm_pass{};
     std::string asset_name{};
+    std::mutex search_lock{};
     SMMSearch *current_search{nullptr};
     smm_assets assets_list{nullptr};
     size_t assets_list_count{0};
