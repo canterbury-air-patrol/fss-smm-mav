@@ -156,6 +156,7 @@ int SMM::currentSearchPoints()
     {
         return this->current_search->getPointsCount();
     }
+    return 0;
 }
 
 SMMSearch::SMMSearch(smm_search search)
@@ -182,7 +183,7 @@ bool SMMSearch::reachedPoint(int point)
 {
     if (this->search != nullptr)
     {
-        if (point >= (this->getPointsCount() - 1))
+        if (point >= this->getPointsCount())
         {
             /* Search completed, yay */
             smm_search_complete (this->search);

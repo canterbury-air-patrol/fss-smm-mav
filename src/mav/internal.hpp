@@ -60,9 +60,10 @@ class mav_connection {
         void *battery_cb_priv{nullptr};
         notify_reached_cb reached_cb{nullptr};
         void *reached_cb_priv{nullptr};
-        bool last_action_was_continue{false};
         bool search_loading{false};
         bool search_loaded{false};
+        Point goto_position{};
+        bool goto_active{false};
         bool sendMavLinkMsg(mavlink_message_t *msg);
         void setFlightMode(uint8_t fmode);
         void processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *status);
@@ -81,9 +82,9 @@ class mav_connection {
         void processMessages();
         void sendHeartBeat();
         void commandRTL();
-        void commandGoto(double lat, double lng);
+        void commandGoto(Point p);
         void commandHold();
-        void commandContinue();
+        void commandAuto();
         void commandAltitute();
         void commandDisARM();
         void commandManual();

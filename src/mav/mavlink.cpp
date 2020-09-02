@@ -47,12 +47,9 @@ void
 mav_connection::setFlightMode(uint8_t fmode)
 {
     auto sys = this->systems.findSystem(TARGET_SYS_ID);
-    if (sys->getFlightMode() != fmode)
-    {
-        mavlink_message_t msg;
-        mavlink_msg_set_mode_pack(SYS_ID, COMP_ID, &msg, 1, MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | MAV_MODE_FLAG_AUTO_ENABLED | MAV_MODE_FLAG_GUIDED_ENABLED | MAV_MODE_FLAG_STABILIZE_ENABLED | MAV_MODE_FLAG_MANUAL_INPUT_ENABLED | MAV_MODE_FLAG_SAFETY_ARMED, fmode);
-        this->sendMavLinkMsg(&msg);
-    }
+    mavlink_message_t msg;
+    mavlink_msg_set_mode_pack(SYS_ID, COMP_ID, &msg, 1, MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | MAV_MODE_FLAG_AUTO_ENABLED | MAV_MODE_FLAG_GUIDED_ENABLED | MAV_MODE_FLAG_STABILIZE_ENABLED | MAV_MODE_FLAG_MANUAL_INPUT_ENABLED | MAV_MODE_FLAG_SAFETY_ARMED, fmode);
+    this->sendMavLinkMsg(&msg);
 }
 
 void
@@ -84,7 +81,7 @@ mav_connection::commandRTL()
     if (fmode != 0)
     {
         this->setFlightMode(fmode);
-        this->last_action_was_continue = false;
+        this->search_loaded = false;
     }
 }
 
@@ -94,16 +91,20 @@ mav_connection::commandDisARM()
     mavlink_message_t msg;
     mavlink_msg_command_long_pack(SYS_ID, COMP_ID, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0);
     this->sendMavLinkMsg(&msg);
-    this->last_action_was_continue = false;
+    this->search_loaded = false;
 }
 
 void
-mav_connection::commandGoto(double lat, double lng)
+mav_connection::commandGoto(Point p)
 {
     mavlink_message_t msg;
-    mavlink_msg_command_long_pack(SYS_ID, COMP_ID, &msg, 1, 0, MAV_CMD_OVERRIDE_GOTO, 0, MAV_GOTO_DO_HOLD, MAV_GOTO_HOLD_AT_SPECIFIED_POSITION, MAV_FRAME_GLOBAL_INT, 0, lat / 0.0000001, lng / 0.0000001, 100);
+    // RTL the aircraft so we can load a mission
+    this->commandRTL();
+    this->goto_position = p;
+    this->goto_active = true;
+    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, 3, MAV_MISSION_TYPE_MISSION);
     this->sendMavLinkMsg(&msg);
-    this->last_action_was_continue = false;
+    this->search_loaded = false;
 }
 
 void
@@ -135,6 +136,7 @@ mav_connection::commandManual()
     if (fmode != 0)
     {
         this->setFlightMode(fmode);
+        this->search_loaded = false;
     }
 
 }
@@ -168,12 +170,12 @@ mav_connection::commandHold()
     if (fmode != 0)
     {
         this->setFlightMode(fmode);
-        this->last_action_was_continue = false;
+        this->search_loaded = false;
     }
 }
 
 void
-mav_connection::commandContinue()
+mav_connection::commandAuto()
 {
     /* Map type to AUTO mode */
     auto sys = this->systems.findSystem(TARGET_SYS_ID);
@@ -200,11 +202,7 @@ mav_connection::commandContinue()
     }
     if (fmode != 0)
     {
-        if (!this->last_action_was_continue)
-        {
-            this->setFlightMode(fmode);
-            this->last_action_was_continue = true;
-        }
+        this->setFlightMode(fmode);
     }
 }
 
@@ -213,33 +211,29 @@ mav_connection::commandTerminate()
 {
     /* Do nothing for now */
     /* TODO: Implement terminate */
+    this->search_loaded = false;
 }
 
 void
 mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
 {
-    if (this->search == nullptr)
-    {
-        return;
-    }
-    /* Find the point */
-    auto points = this->search->getPoints();
     mavlink_message_t msg;
-    if (seq >= points.size())
+    if (this->goto_active)
     {
-        mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
-                    seq, /* Which waypoint is this */
-                    MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
-                    MAV_CMD_NAV_RETURN_TO_LAUNCH, /* Return home */
-                    0, /* Not the current point */
-                    0, /* Auto continue: No */
-                    0, 0, 0, 0, 0, 0, 0, /* Parameters ignored */
-                    mission_type);
-    }
-    else
-    {
-        Point p = points[seq];
-        mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+        if (seq >= 2)
+        {
+            mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+                        seq, /* Which waypoint is this */
+                        MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                        MAV_CMD_NAV_RETURN_TO_LAUNCH, /* Return home */
+                        0, /* Not the current point */
+                        0, /* Auto continue: No */
+                        0, 0, 0, 0, 0, 0, 0, /* Parameters ignored */
+                        mission_type);
+        }
+        else
+        {
+            mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
                     seq, /* Which waypoint is this */
                     MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
                     MAV_CMD_NAV_WAYPOINT, /* Navigate to a point */
@@ -249,10 +243,55 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                     5, /* Accept radius: 5m */
                     0, /* Pass radius: 0m */
                     NAN, /* Yaw: NaN for dont care */
-                    p.getLatitude() / 0.0000001, /* Latitude */
-                    p.getLongitude() / 0.0000001, /* Longitude */
-                    this->search->getAltitude(),  /* Altitude (m) */
+                    this->goto_position.getLatitude() / 0.0000001, /* Latitude */
+                    this->goto_position.getLongitude() / 0.0000001, /* Longitude */
+                    50,  /* Altitude (m) */
                     mission_type);
+        }
+    }
+    else
+    {
+        if (this->search == nullptr)
+        {
+            return;
+        }
+        /* Find the point */
+        auto points = this->search->getPoints();
+        if (seq > points.size())
+        {
+            mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+                        seq, /* Which waypoint is this */
+                        MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                        MAV_CMD_NAV_RETURN_TO_LAUNCH, /* Return home */
+                        0, /* Not the current point */
+                        0, /* Auto continue: No */
+                        0, 0, 0, 0, 0, 0, 0, /* Parameters ignored */
+                        mission_type);
+        }
+        else
+        {
+            Point p;
+            if (seq == 0)
+            {
+                p = points[seq];
+            } else {
+                p = points[seq-1];
+            }
+            mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+                        seq, /* Which waypoint is this */
+                        MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                        MAV_CMD_NAV_WAYPOINT, /* Navigate to a point */
+                        0, /* This waypoint is the current target */
+                        1, /* Auto continue */
+                        0, /* Hold time: 0s */
+                        5, /* Accept radius: 5m */
+                        0, /* Pass radius: 0m */
+                        NAN, /* Yaw: NaN for dont care */
+                        p.getLatitude() / 0.0000001, /* Latitude */
+                        p.getLongitude() / 0.0000001, /* Longitude */
+                        this->search->getAltitude(),  /* Altitude (m) */
+                        mission_type);
+        }
     }
     this->sendMavLinkMsg(&msg);
 }
@@ -268,13 +307,21 @@ mav_connection::setCurrentWP(uint16_t seq)
 void
 mav_connection::mission_ack(bool accepted)
 {
+    if (this->goto_active)
+    {
+        if (accepted)
+        {
+            this->commandAuto();
+            this->setCurrentWP(0);
+        }
+    }
     if (this->search_loading)
     {
         this->search_loading = false;
         if (accepted)
         {
             this->search_loaded = true;
-            this->commandContinue();
+            this->commandAuto();
             this->setCurrentWP(this->search->getCurrentPointIdx());
         }
         else
@@ -282,24 +329,21 @@ mav_connection::mission_ack(bool accepted)
             this->search = nullptr;
         }
     }
-    else
-    {
-        std::cout << "Mission ack when I wasn't loading a search" << std::endl;
-    }
 }
 
 void
 mav_connection::loadSearch()
 {
+    /* Enter RTL while loading the search */
+    this->commandRTL();
     /* Load the existing search into the FC, and jump to the current target point */
     /* Tell the FC how many points there are */
+    this->goto_active = false;
     this->search_loaded = false;
     this->search_loading = true;
     mavlink_message_t msg;
-    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints().size(), MAV_MISSION_TYPE_MISSION);
+    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints().size() + 1, MAV_MISSION_TYPE_MISSION);
     this->sendMavLinkMsg(&msg);
-    /* Enter RTL while loading the search */
-    this->commandRTL();
 }
 
 void

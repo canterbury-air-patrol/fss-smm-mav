@@ -1,4 +1,5 @@
 #include "fmu.hpp"
+#include <iostream>
 
 FMUState map_smm_state(SMMCommand cmd)
 {
@@ -73,7 +74,7 @@ FMUStateMachine::updateState()
         }
     }
 
-    if (new_state != this->current_state || new_state == fmu_state_searching)
+    if (new_state != this->current_state || new_state == fmu_state_searching || new_state == fmu_state_goto)
     {
         this->current_state = new_state;
         this->actionState(this->current_state);
@@ -102,6 +103,7 @@ FMUStateMachine::actionState(FMUState state)
         case fmu_state_goto:
             /* Tell MAV to Goto the fss position */
             this->mav->gotoPosition(this->fss->getGoto());
+            this->mav->setMode(flight_mode_goto);
             break;
         case fmu_state_hold:
             /* Tell MAV to Circle/Hold Position */

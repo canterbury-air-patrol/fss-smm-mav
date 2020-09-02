@@ -12,7 +12,7 @@ bool MAV::setMode(flight_mode fm)
             break;
         case flight_mode_goto:
             /* Load a track with a single waypoint + RTL */
-            this->connection->commandGoto(this->goto_position.getLatitude(), this->goto_position.getLongitude());
+            this->connection->commandGoto(this->goto_position);
             break;
         case flight_mode_hold:
             /* Circle or similar */
