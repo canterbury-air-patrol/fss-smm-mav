@@ -120,6 +120,7 @@ void SMM::search(Point current_pos)
         {
             /* No search to perform */
             /* Enter RTL and exit */
+            this->mav->setMode(flight_mode_rtl);
             return;
         }
         if (smm_search_accept (new_search))
