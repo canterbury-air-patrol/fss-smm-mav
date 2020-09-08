@@ -224,7 +224,7 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
         {
             mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
                         seq, /* Which waypoint is this */
-                        MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                        MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
                         MAV_CMD_NAV_RETURN_TO_LAUNCH, /* Return home */
                         0, /* Not the current point */
                         0, /* Auto continue: No */
@@ -235,7 +235,7 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
         {
             mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
                     seq, /* Which waypoint is this */
-                    MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                    MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
                     MAV_CMD_NAV_WAYPOINT, /* Navigate to a point */
                     0, /* This waypoint is the current target */
                     1, /* Auto continue */
@@ -257,11 +257,11 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
         }
         /* Find the point */
         auto points = this->search->getPoints();
-        if (seq > points.size())
+        if (seq == 0 || seq > points.size())
         {
             mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
                         seq, /* Which waypoint is this */
-                        MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                        MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
                         MAV_CMD_NAV_RETURN_TO_LAUNCH, /* Return home */
                         0, /* Not the current point */
                         0, /* Auto continue: No */
@@ -270,16 +270,10 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
         }
         else
         {
-            Point p;
-            if (seq == 0)
-            {
-                p = points[seq];
-            } else {
-                p = points[seq-1];
-            }
+            Point p = points[seq-1];
             mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
                         seq, /* Which waypoint is this */
-                        MAV_FRAME_GLOBAL, /* Use altitude relative to the terrain */
+                        MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
                         MAV_CMD_NAV_WAYPOINT, /* Navigate to a point */
                         0, /* This waypoint is the current target */
                         1, /* Auto continue */
@@ -488,6 +482,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
         case MAVLINK_MSG_ID_SENSOR_OFFSETS:
         case MAVLINK_MSG_ID_TERRAIN_REQUEST:
         case MAVLINK_MSG_ID_POWER_STATUS:
+        case MAVLINK_MSG_ID_AUTOPILOT_VERSION:
             break;
         case MAVLINK_MSG_ID_STATUSTEXT:
         {
