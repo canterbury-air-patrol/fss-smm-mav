@@ -112,7 +112,7 @@ void SMM::search(Point current_pos)
     {
         return;
     }
-    std::unique_lock<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk(this->search_lock);
     while (this->current_search == nullptr)
     {
         smm_search new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
@@ -139,7 +139,7 @@ void SMM::search(Point current_pos)
 void SMM::reachedPoint(int point)
 {
     /* See if we have completed this search or not */
-    std::unique_lock<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk(this->search_lock);
     if (this->current_search != nullptr)
     {
         if (this->current_search->reachedPoint(point))
@@ -152,7 +152,7 @@ void SMM::reachedPoint(int point)
 
 int SMM::currentSearchPoints()
 {
-    std::unique_lock<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk(this->search_lock);
     if (this->current_search != nullptr)
     {
         return this->current_search->getPointsCount();
