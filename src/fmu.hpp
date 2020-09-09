@@ -1,4 +1,8 @@
 #pragma once
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+
 #include "fss/fmu-fss.hpp"
 #include "smm/smm.hpp"
 #include "mav/mav.hpp"
@@ -28,12 +32,18 @@ private:
     MAV *mav{nullptr};
     SMM *smm{nullptr};
     FSS *fss{nullptr};
+    std::mutex lock{};
+    std::condition_variable cv{};
+    std::thread *thread{nullptr};
+    bool running{true};
 public:
     FMUStateMachine(MAV *t_mav, SMM *t_smm, FSS *t_fss);
+    ~FMUStateMachine();
     FMUState getCurrentstate();
 
     void FSSNewCommand(FSSCommand cmd);
     void SMMNewCommand(SMMCommand cmd);
     void setLowBattery();
     void setCommsFailure(bool failed);
+    void mainThread();
 };
