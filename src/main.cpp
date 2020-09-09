@@ -57,9 +57,14 @@ static void
 mav_position_cb (void *priv, double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver)
 {
     struct fss_smm_s *fss_smm = (struct fss_smm_s *)priv;
-    fss_smm->fss->reportPosition(t_lat, t_lng, alt, t_hdg, t_vel_hor, t_vel_ver);
-
-    fss_smm->smm->reportPosition(t_lat, t_lng, alt, t_hdg / 100);
+    if (fss_smm->fss != nullptr)
+    {
+        fss_smm->fss->reportPosition(t_lat, t_lng, alt, t_hdg, t_vel_hor, t_vel_ver);
+    }
+    if (fss_smm->smm != nullptr)
+    {
+        fss_smm->smm->reportPosition(t_lat, t_lng, alt, t_hdg / 100);
+    }
 }
 
 static void
@@ -67,8 +72,14 @@ mav_reached_cb (void *priv, int point)
 {
     struct fss_smm_s *fss_smm = (struct fss_smm_s *)priv;
 
-    fss_smm->fss->reachedPoint(point, fss_smm->smm->currentSearchPoints());
-    fss_smm->smm->reachedPoint(point);
+    if (fss_smm->fss != nullptr)
+    {
+        fss_smm->fss->reachedPoint(point, fss_smm->smm->currentSearchPoints());
+    }
+    if (fss_smm->smm != nullptr)
+    {
+        fss_smm->smm->reachedPoint(point);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -109,4 +120,13 @@ int main(int argc, char *argv[])
     {
         sleep (1);
     }
+
+    fss_smm->fss = nullptr;
+    fss_smm->smm = nullptr;
+
+    delete state_machine;
+    delete smm;
+    delete fss;
+    delete mav;
+    free (fss_smm);
 }

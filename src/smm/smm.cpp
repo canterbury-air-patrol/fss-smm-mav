@@ -8,6 +8,18 @@ SMM::SMM(MAV *t_mav) : mav(t_mav)
 //    smm_asset_debugging_set (true);
 }
 
+SMM::~SMM()
+{
+    this->disconnect();
+    this->search_lock.lock();
+    if (this->current_search)
+    {
+        delete this->current_search;
+        this->current_search = nullptr;
+    }
+    this->search_lock.unlock();
+}
+
 void
 SMM::disconnect()
 {
@@ -195,4 +207,13 @@ bool SMMSearch::reachedPoint(int point)
     }
     this->current_point = point;
     return false;
+}
+
+SMMSearch::~SMMSearch()
+{
+    if (this->search != nullptr)
+    {
+        smm_search_destroy (this->search);
+        this->search = nullptr;
+    }
 }

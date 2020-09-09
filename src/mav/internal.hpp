@@ -24,6 +24,7 @@ class mav_sys {
         bool setup{false};
     public:
         mav_sys(uint8_t t_sysid) : sysid(t_sysid), autopilot_type(0), flight_mode(0) {};
+        ~mav_sys();
         uint8_t getSysId() { return this->sysid; };
         uint8_t getAutoPilotType() { return this->autopilot_type; };
         uint8_t getFlightMode() { return this->flight_mode; };
@@ -39,6 +40,7 @@ class mav_systems {
         std::list<mav_sys *> systems{};
     public:
         mav_systems() {}
+        ~mav_systems();
         mav_sys *findSystem(uint8_t t_sysid);
 };
 

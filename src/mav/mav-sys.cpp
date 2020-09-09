@@ -14,6 +14,17 @@ mav_comp *mav_sys::findComponent(uint8_t t_compid)
     return new_comp;
 }
 
+mav_sys::~mav_sys()
+{
+    auto iter = this->components.front();
+    while (iter != nullptr)
+    {
+        delete iter;
+        this->components.pop_front();
+        iter = this->components.front();
+    }
+}
+
 mav_sys *mav_systems::findSystem(uint8_t t_sysid)
 {
     for(auto iter : this->systems)
@@ -26,4 +37,15 @@ mav_sys *mav_systems::findSystem(uint8_t t_sysid)
     auto new_sys = new mav_sys(t_sysid);
     this->systems.push_back(new_sys);
     return new_sys;
+}
+
+mav_systems::~mav_systems()
+{
+    auto iter = this->systems.front();
+    while (iter != nullptr)
+    {
+        delete iter;
+        this->systems.pop_front();
+        iter = this->systems.front();
+    }
 }

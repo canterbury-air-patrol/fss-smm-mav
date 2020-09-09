@@ -29,6 +29,7 @@ private:
 public:
     SMMSearch() {};
     SMMSearch(smm_search);
+    ~SMMSearch();
     void addPoint(Point p) { this->points.push_back(p); };
     int getCurrentPointIdx() { return this->current_point; };
     Point getCurrentPoint() { return this->points[this->current_point]; };

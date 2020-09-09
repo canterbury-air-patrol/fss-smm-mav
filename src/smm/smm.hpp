@@ -35,6 +35,7 @@ private:
     void disconnect();
 public:
     SMM(MAV *t_mav);
+    ~SMM();
     void connect(std::string host, std::string user, std::string pass, std::string asset_name);
     void search(Point current_pos);
     void reportPosition(double latitude, double longitude, unsigned int altitude, uint16_t bearing);

@@ -13,6 +13,7 @@ private:
     Point goto_point{};
 public:
     FSS(const char *config_file);
+    ~FSS();
     std::string getAssetName();
     Point getGoto();
     void setGoto(Point);

@@ -55,6 +55,12 @@ MAV::MAV(std::string t_addr, uint16_t t_port) : connection(new mav_connection(t_
 {
 }
 
+MAV::~MAV()
+{
+    delete this->connection;
+    this->connection = nullptr;
+}
+
 Point MAV::getCurrentPosition()
 {
     return this->connection->getLastPosition();

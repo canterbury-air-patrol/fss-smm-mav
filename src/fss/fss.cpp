@@ -84,3 +84,12 @@ FSS::FSS(const char *config_file)
         this->client->registerGotoUpdateCB(goto_updated, this);
     }
 }
+
+FSS::~FSS()
+{
+    if (this->client != nullptr)
+    {
+        delete this->client;
+        this->client = nullptr;
+    }
+}
