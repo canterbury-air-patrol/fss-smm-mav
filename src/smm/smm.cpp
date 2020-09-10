@@ -104,14 +104,15 @@ current_ts()
 }
 
 void
-SMM::reportPosition(double latitude, double longitude, unsigned int altitude, uint16_t bearing)
+SMM::reportPosition(PositionData t_pd)
 {
     if (this->asset)
     {
         uint64_t curr_ts = current_ts();
         if (this->position_report_last_ts + 1000 <= curr_ts)
         {
-            smm_asset_report_position (this->asset, latitude, longitude, altitude, bearing, 3);
+            Point p = t_pd.getP();
+            smm_asset_report_position (this->asset, p.getLatitude(), p.getLongitude(), t_pd.getAltitude(), t_pd.getHeading() / 100, 3);
             this->position_report_last_ts = curr_ts;
         }
     }
@@ -172,12 +173,12 @@ int SMM::currentSearchPoints()
     return 0;
 }
 
-SMMSearch::SMMSearch(smm_search search)
+SMMSearch::SMMSearch(smm_search t_search)
 {
-    this->search = search;
+    this->search = t_search;
     smm_waypoints wps = nullptr;
 	size_t wps_count = 0;
-    smm_search_get_waypoints (search, &wps, &wps_count);
+    smm_search_get_waypoints (this->search, &wps, &wps_count);
 	for (size_t i = 0; i < wps_count; i++)
 	{
 		Point wp(wps[i]->lat, wps[i]->lon);

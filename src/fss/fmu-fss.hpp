@@ -18,7 +18,7 @@ public:
     Point getGoto();
     void setGoto(Point);
     uint16_t getAltitude();
-    void reportPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel);
+    void reportPosition(PositionData pd);
     void registerCommandCB(notify_fss_command_cb cb, void *priv);
     void registerCommsStatusCB(notify_fss_comms_cb cb, void *priv);
     void registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv);

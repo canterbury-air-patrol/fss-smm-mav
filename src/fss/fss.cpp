@@ -50,11 +50,12 @@ void FSS::registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv)
     }
 }
 
-void FSS::reportPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
+void FSS::reportPosition(PositionData t_pd)
 {
     if (this->client != nullptr)
     {
-        this->client->sendPosition(lat, lng, alt, heading, hor_vel, ver_vel);
+        Point p = t_pd.getP();
+        this->client->sendPosition(p.getLatitude(), p.getLongitude(), t_pd.getAltitude(), t_pd.getHeading(), t_pd.getVelocityHorizontal(), t_pd.getVelocityVertical());
     }
 }
 

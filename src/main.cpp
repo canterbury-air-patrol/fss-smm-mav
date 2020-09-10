@@ -1,6 +1,9 @@
 #include <bits/stdint-uintn.h>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 #include <list>
+#include <queue>
 #include <iostream>
 #include <csignal>
 #include <unistd.h>
@@ -8,8 +11,12 @@
 #include "fmu.hpp"
 #include "fss/fmu-fss-types.hpp"
 #include "smm/smm-types.hpp"
+#include "event.hpp"
 
 std::string asset_name = "";
+std::queue<class event *> event_queue;
+std::mutex main_lock;
+std::condition_variable main_cv;
 
 bool running = true;
 
@@ -19,67 +26,43 @@ void sigIntHandler(__attribute__((unused)) int signum)
 }
 
 static void
+enqueue_event (event *e)
+{
+    {
+        std::lock_guard<std::mutex> lk(main_lock);
+        event_queue.push(e);
+    }
+    main_cv.notify_one();
+}
+
+static void
 fss_command_cb (void *priv, FSSCommand command)
 {
-    if (priv != nullptr)
-    {
-        FMUStateMachine *state_machine = (FMUStateMachine *)priv;
-        state_machine->FSSNewCommand(command);
-    }
+    enqueue_event(new event(command));
 }
 
 static void
 fss_comms_status_cb (void *priv, FSSCommsStatus status)
 {
-    if (priv != nullptr)
-    {
-        FMUStateMachine *state_machine = (FMUStateMachine *)priv;
-        state_machine->setCommsFailure((status == fss_comms_failure));
-    }
+    enqueue_event(new event(status));
 }
 
 static void
 smm_settings_cb (void *priv, SMMSettings settings)
 {
-    if (priv != nullptr)
-    {
-        SMM *smm = (SMM *)priv;
-        smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
-    }
+    enqueue_event(new event(settings));
 }
 
-struct fss_smm_s {
-    FSS *fss;
-    SMM *smm;
-};
-
 static void
-mav_position_cb (void *priv, double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver)
+mav_position_cb (void *priv, PositionData pd)
 {
-    struct fss_smm_s *fss_smm = (struct fss_smm_s *)priv;
-    if (fss_smm->fss != nullptr)
-    {
-        fss_smm->fss->reportPosition(t_lat, t_lng, alt, t_hdg, t_vel_hor, t_vel_ver);
-    }
-    if (fss_smm->smm != nullptr)
-    {
-        fss_smm->smm->reportPosition(t_lat, t_lng, alt, t_hdg / 100);
-    }
+    enqueue_event(new event(pd));
 }
 
 static void
 mav_reached_cb (void *priv, int point)
 {
-    struct fss_smm_s *fss_smm = (struct fss_smm_s *)priv;
-
-    if (fss_smm->fss != nullptr)
-    {
-        fss_smm->fss->reachedPoint(point, fss_smm->smm->currentSearchPoints());
-    }
-    if (fss_smm->smm != nullptr)
-    {
-        fss_smm->smm->reachedPoint(point);
-    }
+    enqueue_event(new event(point));
 }
 
 int main(int argc, char *argv[])
@@ -105,28 +88,65 @@ int main(int argc, char *argv[])
     FMUStateMachine *state_machine = new FMUStateMachine(mav, smm, fss);
 
     /* Connect up the notifications */
-    fss->registerCommandCB(fss_command_cb, state_machine);
-    fss->registerCommsStatusCB(fss_comms_status_cb, state_machine);
-    fss->registerSMMSettingsCB(smm_settings_cb, smm);
+    fss->registerCommandCB(fss_command_cb, nullptr);
+    fss->registerCommsStatusCB(fss_comms_status_cb, nullptr);
+    fss->registerSMMSettingsCB(smm_settings_cb, nullptr);
 
-    struct fss_smm_s *fss_smm = (struct fss_smm_s *) calloc (1, sizeof (struct fss_smm_s));
-    fss_smm->fss = fss;
-    fss_smm->smm = smm;
-
-    mav->registerPositionCB(mav_position_cb, fss_smm);
-    mav->registerReachedCB(mav_reached_cb, fss_smm);
+    mav->registerPositionCB(mav_position_cb, nullptr);
+    mav->registerReachedCB(mav_reached_cb, nullptr);
 
     while (running)
     {
-        sleep (1);
+        std::unique_lock<std::mutex> lk(main_lock);
+        while (!event_queue.empty())
+        {
+            auto e = event_queue.front();
+            event_queue.pop();
+            lk.unlock();
+            switch(e->getType())
+            {
+                case event_fss_command:
+                    state_machine->FSSNewCommand(e->getFSSCommand());
+                    break;
+                case event_fss_comms_status:
+                    state_machine->setCommsFailure((e->getFSSCommsStatus() == fss_comms_failure));
+                    break;
+                case event_smm_settings:
+                    {
+                        auto settings = e->getSMMSettings();
+                        smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
+                    }
+                    break;
+                case event_position:
+                    {
+                        fss->reportPosition(e->getPositionData());
+                        smm->reportPosition(e->getPositionData());
+                    }
+                    break;
+                case event_reached:
+                    {
+                        fss->reachedPoint(e->getReachedPoint(), smm->currentSearchPoints());
+                        smm->reachedPoint(e->getReachedPoint());
+                    }
+                    break;
+            }
+            delete e;
+            lk.lock();
+            e = event_queue.front();
+        }
+        main_cv.wait(lk);
     }
 
-    fss_smm->fss = nullptr;
-    fss_smm->smm = nullptr;
-
+    /* Cleanup */
     delete state_machine;
     delete smm;
     delete fss;
     delete mav;
-    free (fss_smm);
+
+    while (!event_queue.empty())
+    {
+        auto e = event_queue.front();
+        event_queue.pop();
+        delete e;
+    }
 }

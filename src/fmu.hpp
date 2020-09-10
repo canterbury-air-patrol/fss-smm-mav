@@ -33,9 +33,6 @@ private:
     SMM *smm{nullptr};
     FSS *fss{nullptr};
     std::mutex lock{};
-    std::condition_variable cv{};
-    std::thread *thread{nullptr};
-    bool running{true};
 public:
     FMUStateMachine(MAV *t_mav, SMM *t_smm, FSS *t_fss);
     ~FMUStateMachine();
@@ -45,5 +42,4 @@ public:
     void SMMNewCommand(SMMCommand cmd);
     void setLowBattery();
     void setCommsFailure(bool failed);
-    void mainThread();
 };

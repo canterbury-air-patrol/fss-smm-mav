@@ -132,8 +132,8 @@ FMUStateMachine::FSSNewCommand(FSSCommand cmd)
     {
         std::lock_guard<std::mutex> lk(this->lock);
         this->fss_command = cmd;
+        this->updateState();
     }
-    this->cv.notify_one();
 }
 
 void
@@ -142,8 +142,8 @@ FMUStateMachine::SMMNewCommand(SMMCommand cmd)
     {
         std::lock_guard<std::mutex> lk(this->lock);
         this->smm_command = cmd;
+        this->updateState();
     }
-    this->cv.notify_one();
 }
 
 void
@@ -152,8 +152,8 @@ FMUStateMachine::setLowBattery()
     {
         std::lock_guard<std::mutex> lk(this->lock);
         this->low_battery = true;
+        this->updateState();
     }
-    this->cv.notify_one();
 }
 
 void
@@ -162,40 +162,14 @@ FMUStateMachine::setCommsFailure(bool failed)
     {
         std::lock_guard<std::mutex> lk(this->lock);
         this->fss_comms_lost = failed;
-    }
-    this->cv.notify_one();
-}
-
-static void
-fmu_thread(void *arg)
-{
-    FMUStateMachine *machine = (FMUStateMachine *)arg;
-    machine->mainThread();
-}
-
-void
-FMUStateMachine::mainThread()
-{
-    while (this->running)
-    {
-        std::unique_lock<std::mutex> lk(this->lock);
-        this->cv.wait(lk);
         this->updateState();
     }
 }
 
 FMUStateMachine::FMUStateMachine(MAV *t_mav, SMM *t_smm, FSS *t_fss) : mav(t_mav), smm(t_smm), fss(t_fss)
 {
-    this->thread = new std::thread(fmu_thread, (void *)this);
 }
 
 FMUStateMachine::~FMUStateMachine()
 {
-    this->running = false;
-    if (this->thread != nullptr)
-    {
-        this->cv.notify_all();
-        this->thread->join();
-        delete this->thread;
-    }
 }

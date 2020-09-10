@@ -725,7 +725,7 @@ void mav_connection::report_position(double lat, double lng, double alt, uint16_
 {
     if (this->position_cb != nullptr)
     {
-        this->position_cb(this->position_cb_priv, lat, lng, alt, hdg, vh, vv);
+        this->position_cb(this->position_cb_priv, PositionData(lat, lng, alt, hdg, vh, vv));
     }
 }
 
