@@ -3,6 +3,7 @@
 
 #include <bits/stdint-intn.h>
 #include <iostream>
+#include <mutex>
 #include <thread>
 
 #include <sys/socket.h>
@@ -398,7 +399,10 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
                 int16_t vy = mavlink_msg_global_position_int_get_vy(msg);
                 int16_t vz = mavlink_msg_global_position_int_get_vz(msg);
                 uint16_t vh = sqrt((vx * vx) + (vy * vy));
-                this->last_position = Point(latd, lngd);
+                {
+                    std::lock_guard<std::mutex> lk(this->position_lock);
+                    this->last_position = Point(latd, lngd);
+                }
                 this->report_position(latd, lngd, (alt / ALT_COV), heading, vh, vz);
         } break;
         case MAVLINK_MSG_ID_BATTERY_STATUS:
