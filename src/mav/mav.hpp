@@ -37,4 +37,5 @@ public:
     void loadSearch(SMMSearch *);
     void registerPositionCB(notify_position_cb cb, void *priv);
     void registerReachedCB(notify_reached_cb, void *priv);
+    void registerBatteryCB(notify_battery_status_cb cb, void *priv);
 };

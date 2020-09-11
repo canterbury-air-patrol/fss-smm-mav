@@ -23,4 +23,5 @@ public:
     void registerCommsStatusCB(notify_fss_comms_cb cb, void *priv);
     void registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv);
     void reachedPoint(int point, int total_points);
+    void reportBatteryStatus(BatteryData bd);
 };

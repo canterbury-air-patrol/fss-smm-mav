@@ -99,4 +99,5 @@ class mav_connection {
         void loadSearch(SMMSearch *search);
         void registerPositionCB(notify_position_cb cb, void *priv);
         void registerReachedCB(notify_reached_cb cb, void *priv);
+        void registerBatteryCB(notify_battery_status_cb cb, void *priv);
 };

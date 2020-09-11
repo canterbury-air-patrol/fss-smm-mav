@@ -65,6 +65,12 @@ mav_reached_cb (void *priv, int point)
     enqueue_event(new event(point));
 }
 
+static void
+mav_battery_cb (void *priv, BatteryData bd)
+{
+    enqueue_event(new event(bd));
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 4)
@@ -94,6 +100,7 @@ int main(int argc, char *argv[])
 
     mav->registerPositionCB(mav_position_cb, nullptr);
     mav->registerReachedCB(mav_reached_cb, nullptr);
+    mav->registerBatteryCB(mav_battery_cb, nullptr);
 
     while (running)
     {
@@ -127,6 +134,16 @@ int main(int argc, char *argv[])
                     {
                         fss->reachedPoint(e->getReachedPoint(), smm->currentSearchPoints());
                         smm->reachedPoint(e->getReachedPoint());
+                    }
+                    break;
+                case event_battery_status:
+                    {
+                        if (e->getBatteryData().getRemaining() < 20)
+                        {
+                            /* Time to go home */
+                            state_machine->setLowBattery();
+                        }
+                        fss->reportBatteryStatus(e->getBatteryData());
                     }
                     break;
             }

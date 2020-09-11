@@ -80,3 +80,8 @@ void MAV::registerReachedCB(notify_reached_cb cb, void *priv)
 {
     this->connection->registerReachedCB(cb, priv);
 }
+
+void MAV::registerBatteryCB(notify_battery_status_cb cb, void *priv)
+{
+    this->connection->registerBatteryCB(cb, priv);
+}

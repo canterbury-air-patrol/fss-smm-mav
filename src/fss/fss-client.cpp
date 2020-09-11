@@ -109,6 +109,14 @@ fss_client::reachedPoint(int point, int total_points)
 }
 
 void
+fss_client::sendBatteryStatus(int8_t remaining, int32_t consumed)
+{
+    auto msg_status = new flight_safety_system::transport::fss_message_system_status(remaining, consumed);
+    this->sendMsgAll (msg_status);
+    delete msg_status;
+}
+
+void
 fss_client::report_command(FSSCommand cmd)
 {
     if (this->command_cb != nullptr)

@@ -67,6 +67,14 @@ void FSS::reachedPoint(int point, int total_points)
     }
 }
 
+void FSS::reportBatteryStatus(BatteryData bd)
+{
+    if (this->client != nullptr)
+    {
+        this->client->sendBatteryStatus(bd.getRemaining(), bd.getConsumed());
+    }
+}
+
 static void
 goto_updated (void *priv, Point p)
 {

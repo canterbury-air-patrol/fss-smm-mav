@@ -721,7 +721,7 @@ void mav_connection::report_battery_status(int8_t remaining, int32_t consumed)
 {
     if (this->battery_cb != nullptr)
     {
-        this->battery_cb(this->battery_cb_priv, remaining, consumed);
+        this->battery_cb(this->battery_cb_priv, BatteryData(remaining, consumed));
     }
 }
 
@@ -751,4 +751,10 @@ void mav_connection::registerReachedCB(notify_reached_cb cb, void *priv)
 {
     this->reached_cb_priv = priv;
     this->reached_cb = cb;
+}
+
+void mav_connection::registerBatteryCB(notify_battery_status_cb cb, void *priv)
+{
+    this->battery_cb_priv = priv;
+    this->battery_cb = cb;
 }
