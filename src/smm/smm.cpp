@@ -123,6 +123,7 @@ void SMM::search(Point current_pos)
     /* Search, or find a search to perform */
     if (this->asset == nullptr)
     {
+        this->mav->setMode(flight_mode_rtl);
         return;
     }
     std::lock_guard<std::mutex> lk(this->search_lock);
