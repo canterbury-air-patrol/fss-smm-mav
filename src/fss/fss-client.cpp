@@ -36,6 +36,9 @@ fss_client::handleCommand(flight_safety_system::transport::fss_message_asset_com
         case flight_safety_system::transport::asset_command_terminate:
             this->report_command(fss_cmd_terminate);
             break;
+        case flight_safety_system::transport::asset_command_manual:
+            this->report_command(fss_cmd_manual);
+            break;
         case flight_safety_system::transport::asset_command_unknown:
         default:
             break;
