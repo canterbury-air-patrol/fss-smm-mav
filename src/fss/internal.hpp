@@ -16,10 +16,13 @@ private:
     void *goto_cb_priv{nullptr};
     notify_smm_settings_cb smm_settings_cb{nullptr};
     void *smm_settings_cb_priv{nullptr};
+    notify_position_cb position_data_cb{nullptr};
+    void *position_data_cb_priv{nullptr};
     void report_command(FSSCommand cmd);
     void report_goto_update(Point);
     void report_comms_status(FSSCommsStatus);
     void report_smm_settings(SMMSettings);
+    void report_position_data(PositionData);
 protected:
     virtual void connectionStatusChange(flight_safety_system::client::connection_status status);
 public:
@@ -31,6 +34,7 @@ public:
     void registerCommsStatusCB(notify_fss_comms_cb cb, void *priv) { this->comms_status_cb = cb; this->comms_status_cb_priv = priv; };
     void registerGotoUpdateCB(notify_goto_update_cb cb, void *priv) { this->goto_cb = cb; this->goto_cb_priv = priv; };
     void registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv) { this->smm_settings_cb = cb; this->smm_settings_cb_priv = priv; };
+    void registerPositionDataCB(notify_position_cb cb, void *priv) { this->position_data_cb = cb; this->position_data_cb_priv = priv; };
     void sendPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel);
     void reachedPoint(int point, int total_points);
     void sendBatteryStatus(int8_t remaining, int32_t consumed);

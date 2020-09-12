@@ -1,3 +1,5 @@
+#include <cstring>
+
 #include "mav.hpp"
 #include "internal.hpp"
 
@@ -49,6 +51,15 @@ void MAV::gotoPosition(Point to)
 void MAV::setAltitude(uint16_t alt)
 {
     this->target_altitude = alt;
+}
+
+void MAV::sendADSB(PositionData pd)
+{
+    char *callsign = (char *)malloc(9);
+    strncpy(callsign, pd.getCallSign().c_str(), 8);
+    callsign[8] = '\0';
+    this->connection->sendADSB(pd.getICAOAddress(), pd.getP().getLatitude(), pd.getP().getLongitude(), pd.getAltitude(), pd.getAltitudeType(), pd.getHeading(), pd.getVelocityHorizontal(), pd.getVelocityVertical(), callsign, pd.getEmitterType(), 0, pd.getFlags(), pd.getSquawk());
+    free(callsign);
 }
 
 MAV::MAV(std::string t_addr, uint16_t t_port) : connection(new mav_connection(t_addr, t_port))

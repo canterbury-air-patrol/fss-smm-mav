@@ -35,6 +35,7 @@ public:
     void setAltitude(uint16_t alt);
     Point getCurrentPosition();
     void loadSearch(SMMSearch *);
+    void sendADSB(PositionData pd);
     void registerPositionCB(notify_position_cb cb, void *priv);
     void registerReachedCB(notify_reached_cb, void *priv);
     void registerBatteryCB(notify_battery_status_cb cb, void *priv);

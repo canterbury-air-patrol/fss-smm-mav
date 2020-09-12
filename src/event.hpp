@@ -9,6 +9,7 @@ enum event_type {
     event_position,
     event_reached,
     event_battery_status,
+    event_other_aircraft_report,
 };
 
 class event {
@@ -26,6 +27,7 @@ public:
     event(FSSCommsStatus t_status) : et(event_fss_comms_status), comms_status(t_status) {};
     event(SMMSettings t_settings) : et(event_smm_settings), smm_settings(t_settings) {};
     event(PositionData t_pd) : et(event_position), pd(t_pd) {};
+    event(event_type t_et, PositionData t_pd) : et(t_et), pd(t_pd) {};
     event(int t_reached_point) : et(event_reached), reached_point(t_reached_point) {};
     event(BatteryData t_bd) : et(event_battery_status), bd(t_bd) {};
     event_type getType() { return this->et; };

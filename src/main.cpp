@@ -12,6 +12,7 @@
 #include "fss/fmu-fss-types.hpp"
 #include "smm/smm-types.hpp"
 #include "event.hpp"
+#include "aircraft.hpp"
 
 std::string asset_name = "";
 std::queue<class event *> event_queue;
@@ -56,7 +57,7 @@ smm_settings_cb (void *priv, SMMSettings settings)
 static void
 mav_position_cb (void *priv, PositionData pd)
 {
-    enqueue_event(new event(pd));
+    enqueue_event(new event(event_position, pd));
 }
 
 static void
@@ -71,6 +72,20 @@ mav_battery_cb (void *priv, BatteryData bd)
     enqueue_event(new event(bd));
 }
 
+known_aircraft *aircraft = nullptr;
+
+static void
+fss_other_traffic_cb (void *priv, PositionData pd)
+{
+    if (aircraft != nullptr)
+    {
+        if (aircraft->newPositionReport(pd))
+        {
+            enqueue_event(new event(event_other_aircraft_report, pd));
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 4)
@@ -82,6 +97,8 @@ int main(int argc, char *argv[])
     signal (SIGINT, sigIntHandler);
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
+
+    aircraft = new known_aircraft();
 
     FSS *fss = new FSS(argv[1]);
     MAV *mav = new MAV(argv[2], atoi(argv[3]));
@@ -97,6 +114,7 @@ int main(int argc, char *argv[])
     fss->registerCommandCB(fss_command_cb, nullptr);
     fss->registerCommsStatusCB(fss_comms_status_cb, nullptr);
     fss->registerSMMSettingsCB(smm_settings_cb, nullptr);
+    fss->registerPositionDataCB(fss_other_traffic_cb, nullptr);
 
     mav->registerPositionCB(mav_position_cb, nullptr);
     mav->registerReachedCB(mav_reached_cb, nullptr);
@@ -144,6 +162,12 @@ int main(int argc, char *argv[])
                             state_machine->setLowBattery();
                         }
                         fss->reportBatteryStatus(e->getBatteryData());
+                    }
+                    break;
+                case event_other_aircraft_report:
+                    {
+                        PositionData pd = e->getPositionData();
+                        mav->sendADSB(e->getPositionData());
                     }
                     break;
             }

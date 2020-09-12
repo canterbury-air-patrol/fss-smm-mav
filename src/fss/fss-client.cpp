@@ -62,6 +62,9 @@ fss_client::connectionStatusChange(flight_safety_system::client::connection_stat
 void
 fss_client::handlePositionReport(flight_safety_system::transport::fss_message_position_report *msg)
 {
+    this->report_position_data(PositionData(msg->getLatitude(), msg->getLongitude(), msg->getAltitude(),
+        msg->getHeading(), msg->getHorzVel(), msg->getVertVel(), msg->getCallSign(), msg->getSquawk(), msg->getICAOAddress(),
+        msg->getTimeStamp(), msg->getFlags(), msg->getAltitudeType(), msg->getEmitterType()));
 }
 
 void
@@ -149,5 +152,14 @@ fss_client::report_smm_settings(SMMSettings settings)
     if (this->smm_settings_cb != nullptr)
     {
         this->smm_settings_cb (this->smm_settings_cb_priv, settings);
+    }
+}
+
+void
+fss_client::report_position_data(PositionData pd)
+{
+    if (this->position_data_cb != nullptr)
+    {
+        this->position_data_cb (this->position_data_cb_priv, pd);
     }
 }

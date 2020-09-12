@@ -50,6 +50,14 @@ void FSS::registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv)
     }
 }
 
+void FSS::registerPositionDataCB(notify_position_cb cb, void *priv)
+{
+    if (this->client != nullptr)
+    {
+        this->client->registerPositionDataCB(cb, priv);
+    }
+}
+
 void FSS::reportPosition(PositionData t_pd)
 {
     if (this->client != nullptr)
