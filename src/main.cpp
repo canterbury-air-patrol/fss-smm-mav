@@ -5,6 +5,7 @@
 #include <list>
 #include <queue>
 #include <iostream>
+#include <thread>
 #include <csignal>
 #include <unistd.h>
 #include "fmu-types.hpp"
@@ -86,6 +87,17 @@ fss_other_traffic_cb (void *priv, PositionData pd)
     }
 }
 
+static void
+fss_reconnector (FSS *fss, MAV *mav)
+{
+    while (running)
+    {
+        sleep (10);
+        fss->reconnectAll();
+        mav->attemptReconnect();
+    }
+}
+
 int main(int argc, char *argv[])
 {
     if (argc < 4)
@@ -103,6 +115,9 @@ int main(int argc, char *argv[])
     FSS *fss = new FSS(argv[1]);
     MAV *mav = new MAV(argv[2], atoi(argv[3]));
     SMM *smm = new SMM(mav);
+
+    /* Run the reconnector thread */
+    std::thread reconnector = std::thread(fss_reconnector, fss, mav);
 
     /* Get the asset name */
     asset_name = fss->getAssetName();
@@ -176,6 +191,11 @@ int main(int argc, char *argv[])
             e = event_queue.front();
         }
         main_cv.wait(lk);
+    }
+
+    if (reconnector.joinable())
+    {
+        reconnector.join();
     }
 
     /* Cleanup */

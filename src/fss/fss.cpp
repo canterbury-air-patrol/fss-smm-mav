@@ -93,6 +93,12 @@ goto_updated (void *priv, Point p)
     }
 }
 
+void
+FSS::reconnectAll()
+{
+    this->client->attemptReconnect();
+}
+
 FSS::FSS(const char *config_file)
 {
     this->client = new fss_client(config_file);

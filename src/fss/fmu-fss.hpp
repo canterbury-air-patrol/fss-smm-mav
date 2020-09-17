@@ -25,4 +25,5 @@ public:
     void registerPositionDataCB(notify_position_cb cb, void *priv);
     void reachedPoint(int point, int total_points);
     void reportBatteryStatus(BatteryData bd);
+    void reconnectAll();
 };

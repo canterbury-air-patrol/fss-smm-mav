@@ -38,4 +38,5 @@ public:
     void sendPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel);
     void reachedPoint(int point, int total_points);
     void sendBatteryStatus(int8_t remaining, int32_t consumed);
+    void reconnectAll();
 };

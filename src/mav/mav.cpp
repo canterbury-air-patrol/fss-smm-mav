@@ -43,6 +43,11 @@ void MAV::terminate()
     this->connection->commandTerminate();
 }
 
+void MAV::attemptReconnect()
+{
+    this->connection->attemptReconnect();
+}
+
 void MAV::gotoPosition(Point to)
 {
     this->goto_position = to;

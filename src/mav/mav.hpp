@@ -28,6 +28,7 @@ public:
     ~MAV();
     flight_mode getFlightMode() { return this->mode; };
     bool getArmed() { return this->armed; };
+    void attemptReconnect();
     bool setMode(flight_mode fm);
     void disarm();
     void terminate();
