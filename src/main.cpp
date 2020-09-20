@@ -182,7 +182,11 @@ int main(int argc, char *argv[])
                 case event_other_aircraft_report:
                     {
                         PositionData pd = e->getPositionData();
-                        mav->sendADSB(e->getPositionData());
+                        if (pd.getCallSign() != fss->getAssetName())
+                        {
+                            /* Don't tell it about ourself */
+                            mav->sendADSB(pd);
+                        }
                     }
                     break;
             }
