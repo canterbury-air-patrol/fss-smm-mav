@@ -3,6 +3,7 @@
 #include <list>
 #include <string>
 #include <mutex>
+#include <memory>
 
 #include "../fmu-types.hpp"
 #include "../mav/mav.hpp"
@@ -19,7 +20,7 @@ enum SMMCommand {
 
 class SMM {
 private:
-    MAV *mav{nullptr};
+    std::shared_ptr<MAV> mav{nullptr};
     smm_connection conn{nullptr};
     std::string smm_host{};
     std::string smm_user{};
@@ -34,7 +35,7 @@ private:
     void connect();
     void disconnect();
 public:
-    SMM(MAV *t_mav);
+    SMM(std::shared_ptr<MAV> t_mav);
     ~SMM();
     void connect(std::string host, std::string user, std::string pass, std::string asset_name);
     void search(Point current_pos);

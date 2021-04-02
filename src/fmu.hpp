@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <mutex>
 #include <condition_variable>
 
@@ -28,14 +29,13 @@ private:
     SMMCommand smm_command{smm_cmd_none};
     bool low_battery{false};
     bool fss_comms_lost{false};
-    MAV *mav{nullptr};
-    SMM *smm{nullptr};
-    FSS *fss{nullptr};
+    std::shared_ptr<MAV> mav{nullptr};
+    std::shared_ptr<SMM> smm{nullptr};
+    std::shared_ptr<FSS> fss{nullptr};
     std::mutex lock{};
 public:
-    FMUStateMachine(MAV *t_mav, SMM *t_smm, FSS *t_fss);
-    ~FMUStateMachine();
-    FMUState getCurrentstate();
+    FMUStateMachine(std::shared_ptr<MAV> t_mav, std::shared_ptr<SMM> t_smm, std::shared_ptr<FSS> t_fss);
+    auto getCurrentstate() -> FMUState;
 
     void FSSNewCommand(FSSCommand cmd);
     void SMMNewCommand(SMMCommand cmd);

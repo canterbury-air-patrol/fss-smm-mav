@@ -1,5 +1,6 @@
 #include <bits/stdint-uintn.h>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <list>
@@ -88,7 +89,7 @@ fss_other_traffic_cb (PositionData pd)
 }
 
 static void
-fss_reconnector (FSS *fss, MAV *mav)
+fss_reconnector (std::shared_ptr<FSS> fss, std::shared_ptr<MAV> mav)
 {
     while (running)
     {
@@ -112,9 +113,9 @@ int main(int argc, char *argv[])
 
     aircraft = new known_aircraft();
 
-    FSS *fss = new FSS(argv[1]);
-    MAV *mav = new MAV(argv[2], atoi(argv[3]));
-    SMM *smm = new SMM(mav);
+    auto fss = std::make_shared<FSS>(argv[1]);
+    auto mav = std::make_shared<MAV>(argv[2], atoi(argv[3]));
+    auto smm = std::make_shared<SMM>(mav);
 
     /* Run the reconnector thread */
     std::thread reconnector = std::thread(fss_reconnector, fss, mav);
@@ -203,9 +204,9 @@ int main(int argc, char *argv[])
 
     /* Cleanup */
     delete state_machine;
-    delete smm;
-    delete fss;
-    delete mav;
+    smm.reset();
+    fss.reset();
+    mav.reset();
 
     while (!event_queue.empty())
     {

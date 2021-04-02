@@ -2,7 +2,7 @@
 #include <iostream>
 #include <mutex>
 
-FMUState map_smm_state(SMMCommand cmd)
+auto map_smm_state(SMMCommand cmd) -> FMUState
 {
     FMUState new_state = fmu_state_rtl;
 
@@ -19,7 +19,7 @@ FMUState map_smm_state(SMMCommand cmd)
     return new_state;
 }
 
-FMUState map_fss_state(FSSCommand cmd)
+auto map_fss_state(FSSCommand cmd) -> FMUState
 {
     FMUState new_state = fmu_state_searching;
     switch (cmd)
@@ -166,10 +166,6 @@ FMUStateMachine::setCommsFailure(bool failed)
     }
 }
 
-FMUStateMachine::FMUStateMachine(MAV *t_mav, SMM *t_smm, FSS *t_fss) : mav(t_mav), smm(t_smm), fss(t_fss)
-{
-}
-
-FMUStateMachine::~FMUStateMachine()
+FMUStateMachine::FMUStateMachine(std::shared_ptr<MAV> t_mav, std::shared_ptr<SMM> t_smm, std::shared_ptr<FSS> t_fss) : mav(std::move(t_mav)), smm(std::move(t_smm)), fss(std::move(t_fss))
 {
 }

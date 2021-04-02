@@ -3,7 +3,7 @@
 #include "smm.hpp"
 #include <smm-asset.h>
 
-SMM::SMM(MAV *t_mav) : mav(t_mav)
+SMM::SMM(std::shared_ptr<MAV> t_mav) : mav(t_mav)
 {
 //    smm_asset_debugging_set (true);
 }
