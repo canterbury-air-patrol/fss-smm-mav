@@ -342,11 +342,11 @@ mav_connection::loadSearch()
 }
 
 void
-mav_connection::loadSearch(SMMSearch *search)
+mav_connection::loadSearch(SMMSearch *t_search)
 {
-    if (this->search != search || !this->search_loaded)
+    if (this->search != t_search || !this->search_loaded)
     {
-        this->search = search;
+        this->search = t_search;
         if (this->search != nullptr)
         {
             this->loadSearch();
@@ -363,7 +363,7 @@ mav_connection::requestStream(int sysid, int compid, uint32_t command, uint32_t 
 }
 
 void
-mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *status)
+mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *status __attribute__((unused)))
 {
     auto sys = this->systems.findSystem(msg->sysid);
     auto comp = sys->findComponent(msg->compid);
