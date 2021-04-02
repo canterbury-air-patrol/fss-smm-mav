@@ -26,35 +26,35 @@ void FSS::setGoto(Point p)
     this->goto_point = p;
 }
 
-void FSS::registerCommandCB(notify_fss_command_cb cb, void *priv)
+void FSS::registerCommandCB(notify_fss_command_cb cb)
 {
     if (this->client != nullptr)
     {
-        this->client->registerCommandCB(cb, priv);
+        this->client->registerCommandCB(cb);
     }
 };
 
-void FSS::registerCommsStatusCB(notify_fss_comms_cb cb, void *priv)
+void FSS::registerCommsStatusCB(notify_fss_comms_cb cb)
 {
     if (this->client != nullptr)
     {
-        this->client->registerCommsStatusCB(cb, priv);
+        this->client->registerCommsStatusCB(cb);
     }
 };
 
-void FSS::registerSMMSettingsCB(notify_smm_settings_cb cb, void *priv)
+void FSS::registerSMMSettingsCB(notify_smm_settings_cb cb)
 {
     if (this->client != nullptr)
     {
-        this->client->registerSMMSettingsCB(cb, priv);
+        this->client->registerSMMSettingsCB(cb);
     }
 }
 
-void FSS::registerPositionDataCB(notify_position_cb cb, void *priv)
+void FSS::registerPositionDataCB(notify_position_cb cb)
 {
     if (this->client != nullptr)
     {
-        this->client->registerPositionDataCB(cb, priv);
+        this->client->registerPositionDataCB(cb);
     }
 }
 

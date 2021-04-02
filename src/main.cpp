@@ -38,37 +38,37 @@ enqueue_event (event *e)
 }
 
 static void
-fss_command_cb (void *priv, FSSCommand command)
+fss_command_cb (FSSCommand command)
 {
     enqueue_event(new event(command));
 }
 
 static void
-fss_comms_status_cb (void *priv, FSSCommsStatus status)
+fss_comms_status_cb (FSSCommsStatus status)
 {
     enqueue_event(new event(status));
 }
 
 static void
-smm_settings_cb (void *priv, SMMSettings settings)
+smm_settings_cb (SMMSettings settings)
 {
     enqueue_event(new event(settings));
 }
 
 static void
-mav_position_cb (void *priv, PositionData pd)
+mav_position_cb (PositionData pd)
 {
     enqueue_event(new event(event_position, pd));
 }
 
 static void
-mav_reached_cb (void *priv, int point)
+mav_reached_cb (int point)
 {
     enqueue_event(new event(point));
 }
 
 static void
-mav_battery_cb (void *priv, BatteryData bd)
+mav_battery_cb (BatteryData bd)
 {
     enqueue_event(new event(bd));
 }
@@ -76,7 +76,7 @@ mav_battery_cb (void *priv, BatteryData bd)
 known_aircraft *aircraft = nullptr;
 
 static void
-fss_other_traffic_cb (void *priv, PositionData pd)
+fss_other_traffic_cb (PositionData pd)
 {
     if (aircraft != nullptr)
     {
@@ -126,14 +126,14 @@ int main(int argc, char *argv[])
     FMUStateMachine *state_machine = new FMUStateMachine(mav, smm, fss);
 
     /* Connect up the notifications */
-    fss->registerCommandCB(fss_command_cb, nullptr);
-    fss->registerCommsStatusCB(fss_comms_status_cb, nullptr);
-    fss->registerSMMSettingsCB(smm_settings_cb, nullptr);
-    fss->registerPositionDataCB(fss_other_traffic_cb, nullptr);
+    fss->registerCommandCB(fss_command_cb);
+    fss->registerCommsStatusCB(fss_comms_status_cb);
+    fss->registerSMMSettingsCB(smm_settings_cb);
+    fss->registerPositionDataCB(fss_other_traffic_cb);
 
-    mav->registerPositionCB(mav_position_cb, nullptr);
-    mav->registerReachedCB(mav_reached_cb, nullptr);
-    mav->registerBatteryCB(mav_battery_cb, nullptr);
+    mav->registerPositionCB(mav_position_cb);
+    mav->registerReachedCB(mav_reached_cb);
+    mav->registerBatteryCB(mav_battery_cb);
 
     while (running)
     {
@@ -192,7 +192,6 @@ int main(int argc, char *argv[])
             }
             delete e;
             lk.lock();
-            e = event_queue.front();
         }
         main_cv.wait(lk);
     }

@@ -58,11 +58,8 @@ class mav_connection {
         std::mutex position_lock{};
         SMMSearch *search{nullptr};
         notify_position_cb position_cb{nullptr};
-        void *position_cb_priv{nullptr};
         notify_battery_status_cb battery_cb{nullptr};
-        void *battery_cb_priv{nullptr};
         notify_reached_cb reached_cb{nullptr};
-        void *reached_cb_priv{nullptr};
         bool search_loading{false};
         bool search_loaded{false};
         Point goto_position{};
@@ -97,7 +94,7 @@ class mav_connection {
         void requestStream(int sysid, int compid, uint32_t command, uint32_t interval);
         Point getLastPosition() { std::lock_guard<std::mutex> lk{this->position_lock}; return this->last_position; };
         void loadSearch(SMMSearch *search);
-        void registerPositionCB(notify_position_cb cb, void *priv);
-        void registerReachedCB(notify_reached_cb cb, void *priv);
-        void registerBatteryCB(notify_battery_status_cb cb, void *priv);
+        void registerPositionCB(notify_position_cb cb);
+        void registerReachedCB(notify_reached_cb cb);
+        void registerBatteryCB(notify_battery_status_cb cb);
 };

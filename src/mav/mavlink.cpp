@@ -721,7 +721,7 @@ void mav_connection::report_battery_status(int8_t remaining, int32_t consumed)
 {
     if (this->battery_cb != nullptr)
     {
-        this->battery_cb(this->battery_cb_priv, BatteryData(remaining, consumed));
+        this->battery_cb(BatteryData(remaining, consumed));
     }
 }
 
@@ -729,7 +729,7 @@ void mav_connection::report_position(double lat, double lng, double alt, uint16_
 {
     if (this->position_cb != nullptr)
     {
-        this->position_cb(this->position_cb_priv, PositionData(lat, lng, alt, hdg, vh, vv));
+        this->position_cb(PositionData(lat, lng, alt, hdg, vh, vv));
     }
 }
 
@@ -737,24 +737,21 @@ void mav_connection::report_reached(int point)
 {
     if (this->reached_cb != nullptr)
     {
-        this->reached_cb(this->reached_cb_priv, point);
+        this->reached_cb(point);
     }
 }
 
-void mav_connection::registerPositionCB(notify_position_cb cb, void *priv)
+void mav_connection::registerPositionCB(notify_position_cb cb)
 {
-    this->position_cb_priv = priv;
     this->position_cb = cb;
 }
 
-void mav_connection::registerReachedCB(notify_reached_cb cb, void *priv)
+void mav_connection::registerReachedCB(notify_reached_cb cb)
 {
-    this->reached_cb_priv = priv;
     this->reached_cb = cb;
 }
 
-void mav_connection::registerBatteryCB(notify_battery_status_cb cb, void *priv)
+void mav_connection::registerBatteryCB(notify_battery_status_cb cb)
 {
-    this->battery_cb_priv = priv;
     this->battery_cb = cb;
 }

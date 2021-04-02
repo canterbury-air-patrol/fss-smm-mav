@@ -5,12 +5,11 @@
 
 class Point {
 private:
-    bool valid{false};
     double latitude{0.0};
     double longitude{0.0};
 public:
     Point() {};
-    Point(double lat, double lng) : valid(true), latitude(lat), longitude(lng) {};
+    Point(double lat, double lng) : latitude(lat), longitude(lng) {};
     double getLatitude() { return latitude; };
     double getLongitude() { return longitude; };
 };
@@ -69,11 +68,11 @@ public:
 #include <bits/stdint-uintn.h>
 #include <bits/stdint-intn.h>
 
-typedef void (*notify_fss_command_cb)(void *priv, FSSCommand cmd);
-typedef void (*notify_fss_comms_cb)(void *priv, FSSCommsStatus status);
+typedef void (*notify_fss_command_cb)(FSSCommand cmd);
+typedef void (*notify_fss_comms_cb)(FSSCommsStatus status);
 
-typedef void (*notify_position_cb)(void *priv, PositionData pd);
-typedef void (*notify_battery_status_cb)(void *priv, BatteryData bd);
-typedef void (*notify_reached_cb)(void *priv, int point);
+typedef void (*notify_position_cb)(PositionData pd);
+typedef void (*notify_battery_status_cb)(BatteryData bd);
+typedef void (*notify_reached_cb)(int point);
 
-typedef void (*notify_smm_settings_cb)(void *priv, SMMSettings settings);
+typedef void (*notify_smm_settings_cb)(SMMSettings settings);

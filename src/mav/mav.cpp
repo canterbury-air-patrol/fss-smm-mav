@@ -87,17 +87,17 @@ void MAV::loadSearch(SMMSearch *search)
     this->connection->loadSearch(search);
 }
 
-void MAV::registerPositionCB(notify_position_cb cb, void *priv)
+void MAV::registerPositionCB(notify_position_cb cb)
 {
-    this->connection->registerPositionCB(cb, priv);
+    this->connection->registerPositionCB(cb);
 }
 
-void MAV::registerReachedCB(notify_reached_cb cb, void *priv)
+void MAV::registerReachedCB(notify_reached_cb cb)
 {
-    this->connection->registerReachedCB(cb, priv);
+    this->connection->registerReachedCB(cb);
 }
 
-void MAV::registerBatteryCB(notify_battery_status_cb cb, void *priv)
+void MAV::registerBatteryCB(notify_battery_status_cb cb)
 {
-    this->connection->registerBatteryCB(cb, priv);
+    this->connection->registerBatteryCB(cb);
 }

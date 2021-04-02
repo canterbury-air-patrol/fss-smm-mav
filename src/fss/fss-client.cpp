@@ -127,7 +127,7 @@ fss_client::report_command(FSSCommand cmd)
 {
     if (this->command_cb != nullptr)
     {
-        this->command_cb(this->command_cb_priv, cmd);
+        this->command_cb(cmd);
     }
 }
 
@@ -136,7 +136,7 @@ fss_client::report_comms_status(FSSCommsStatus status)
 {
     if (this->comms_status_cb != nullptr)
     {
-        this->comms_status_cb (this->comms_status_cb_priv, status);
+        this->comms_status_cb (status);
     }
 }
 
@@ -154,7 +154,7 @@ fss_client::report_smm_settings(SMMSettings settings)
 {
     if (this->smm_settings_cb != nullptr)
     {
-        this->smm_settings_cb (this->smm_settings_cb_priv, settings);
+        this->smm_settings_cb (settings);
     }
 }
 
@@ -163,6 +163,6 @@ fss_client::report_position_data(PositionData pd)
 {
     if (this->position_data_cb != nullptr)
     {
-        this->position_data_cb (this->position_data_cb_priv, pd);
+        this->position_data_cb (pd);
     }
 }

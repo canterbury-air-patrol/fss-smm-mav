@@ -37,7 +37,7 @@ public:
     Point getCurrentPosition();
     void loadSearch(SMMSearch *);
     void sendADSB(PositionData pd);
-    void registerPositionCB(notify_position_cb cb, void *priv);
-    void registerReachedCB(notify_reached_cb, void *priv);
-    void registerBatteryCB(notify_battery_status_cb cb, void *priv);
+    void registerPositionCB(notify_position_cb cb);
+    void registerReachedCB(notify_reached_cb);
+    void registerBatteryCB(notify_battery_status_cb cb);
 };
