@@ -16,8 +16,8 @@
 #include "event.hpp"
 #include "aircraft.hpp"
 
-std::string asset_name = "";
-std::queue<class event *> event_queue;
+std::string asset_name{""};
+std::queue<std::shared_ptr<event>> event_queue;
 std::mutex main_lock;
 std::condition_variable main_cv;
 
@@ -29,7 +29,7 @@ void sigIntHandler(__attribute__((unused)) int signum)
 }
 
 static void
-enqueue_event (event *e)
+enqueue_event (const std::shared_ptr<event> &e)
 {
     {
         std::lock_guard<std::mutex> lk(main_lock);
@@ -41,55 +41,55 @@ enqueue_event (event *e)
 static void
 fss_command_cb (FSSCommand command)
 {
-    enqueue_event(new event(command));
+    enqueue_event(std::make_shared<event>(command));
 }
 
 static void
 fss_comms_status_cb (FSSCommsStatus status)
 {
-    enqueue_event(new event(status));
+    enqueue_event(std::make_shared<event>(status));
 }
 
 static void
-smm_settings_cb (SMMSettings settings)
+smm_settings_cb (const SMMSettings &settings)
 {
-    enqueue_event(new event(settings));
+    enqueue_event(std::make_shared<event>(settings));
 }
 
 static void
-mav_position_cb (PositionData pd)
+mav_position_cb (const PositionData &pd)
 {
-    enqueue_event(new event(event_position, pd));
+    enqueue_event(std::make_shared<event>(event_position, pd));
 }
 
 static void
 mav_reached_cb (int point)
 {
-    enqueue_event(new event(point));
+    enqueue_event(std::make_shared<event>(point));
 }
 
 static void
-mav_battery_cb (BatteryData bd)
+mav_battery_cb (const BatteryData &bd)
 {
-    enqueue_event(new event(bd));
+    enqueue_event(std::make_shared<event>(bd));
 }
 
-known_aircraft *aircraft = nullptr;
+std::shared_ptr<known_aircraft> aircraft = nullptr;
 
 static void
-fss_other_traffic_cb (PositionData pd)
+fss_other_traffic_cb (const PositionData &pd)
 {
     if (aircraft != nullptr)
     {
         if (aircraft->newPositionReport(pd))
         {
-            enqueue_event(new event(event_other_aircraft_report, pd));
+            enqueue_event(std::make_shared<event>(event_other_aircraft_report, pd));
         }
     }
 }
 
 static void
-fss_reconnector (std::shared_ptr<FSS> fss, std::shared_ptr<MAV> mav)
+fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &mav)
 {
     while (running)
     {
@@ -99,7 +99,8 @@ fss_reconnector (std::shared_ptr<FSS> fss, std::shared_ptr<MAV> mav)
     }
 }
 
-int main(int argc, char *argv[])
+auto
+main(int argc, char *argv[]) -> int
 {
     if (argc < 4)
     {
@@ -111,7 +112,7 @@ int main(int argc, char *argv[])
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
 
-    aircraft = new known_aircraft();
+    aircraft = std::make_shared<known_aircraft>();
 
     auto fss = std::make_shared<FSS>(argv[1]);
     auto mav = std::make_shared<MAV>(argv[2], atoi(argv[3]));
@@ -124,7 +125,7 @@ int main(int argc, char *argv[])
     asset_name = fss->getAssetName();
 
     /* Setup the State Machine */
-    FMUStateMachine *state_machine = new FMUStateMachine(mav, smm, fss);
+    auto state_machine = std::make_shared<FMUStateMachine>(mav, smm, fss);
 
     /* Connect up the notifications */
     fss->registerCommandCB(fss_command_cb);
@@ -190,8 +191,12 @@ int main(int argc, char *argv[])
                         }
                     }
                     break;
+                case event_unknown:
+                    {
+                        std::cout << "Unknown event in queue";
+                    }
+                    break;
             }
-            delete e;
             lk.lock();
         }
         main_cv.wait(lk);
@@ -203,7 +208,7 @@ int main(int argc, char *argv[])
     }
 
     /* Cleanup */
-    delete state_machine;
+    state_machine.reset();
     smm.reset();
     fss.reset();
     mav.reset();
@@ -212,6 +217,5 @@ int main(int argc, char *argv[])
     {
         auto e = event_queue.front();
         event_queue.pop();
-        delete e;
     }
 }

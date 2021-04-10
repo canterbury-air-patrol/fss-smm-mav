@@ -1,6 +1,7 @@
 #include "internal.hpp"
 
-mav_comp *mav_sys::findComponent(uint8_t t_compid)
+auto
+mav_sys::findComponent(uint8_t t_compid) -> std::shared_ptr<mav_comp>
 {
     for(auto iter : this->components)
     {
@@ -9,23 +10,13 @@ mav_comp *mav_sys::findComponent(uint8_t t_compid)
             return (iter);
         }
     }
-    auto new_comp = new mav_comp(t_compid);
+    auto new_comp = std::make_shared<mav_comp>(t_compid);
     this->components.push_back(new_comp);
     return new_comp;
 }
 
-mav_sys::~mav_sys()
-{
-    auto iter = this->components.front();
-    while (iter != nullptr)
-    {
-        delete iter;
-        this->components.pop_front();
-        iter = this->components.front();
-    }
-}
-
-mav_sys *mav_systems::findSystem(uint8_t t_sysid)
+auto
+mav_systems::findSystem(uint8_t t_sysid) -> std::shared_ptr<mav_sys>
 {
     for(auto iter : this->systems)
     {
@@ -34,18 +25,7 @@ mav_sys *mav_systems::findSystem(uint8_t t_sysid)
             return (iter);
         }
     }
-    auto new_sys = new mav_sys(t_sysid);
+    auto new_sys = std::make_shared<mav_sys>(t_sysid);
     this->systems.push_back(new_sys);
     return new_sys;
-}
-
-mav_systems::~mav_systems()
-{
-    auto iter = this->systems.front();
-    while (iter != nullptr)
-    {
-        delete iter;
-        this->systems.pop_front();
-        iter = this->systems.front();
-    }
 }

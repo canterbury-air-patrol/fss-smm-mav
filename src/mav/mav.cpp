@@ -3,7 +3,8 @@
 #include "mav.hpp"
 #include "internal.hpp"
 
-bool MAV::setMode(flight_mode fm)
+auto
+MAV::setMode(flight_mode fm) -> bool
 {
     bool res = false;
     switch (fm)
@@ -60,29 +61,24 @@ void MAV::setAltitude(uint16_t alt)
 
 void MAV::sendADSB(PositionData pd)
 {
-    char *callsign = (char *)malloc(9);
+    auto callsign = (char *)malloc(9);
     strncpy(callsign, pd.getCallSign().c_str(), 8);
     callsign[8] = '\0';
     this->connection->sendADSB(pd.getICAOAddress(), pd.getP().getLatitude(), pd.getP().getLongitude(), pd.getAltitude(), pd.getAltitudeType(), pd.getHeading(), pd.getVelocityHorizontal(), pd.getVelocityVertical(), callsign, pd.getEmitterType(), 0, pd.getFlags(), pd.getSquawk());
     free(callsign);
 }
 
-MAV::MAV(std::string t_addr, uint16_t t_port) : connection(new mav_connection(t_addr, t_port))
+MAV::MAV(std::string t_addr, uint16_t t_port) : connection(std::make_shared<mav_connection>(std::move(t_addr), t_port))
 {
 }
 
-MAV::~MAV()
-{
-    delete this->connection;
-    this->connection = nullptr;
-}
-
-Point MAV::getCurrentPosition()
+auto
+MAV::getCurrentPosition() -> Point
 {
     return this->connection->getLastPosition();
 }
 
-void MAV::loadSearch(std::shared_ptr<SMMSearch> search)
+void MAV::loadSearch(const std::shared_ptr<SMMSearch> &search)
 {
     this->connection->loadSearch(search);
 }

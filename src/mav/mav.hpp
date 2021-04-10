@@ -19,24 +19,24 @@ class mav_connection;
 
 class MAV {
 private:
-    mav_connection *connection;
+    std::shared_ptr<mav_connection> connection;
     flight_mode mode{flight_mode_unknown};
     bool armed{false};
     Point goto_position{};
     uint16_t target_altitude{0};
 public:
     MAV(std::string t_addr, uint16_t t_port);
-    ~MAV();
-    flight_mode getFlightMode() { return this->mode; };
-    bool getArmed() { return this->armed; };
+    ~MAV() = default;
+    auto getFlightMode() -> flight_mode { return this->mode; };
+    auto getArmed() -> bool { return this->armed; };
     void attemptReconnect();
-    bool setMode(flight_mode fm);
+    auto setMode(flight_mode fm) -> bool;
     void disarm();
     void terminate();
     void gotoPosition(Point to);
     void setAltitude(uint16_t alt);
-    Point getCurrentPosition();
-    void loadSearch(std::shared_ptr<SMMSearch>);
+    auto getCurrentPosition() -> Point;
+    void loadSearch(const std::shared_ptr<SMMSearch> &);
     void sendADSB(PositionData pd);
     void registerPositionCB(notify_position_cb cb);
     void registerReachedCB(notify_reached_cb);

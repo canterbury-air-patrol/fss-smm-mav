@@ -71,8 +71,8 @@ public:
 using notify_fss_command_cb = void (*)(FSSCommand cmd);
 using notify_fss_comms_cb = void (*)(FSSCommsStatus status);
 
-using notify_position_cb = void (*)(PositionData pd);
-using notify_battery_status_cb = void (*)(BatteryData bd);
+using notify_position_cb = void (*)(const PositionData &pd);
+using notify_battery_status_cb = void (*)(const BatteryData &bd);
 using notify_reached_cb = void (*)(int point);
 
-using notify_smm_settings_cb = void (*)(SMMSettings settings);
+using notify_smm_settings_cb = void (*)(const SMMSettings &settings);

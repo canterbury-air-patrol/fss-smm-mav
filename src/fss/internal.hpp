@@ -22,12 +22,12 @@ private:
     void report_position_data(PositionData);
     flight_safety_system::transport::fss_message_asset_command last_command{flight_safety_system::transport::asset_command_unknown, 0, 0};
 protected:
-    virtual void connectionStatusChange(flight_safety_system::client::connection_status status);
+    void connectionStatusChange(flight_safety_system::client::connection_status status) override;
 public:
-    fss_client(const char *t_config_file) : flight_safety_system::client::fss_client(t_config_file) {};
-    void handleCommand(std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> msg) override;
-    void handlePositionReport(std::shared_ptr<flight_safety_system::transport::fss_message_position_report> msg) override;
-    void handleSMMSettings(std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> msg) override;
+    explicit fss_client(const char *t_config_file) : flight_safety_system::client::fss_client(t_config_file) {};
+    void handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg) override;
+    void handlePositionReport(const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg) override;
+    void handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg) override;
     void registerCommandCB(notify_fss_command_cb cb) { this->command_cb = cb; };
     void registerCommsStatusCB(notify_fss_comms_cb cb) { this->comms_status_cb = cb; };
     void registerGotoUpdateCB(notify_goto_update_cb cb, void *priv) { this->goto_cb = cb; this->goto_cb_priv = priv; };

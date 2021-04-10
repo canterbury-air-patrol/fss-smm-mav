@@ -342,7 +342,7 @@ mav_connection::loadSearch()
 }
 
 void
-mav_connection::loadSearch(std::shared_ptr<SMMSearch> t_search)
+mav_connection::loadSearch(const std::shared_ptr<SMMSearch> &t_search)
 {
     if (this->search != t_search || !this->search_loaded)
     {
@@ -496,22 +496,22 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
             std::cout << text_buf << std::endl;
         }    break;
         default:
-            printf("\nReceived packet: SYS: %d, COMP: %d, LEN: %d, MSG ID: %d\n", msg->sysid, msg->compid, msg->len, msg->msgid);
+            std::cout << std::endl << "Received packet: SYS: " << msg->sysid << ", COMP: " << msg->compid << ", LEN: " << msg->len << ", MSG ID: " << msg->msgid << std::endl;
     }
 }
 
-bool
-convert_str_to_sa(std::string addr, uint16_t port, struct sockaddr_storage *sa)
+auto
+convert_str_to_sa(std::string addr, uint16_t port, struct sockaddr_storage *sa) -> bool
 {
     int family = AF_UNSPEC;
     /* Try converting an IP(v4) address first */
     if (family == AF_UNSPEC)
     {
-        struct in_addr ia;
+        struct in_addr ia = {};
         if (inet_pton(AF_INET, addr.c_str(), &ia) == 1)
         {
             family = AF_INET;
-            struct sockaddr_in *sa_in = (struct sockaddr_in *)sa;
+            auto sa_in = (struct sockaddr_in *)sa;
             memset(sa_in, 0, sizeof(struct sockaddr_in));
             sa_in->sin_family = AF_INET;
             sa_in->sin_addr = ia;
@@ -520,11 +520,11 @@ convert_str_to_sa(std::string addr, uint16_t port, struct sockaddr_storage *sa)
     /* Try converting an IPv6 address */
     if (family == AF_UNSPEC)
     {
-        struct in6_addr ia;
+        struct in6_addr ia = {};
         if (inet_pton (AF_INET6, addr.c_str(), &ia) == 1)
         {
             family = AF_INET6;
-            struct sockaddr_in6 *sa_in = (struct sockaddr_in6 *)sa;
+            auto sa_in = (struct sockaddr_in6 *)sa;
             memset(sa_in, 0, sizeof(struct sockaddr_in6));
             sa_in->sin6_family = AF_INET6;
             sa_in->sin6_addr = ia;
@@ -548,12 +548,12 @@ convert_str_to_sa(std::string addr, uint16_t port, struct sockaddr_storage *sa)
     {
         case AF_INET:
         {
-            struct sockaddr_in *sa_in = (struct sockaddr_in *)sa;
+            auto sa_in = (struct sockaddr_in *)sa;
             sa_in->sin_port = ntohs (port);
         } break;
         case AF_INET6:
         {
-            struct sockaddr_in6 *sa_in = (struct sockaddr_in6 *)sa;
+            auto sa_in = (struct sockaddr_in6 *)sa;
             sa_in->sin6_port = ntohs (port);
         }
     }
@@ -572,7 +572,7 @@ mav_connection::processMessages()
         ssize_t received = recv(this->fd, buf, sizeof(buf), 0);
         if (received > 0)
         {
-            for (size_t i = 0; i < BUFFER_LENGTH; i++)
+            for (ssize_t i = 0; i < received; i++)
             {
                 if (mavlink_parse_char (MAVLINK_COMM_0, buf[i], &msg, &status))
                 {
@@ -592,7 +592,7 @@ recv_mav_thread(mav_connection *conn)
 void
 mav_connection::connect_to_mav()
 {
-    struct sockaddr_storage remote;
+    struct sockaddr_storage remote = {};
     if (!convert_str_to_sa(this->addr, this->port, &remote))
     {
         return;
@@ -626,7 +626,7 @@ mav_connection::disconnect_from_mav()
     }
 }
 
-mav_connection::mav_connection(std::string t_addr, uint16_t t_port) : addr(t_addr), port(t_port)
+mav_connection::mav_connection(std::string t_addr, uint16_t t_port) : addr(std::move(t_addr)), port(std::move(t_port))
 {
     this->connect_to_mav();
 }
@@ -647,8 +647,8 @@ mav_connection::~mav_connection()
 }
 
 
-bool
-mav_connection::sendMavLinkMsg(mavlink_message_t *msg)
+auto
+mav_connection::sendMavLinkMsg(mavlink_message_t *msg) -> bool
 {
     this->send_lock.lock();
     uint8_t buf[BUFFER_LENGTH];
@@ -669,10 +669,10 @@ mav_connection::sendMavLinkMsg(mavlink_message_t *msg)
     return true;
 }
 
-static uint64_t
-current_timestamp()
+static auto
+current_timestamp() -> uint64_t
 {
-    struct timeval tv;
+    struct timeval tv = {};
     gettimeofday(&tv, nullptr);
     return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
 }

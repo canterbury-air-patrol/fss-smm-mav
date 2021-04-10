@@ -11,37 +11,37 @@ class mav_comp {
     private:
         uint8_t compid;
     public:
-        mav_comp(uint8_t t_compid) : compid(t_compid) {};
-        uint8_t getCompId() { return this->compid; };
+        explicit mav_comp(uint8_t t_compid) : compid(t_compid) {};
+        auto getCompId() -> uint8_t { return this->compid; };
 };
 
 class mav_sys {
     private:
         uint8_t sysid;
-        std::list<mav_comp *> components{};
+        std::list<std::shared_ptr<mav_comp>> components{};
         uint8_t autopilot_type;
         uint8_t flight_mode;
         bool setup{false};
     public:
-        mav_sys(uint8_t t_sysid) : sysid(t_sysid), autopilot_type(0), flight_mode(0) {};
-        ~mav_sys();
-        uint8_t getSysId() { return this->sysid; };
-        uint8_t getAutoPilotType() { return this->autopilot_type; };
-        uint8_t getFlightMode() { return this->flight_mode; };
+        explicit mav_sys(uint8_t t_sysid) : sysid(t_sysid), autopilot_type(0), flight_mode(0) {};
+        ~mav_sys() = default;
+        auto getSysId() -> uint8_t { return this->sysid; };
+        auto getAutoPilotType() -> uint8_t { return this->autopilot_type; };
+        auto getFlightMode() -> uint8_t { return this->flight_mode; };
         void setAutoPilotMode(uint8_t type) { this->autopilot_type = type; };
         void setFlightMode(uint8_t mode) { this->flight_mode = mode; };
-        mav_comp *findComponent(uint8_t compid);
-        bool isSetup() { return this->setup; };
+        auto findComponent(uint8_t compid) -> std::shared_ptr<mav_comp>;
+        auto isSetup() -> bool { return this->setup; };
         void setupComplete() { this->setup = true; };
 };
 
 class mav_systems {
     private:
-        std::list<mav_sys *> systems{};
+        std::list<std::shared_ptr<mav_sys>> systems{};
     public:
-        mav_systems() {}
-        ~mav_systems();
-        mav_sys *findSystem(uint8_t t_sysid);
+        mav_systems() = default;
+        ~mav_systems() = default;
+        auto findSystem(uint8_t t_sysid) -> std::shared_ptr<mav_sys>;
 };
 
 class mav_connection {
@@ -64,7 +64,7 @@ class mav_connection {
         bool search_loaded{false};
         Point goto_position{};
         bool goto_active{false};
-        bool sendMavLinkMsg(mavlink_message_t *msg);
+        auto sendMavLinkMsg(mavlink_message_t *msg) -> bool;
         void setFlightMode(uint8_t fmode);
         void processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *status);
         void connect_to_mav();
@@ -92,8 +92,8 @@ class mav_connection {
         void loadSearch();
         void sendADSB(uint32_t icao_address, double lat, double lng, uint32_t altitude, uint8_t altitude_type, uint16_t heading, uint16_t hor_vel, uint16_t ver_vel, char *callsign, uint8_t emitter_type, uint8_t tslc, uint16_t flags, uint16_t squawk);
         void requestStream(int sysid, int compid, uint32_t command, uint32_t interval);
-        Point getLastPosition() { std::lock_guard<std::mutex> lk{this->position_lock}; return this->last_position; };
-        void loadSearch(std::shared_ptr<SMMSearch> search);
+        auto getLastPosition() -> Point { std::lock_guard<std::mutex> lk{this->position_lock}; return this->last_position; };
+        void loadSearch(const std::shared_ptr<SMMSearch> &search);
         void registerPositionCB(notify_position_cb cb);
         void registerReachedCB(notify_reached_cb cb);
         void registerBatteryCB(notify_battery_status_cb cb);

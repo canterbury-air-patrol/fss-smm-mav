@@ -3,7 +3,7 @@
 
 
 void
-fss_client::handleCommand(std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> msg)
+fss_client::handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg)
 {
     /* Don't execute commands older than the last one we handled
        This can happen when there are connections to multiple servers
@@ -62,7 +62,7 @@ fss_client::connectionStatusChange(flight_safety_system::client::connection_stat
 }
 
 void
-fss_client::handlePositionReport(std::shared_ptr<flight_safety_system::transport::fss_message_position_report> msg)
+fss_client::handlePositionReport(const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg)
 {
     this->report_position_data(PositionData(msg->getLatitude(), msg->getLongitude(), msg->getAltitude(),
         msg->getHeading(), msg->getHorzVel(), msg->getVertVel(), msg->getCallSign(), msg->getSquawk(), msg->getICAOAddress(),
@@ -70,7 +70,7 @@ fss_client::handlePositionReport(std::shared_ptr<flight_safety_system::transport
 }
 
 void
-fss_client::handleSMMSettings(std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> msg)
+fss_client::handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg)
 {
     this->report_smm_settings(SMMSettings(msg->getServerURL(), msg->getUsername(), msg->getPassword()));
 }
