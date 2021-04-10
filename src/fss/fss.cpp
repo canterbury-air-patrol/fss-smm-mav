@@ -3,7 +3,9 @@
 #include "internal.hpp"
 #include <memory>
 
-std::string FSS::getAssetName()
+
+auto
+FSS::getAssetName() -> std::string
 {
     if (this->client != nullptr)
     {
@@ -12,12 +14,14 @@ std::string FSS::getAssetName()
     return "";
 }
 
-uint16_t FSS::getAltitude()
+auto
+FSS::getAltitude() -> uint16_t
 {
     return this->assigned_altitude;
 }
 
-Point FSS::getGoto()
+auto
+FSS::getGoto() -> Point
 {
     return this->goto_point;
 }

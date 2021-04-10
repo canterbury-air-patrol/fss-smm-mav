@@ -2,6 +2,7 @@
 #include "../fmu-types.hpp"
 #include "../smm/smm-types.hpp"
 #include <bits/stdint-uintn.h>
+#include <memory>
 
 #include <string>
 
@@ -35,7 +36,7 @@ public:
     void gotoPosition(Point to);
     void setAltitude(uint16_t alt);
     Point getCurrentPosition();
-    void loadSearch(SMMSearch *);
+    void loadSearch(std::shared_ptr<SMMSearch>);
     void sendADSB(PositionData pd);
     void registerPositionCB(notify_position_cb cb);
     void registerReachedCB(notify_reached_cb);

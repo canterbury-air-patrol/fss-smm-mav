@@ -3,7 +3,7 @@
 #include "smm.hpp"
 #include <smm-asset.h>
 
-SMM::SMM(std::shared_ptr<MAV> t_mav) : mav(t_mav)
+SMM::SMM(std::shared_ptr<MAV> t_mav) : mav(std::move(t_mav))
 {
 //    smm_asset_debugging_set (true);
 }
@@ -14,7 +14,6 @@ SMM::~SMM()
     this->search_lock.lock();
     if (this->current_search)
     {
-        delete this->current_search;
         this->current_search = nullptr;
     }
     this->search_lock.unlock();
@@ -59,7 +58,7 @@ SMM::connect()
                 break;
             }
         }
-        if (this->asset == NULL)
+        if (this->asset == nullptr)
         {
             this->disconnect();
         }
@@ -71,7 +70,7 @@ SMM::connect()
 }
 
 void
-SMM::connect(std::string t_host, std::string t_user, std::string t_pass, std::string t_asset_name)
+SMM::connect(const std::string &t_host, const std::string &t_user, const std::string &t_pass, const std::string &t_asset_name)
 {
     if (this->conn == nullptr)
     {
@@ -95,10 +94,10 @@ SMM::connect(std::string t_host, std::string t_user, std::string t_pass, std::st
 
 #include <sys/time.h>
 
-static uint64_t
-current_ts()
+static auto
+current_ts() -> uint64_t
 {
-    struct timeval tv;
+    struct timeval tv = {};
     gettimeofday(&tv, nullptr);
     return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
 }
@@ -129,7 +128,7 @@ void SMM::search(Point current_pos)
     std::lock_guard<std::mutex> lk(this->search_lock);
     while (this->current_search == nullptr)
     {
-        smm_search new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
+        auto new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
         if (new_search == nullptr)
         {
             /* No search to perform */
@@ -139,7 +138,7 @@ void SMM::search(Point current_pos)
         }
         if (smm_search_accept (new_search))
         {
-            this->current_search = new SMMSearch(new_search);
+            this->current_search = std::make_shared<SMMSearch>(new_search);
         }
         else
         {
@@ -158,13 +157,12 @@ void SMM::reachedPoint(int point)
     {
         if (this->current_search->reachedPoint(point))
         {
-            delete this->current_search;
             this->current_search = nullptr;
         }
     }
 }
 
-int SMM::currentSearchPoints()
+auto SMM::currentSearchPoints() -> int
 {
     std::lock_guard<std::mutex> lk(this->search_lock);
     if (this->current_search != nullptr)
@@ -189,12 +187,14 @@ SMMSearch::SMMSearch(smm_search t_search)
     this->altitude = smm_search_sweep_width (search);
 }
 
-int SMMSearch::getPointsCount()
+auto
+SMMSearch::getPointsCount() -> int
 {
     return this->points.size();
 }
 
-bool SMMSearch::reachedPoint(int point)
+auto
+SMMSearch::reachedPoint(int point) -> bool
 {
     if (this->search != nullptr)
     {

@@ -27,7 +27,7 @@ private:
     std::string smm_pass{};
     std::string asset_name{};
     std::mutex search_lock{};
-    SMMSearch *current_search{nullptr};
+    std::shared_ptr<SMMSearch> current_search{nullptr};
     smm_assets assets_list{nullptr};
     size_t assets_list_count{0};
     smm_asset asset{nullptr};
@@ -35,11 +35,11 @@ private:
     void connect();
     void disconnect();
 public:
-    SMM(std::shared_ptr<MAV> t_mav);
+    explicit SMM(std::shared_ptr<MAV> t_mav);
     ~SMM();
-    void connect(std::string host, std::string user, std::string pass, std::string asset_name);
+    void connect(const std::string &host, const std::string &user, const std::string &pass, const std::string &asset_name);
     void search(Point current_pos);
     void reportPosition(PositionData t_pd);
     void reachedPoint(int point);
-    int currentSearchPoints();
+    auto currentSearchPoints() -> int;
 };

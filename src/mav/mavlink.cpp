@@ -342,7 +342,7 @@ mav_connection::loadSearch()
 }
 
 void
-mav_connection::loadSearch(SMMSearch *t_search)
+mav_connection::loadSearch(std::shared_ptr<SMMSearch> t_search)
 {
     if (this->search != t_search || !this->search_loaded)
     {

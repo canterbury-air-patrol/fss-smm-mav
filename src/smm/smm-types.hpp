@@ -14,11 +14,11 @@ private:
     std::string user{};
     std::string pass{};
 public:
-    SMMSettings() {};
-    SMMSettings(std::string t_url, std::string t_user, std::string t_pass) : url(t_url), user(t_user), pass(t_pass) {};
-    std::string getURL() { return this->url; };
-    std::string getUsername() { return this->user; };
-    std::string getPassword() { return this->pass; };
+    SMMSettings() = default;
+    SMMSettings(std::string t_url, std::string t_user, std::string t_pass) : url(std::move(t_url)), user(std::move(t_user)), pass(std::move(t_pass)) {};
+    auto getURL() -> std::string { return this->url; };
+    auto getUsername() -> std::string { return this->user; };
+    auto getPassword() -> std::string { return this->pass; };
 };
 
 class SMMSearch {
@@ -28,14 +28,14 @@ private:
     int altitude{0};
     smm_search search{nullptr};
 public:
-    SMMSearch() {};
-    SMMSearch(smm_search);
+    SMMSearch() = default;
+    explicit SMMSearch(smm_search);
     ~SMMSearch();
     void addPoint(Point p) { this->points.push_back(p); };
-    int getCurrentPointIdx() { return this->current_point; };
-    Point getCurrentPoint() { return this->points[this->current_point]; };
-    const std::vector<Point> getPoints() { return this->points; };
-    uint16_t getAltitude() { return this->altitude; };
-    int getPointsCount();
-    bool reachedPoint(int point);
+    auto getCurrentPointIdx() -> int { return this->current_point; };
+    auto getCurrentPoint() -> Point { return this->points[this->current_point]; };
+    auto getPoints() -> const std::vector<Point> { return this->points; };
+    auto getAltitude() -> uint16_t { return this->altitude; };
+    auto getPointsCount() -> int;
+    auto reachedPoint(int point) -> bool;
 };

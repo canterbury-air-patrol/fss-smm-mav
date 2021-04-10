@@ -82,7 +82,7 @@ Point MAV::getCurrentPosition()
     return this->connection->getLastPosition();
 }
 
-void MAV::loadSearch(SMMSearch *search)
+void MAV::loadSearch(std::shared_ptr<SMMSearch> search)
 {
     this->connection->loadSearch(search);
 }
