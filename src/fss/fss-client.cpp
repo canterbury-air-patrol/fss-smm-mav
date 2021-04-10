@@ -1,7 +1,6 @@
 #include "fmu-fss-types.hpp"
 #include "internal.hpp"
 
-flight_safety_system::transport::fss_message_asset_command last_command(flight_safety_system::transport::asset_command_unknown, 0, 0);
 
 void
 fss_client::handleCommand(flight_safety_system::transport::fss_message_asset_command *msg)
@@ -79,29 +78,32 @@ fss_client::handleSMMSettings(flight_safety_system::transport::fss_message_smm_s
 void
 fss_client::sendPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
 {
+    static constexpr uint64_t ts_1sec_interval = 1000;
+    static constexpr uint16_t squawk_vfr = 1200;
     static uint64_t position_last_sent = 0;
+    static constexpr uint32_t valid_fields = 1 | 2 | 4 | 8 | 16 | 32;
+    static constexpr uint8_t aircraft_type = 14;
     uint64_t curr_ts = flight_safety_system::fss_current_timestamp();
-    bool res = curr_ts > (position_last_sent + 1000);
+    bool res = curr_ts > (position_last_sent + ts_1sec_interval);
     if (res)
     {
-        auto msg_pos = new flight_safety_system::transport::fss_message_position_report(lat, lng, alt, heading, hor_vel, ver_vel,
+        auto msg_pos = std::make_shared<flight_safety_system::transport::fss_message_position_report>(lat, lng, alt, heading, hor_vel, ver_vel,
             /* No ICAO Code assigned */
             0,
             /* Use our name as the callsign */
             this->getAssetName(),
             /* Sqawk VFR */
-            1200,
+            squawk_vfr,
             /* Time since last contact (0), we are annoncing now */
             0,
             /* Report valid for: coords, altitude, heading, velocity, callsign, squawk */
-            1 | 2 | 4 | 8 | 16 | 32,
+            valid_fields,
             /* Using GPS for altitude */
             1,
             /* Type is UAV */
-            14,
+            aircraft_type,
             curr_ts);
         this->sendMsgAll(msg_pos);
-        delete msg_pos;
         position_last_sent = curr_ts;
     }
 }
@@ -109,17 +111,15 @@ fss_client::sendPosition(double lat, double lng, int16_t alt, uint16_t heading, 
 void
 fss_client::reachedPoint(int point, int total_points)
 {
-    auto msg_search = new flight_safety_system::transport::fss_message_search_status(0, point, total_points);
+    auto msg_search = std::make_shared<flight_safety_system::transport::fss_message_search_status>(0, point, total_points);
     this->sendMsgAll(msg_search);
-    delete msg_search;
 }
 
 void
 fss_client::sendBatteryStatus(int8_t remaining, int32_t consumed)
 {
-    auto msg_status = new flight_safety_system::transport::fss_message_system_status(remaining, consumed);
+    auto msg_status = std::make_shared<flight_safety_system::transport::fss_message_system_status>(remaining, consumed);
     this->sendMsgAll (msg_status);
-    delete msg_status;
 }
 
 void
@@ -154,7 +154,7 @@ fss_client::report_smm_settings(SMMSettings settings)
 {
     if (this->smm_settings_cb != nullptr)
     {
-        this->smm_settings_cb (settings);
+        this->smm_settings_cb (std::move(settings));
     }
 }
 
@@ -163,6 +163,6 @@ fss_client::report_position_data(PositionData pd)
 {
     if (this->position_data_cb != nullptr)
     {
-        this->position_data_cb (pd);
+        this->position_data_cb (std::move(pd));
     }
 }

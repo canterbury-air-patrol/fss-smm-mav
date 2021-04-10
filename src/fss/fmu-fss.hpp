@@ -2,22 +2,22 @@
 #include "fmu-fss-types.hpp"
 #include "../fmu-types.hpp"
 #include <bits/stdint-uintn.h>
+#include <memory>
 #include <string>
 
-class fss_client;
+#include "internal.hpp"
 
 class FSS {
 private:
-    fss_client *client{nullptr};
+    std::unique_ptr<fss_client> client{nullptr};
     uint16_t assigned_altitude{0};
     Point goto_point{};
 public:
-    FSS(const char *config_file);
-    ~FSS();
-    std::string getAssetName();
-    Point getGoto();
+    explicit FSS(const char *config_file);
+    auto getAssetName() -> std::string;
+    auto getGoto() -> Point;
     void setGoto(Point);
-    uint16_t getAltitude();
+    auto getAltitude() -> uint16_t;
     void reportPosition(PositionData pd);
     void registerCommandCB(notify_fss_command_cb cb);
     void registerCommsStatusCB(notify_fss_comms_cb cb);

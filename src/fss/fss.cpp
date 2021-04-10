@@ -1,6 +1,7 @@
 #include "fmu-fss-types.hpp"
 #include "fmu-fss.hpp"
 #include "internal.hpp"
+#include <memory>
 
 std::string FSS::getAssetName()
 {
@@ -101,18 +102,9 @@ FSS::reconnectAll()
 
 FSS::FSS(const char *config_file)
 {
-    this->client = new fss_client(config_file);
+    this->client = std::unique_ptr<fss_client>(new fss_client(config_file));
     if (this->client != nullptr)
     {
         this->client->registerGotoUpdateCB(goto_updated, this);
-    }
-}
-
-FSS::~FSS()
-{
-    if (this->client != nullptr)
-    {
-        delete this->client;
-        this->client = nullptr;
     }
 }

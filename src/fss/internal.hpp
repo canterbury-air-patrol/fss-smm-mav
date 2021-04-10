@@ -1,10 +1,11 @@
+#pragma once
 #include <fss-client.hpp>
 
 #include "../fmu-types.hpp"
 #include "../smm/smm-types.hpp"
 #include "fmu-fss-types.hpp"
 
-typedef void (*notify_goto_update_cb)(void *, Point);
+using notify_goto_update_cb = void (*)(void *, Point);
 
 class fss_client : public flight_safety_system::client::fss_client {
 private:
@@ -19,6 +20,7 @@ private:
     void report_comms_status(FSSCommsStatus);
     void report_smm_settings(SMMSettings);
     void report_position_data(PositionData);
+    flight_safety_system::transport::fss_message_asset_command last_command{flight_safety_system::transport::asset_command_unknown, 0, 0};
 protected:
     virtual void connectionStatusChange(flight_safety_system::client::connection_status status);
 public:
