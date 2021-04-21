@@ -626,7 +626,7 @@ mav_connection::disconnect_from_mav()
     }
 }
 
-mav_connection::mav_connection(std::string t_addr, uint16_t t_port) : addr(std::move(t_addr)), port(std::move(t_port))
+mav_connection::mav_connection(std::string t_addr, uint16_t t_port) : addr(std::move(t_addr)), port(t_port)
 {
     this->connect_to_mav();
 }
