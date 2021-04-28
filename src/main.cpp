@@ -79,11 +79,17 @@ std::shared_ptr<known_aircraft> aircraft = nullptr;
 static void
 fss_other_traffic_cb (const PositionData &pd)
 {
+    auto pd_modified = PositionData(pd);
     if (aircraft != nullptr)
     {
-        if (aircraft->newPositionReport(pd))
+        if (aircraft->newPositionReport(pd_modified))
         {
-            enqueue_event(std::make_shared<event>(event_other_aircraft_report, pd));
+            // Update the ICAO if we didn't get it in the original report
+            if (pd_modified.getICAOAddress() == 0)
+            {
+                pd_modified.setICAOAddress(aircraft->getAircraftICAOAddress(pd_modified.getCallSign()));
+            }
+            enqueue_event(std::make_shared<event>(event_other_aircraft_report, pd_modified));
         }
     }
 }

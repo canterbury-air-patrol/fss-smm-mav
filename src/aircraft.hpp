@@ -1,6 +1,7 @@
 #include <memory>
 #include <mutex>
 #include <map>
+#include <iostream>
 #include "fmu-types.hpp"
 
 
@@ -41,6 +42,7 @@ class known_aircraft {
             {
                 t_icao_address = ++this->lastAllocatedICAO;
             }
+            std::cout << "Aircraft: Creating new aircraft with callsign " << t_call_sign << " ICAO: " << t_icao_address << std::endl;
             auto ad = std::make_shared<aircraft_details>(t_icao_address);
             this->aircraft.insert(std::pair<std::string, std::shared_ptr<aircraft_details>>(t_call_sign, ad));
             return ad;
@@ -53,9 +55,13 @@ class known_aircraft {
             auto ad = this->findAircraft(pd.getCallSign(), pd.getICAOAddress());
             if (ad->acceptableUpdate(pd.getTimeStamp()))
             {
-                pd.setICAOAddress(ad->getICAOAddress());
                 return true;
             }
             return false;
+        }
+        auto getAircraftICAOAddress(const std::string &t_call_sign) -> uint32_t
+        {
+            auto ad = this->findAircraft(t_call_sign, 0);
+            return ad->getICAOAddress();
         }
 };

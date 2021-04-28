@@ -1,4 +1,5 @@
 #include <cstring>
+#include <iostream>
 
 #include "smm.hpp"
 #include <smm-asset.h>
@@ -44,7 +45,9 @@ SMM::connect()
     if (smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
     {
         /* Oh dear */
+        std::cout << "SMM: Connection failed (" << smm_asset_connection_get_state(this->conn) << ")" << std::endl;
         this->disconnect();
+        return;
     }
 
     /* Find our asset */
@@ -60,11 +63,14 @@ SMM::connect()
         }
         if (this->asset == nullptr)
         {
+            std::cout << "SMM: Failed to find this asset" << std::endl;
             this->disconnect();
+            return;
         }
     }
     else
     {
+        std::cout << "SMM: Failed to get assets" << std::endl;
         this->disconnect();
     }
 }
@@ -72,11 +78,12 @@ SMM::connect()
 void
 SMM::connect(const std::string &t_host, const std::string &t_user, const std::string &t_pass, const std::string &t_asset_name)
 {
-    if (this->conn == nullptr)
+    if (this->conn != nullptr)
     {
         /* If the details have changed, or the connection has failed, disconnect */
         if (this->smm_host != t_host || this->smm_user != t_user || this->smm_pass != t_pass || this->asset_name != t_asset_name || smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
         {
+            std::cout << "SMM: Details have changed" << std::endl;
             this->disconnect();
         }
     }
@@ -88,6 +95,7 @@ SMM::connect(const std::string &t_host, const std::string &t_user, const std::st
         this->smm_pass = t_pass;
         this->asset_name = t_asset_name;
 
+        std::cout << "SMM: Connecting (" << this->smm_host << "," << this->smm_user << "," << this->asset_name << ")" << std::endl;
         this->connect();
     }
 }
