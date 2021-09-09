@@ -16,7 +16,10 @@
 #include "event.hpp"
 #include "aircraft.hpp"
 
-std::string asset_name{""};
+constexpr int lowbat_threshold = 20;
+constexpr int reconnect_interval = 10;
+
+std::string asset_name;
 std::queue<std::shared_ptr<event>> event_queue;
 std::mutex main_lock;
 std::condition_variable main_cv;
@@ -99,7 +102,7 @@ fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &ma
 {
     while (running)
     {
-        sleep (10);
+        sleep (reconnect_interval);
         fss->reconnectAll();
         mav->attemptReconnect();
     }
@@ -121,7 +124,7 @@ main(int argc, char *argv[]) -> int
     aircraft = std::make_shared<known_aircraft>();
 
     auto fss = std::make_shared<FSS>(argv[1]);
-    auto mav = std::make_shared<MAV>(argv[2], atoi(argv[3]));
+    auto mav = std::make_shared<MAV>(argv[2], std::stoi(argv[3]));
     auto smm = std::make_shared<SMM>(mav);
 
     /* Run the reconnector thread */
@@ -179,7 +182,7 @@ main(int argc, char *argv[]) -> int
                     break;
                 case event_battery_status:
                     {
-                        if (e->getBatteryData().getRemaining() < 20)
+                        if (e->getBatteryData().getRemaining() < lowbat_threshold)
                         {
                             /* Time to go home */
                             state_machine->setLowBattery();

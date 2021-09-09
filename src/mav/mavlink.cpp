@@ -15,17 +15,17 @@
 
 #include <ardupilotmega/mavlink.h>
 
-#define BUFFER_LENGTH 2048
+constexpr int BUFFER_LEN = 2048;
 
-#define SYS_ID 200
-#define COMP_ID 1
+constexpr uint8_t SYS_ID = 200;
+constexpr uint8_t COMP_ID = 1;
 
-#define TARGET_SYS_ID 1
+constexpr uint8_t TARGET_SYS_ID = 1;
 
 /* Convert double/float into int32_t */
-#define LAT_LNG_COV 0.0000001
+constexpr double LAT_LNG_COV = 0.0000001;
 /* Convert ft into mm */
-#define ALT_COV 304.8
+constexpr double ALT_COV = 304.8;
 
 void
 mav_connection::sendHeartBeat()
@@ -218,6 +218,8 @@ mav_connection::commandTerminate()
 void
 mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
 {
+    constexpr int acceptable_radius = 5;
+    constexpr int goto_alt = 50;
     mavlink_message_t msg;
     if (this->goto_active)
     {
@@ -241,12 +243,12 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                     0, /* This waypoint is the current target */
                     1, /* Auto continue */
                     0, /* Hold time: 0s */
-                    5, /* Accept radius: 5m */
+                    acceptable_radius, /* Accept radius: m */
                     0, /* Pass radius: 0m */
                     NAN, /* Yaw: NaN for dont care */
-                    this->goto_position.getLatitude() / 0.0000001, /* Latitude */
-                    this->goto_position.getLongitude() / 0.0000001, /* Longitude */
-                    50,  /* Altitude (m) */
+                    this->goto_position.getLatitude() / LAT_LNG_COV, /* Latitude */
+                    this->goto_position.getLongitude() / LAT_LNG_COV, /* Longitude */
+                    goto_alt,  /* Altitude (m) */
                     mission_type);
         }
     }
@@ -279,11 +281,11 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                         0, /* This waypoint is the current target */
                         1, /* Auto continue */
                         0, /* Hold time: 0s */
-                        5, /* Accept radius: 5m */
+                        acceptable_radius, /* Accept radius: m */
                         0, /* Pass radius: 0m */
                         NAN, /* Yaw: NaN for dont care */
-                        p.getLatitude() / 0.0000001, /* Latitude */
-                        p.getLongitude() / 0.0000001, /* Longitude */
+                        p.getLatitude() / LAT_LNG_COV, /* Latitude */
+                        p.getLongitude() / LAT_LNG_COV, /* Longitude */
                         this->search->getAltitude(),  /* Altitude (m) */
                         mission_type);
         }
@@ -370,10 +372,12 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
 
     if (!sys->isSetup())
     {
+        constexpr int position_rate = 200000;
+        constexpr int battery_rate = 1000000;
         /* Request current position at a rate of 5 per second */
-        this->requestStream(msg->sysid, msg->compid, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 200000);
+        this->requestStream(msg->sysid, msg->compid, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, position_rate);
         /* Request battery status every 1 second */
-        this->requestStream(msg->sysid, msg->compid, MAVLINK_MSG_ID_BATTERY_STATUS, 1000000);
+        this->requestStream(msg->sysid, msg->compid, MAVLINK_MSG_ID_BATTERY_STATUS, battery_rate);
         sys->setupComplete();
     }
 
@@ -392,8 +396,8 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
                 int32_t lat = mavlink_msg_global_position_int_get_lat(msg);
                 int32_t lng = mavlink_msg_global_position_int_get_lon(msg);
                 int32_t alt = mavlink_msg_global_position_int_get_alt(msg);
-                double latd = ((double)lat * LAT_LNG_COV);
-                double lngd = ((double)lng * LAT_LNG_COV);
+                double latd = (static_cast<double>(lat) * LAT_LNG_COV);
+                double lngd = (static_cast<double>(lng) * LAT_LNG_COV);
                 uint16_t heading = mavlink_msg_global_position_int_get_hdg(msg);
                 int16_t vx = mavlink_msg_global_position_int_get_vx(msg);
                 int16_t vy = mavlink_msg_global_position_int_get_vy(msg);
@@ -491,7 +495,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
         case MAVLINK_MSG_ID_STATUSTEXT:
         {
             std::cout << "Status: ";
-            char text_buf[BUFFER_LENGTH];
+            char text_buf[BUFFER_LEN];
             mavlink_msg_statustext_get_text(msg, text_buf);
             std::cout << text_buf << std::endl;
         }    break;
@@ -501,7 +505,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
 }
 
 auto
-convert_str_to_sa(std::string addr, uint16_t port, struct sockaddr_storage *sa) -> bool
+convert_str_to_sa(const std::string addr, uint16_t port, struct sockaddr_storage *sa) -> bool
 {
     int family = AF_UNSPEC;
     /* Try converting an IP(v4) address first */
@@ -566,7 +570,7 @@ mav_connection::processMessages()
 {
     while (this->fd != -1)
     {
-        char buf[BUFFER_LENGTH];
+        char buf[BUFFER_LEN];
         mavlink_message_t msg;
         mavlink_status_t status;
         ssize_t received = recv(this->fd, buf, sizeof(buf), 0);
@@ -651,7 +655,7 @@ auto
 mav_connection::sendMavLinkMsg(mavlink_message_t *msg) -> bool
 {
     this->send_lock.lock();
-    uint8_t buf[BUFFER_LENGTH];
+    uint8_t buf[BUFFER_LEN];
     size_t to_send = mavlink_msg_to_send_buffer(buf, msg);
     size_t sent = 0;
     while (sent < to_send)
@@ -680,6 +684,7 @@ current_timestamp() -> uint64_t
 void
 mav_connection::attemptReconnect()
 {
+    constexpr int msecs_in_sec = 1000;
     if (this->fd == -1)
     {
         uint64_t ts = current_timestamp();
@@ -688,22 +693,22 @@ mav_connection::attemptReconnect()
         switch (this->retry_count)
         {
             case 0:
-                try_now = (elapsed_time > 1000);
+                try_now = (elapsed_time > msecs_in_sec);
                 break;
             case 1:
-                try_now = (elapsed_time > 2000);
+                try_now = (elapsed_time > 2 * msecs_in_sec);
                 break;
             case 2:
-                try_now = (elapsed_time > 4000);
+                try_now = (elapsed_time > 4 * msecs_in_sec);
                 break;
             case 3:
-                try_now = (elapsed_time > 8000);
+                try_now = (elapsed_time > 8 * msecs_in_sec);
                 break;
             case 4:
-                try_now = (elapsed_time > 15000);
+                try_now = (elapsed_time > 15 * msecs_in_sec);
                 break;
             default:
-                try_now = (elapsed_time > 30000);
+                try_now = (elapsed_time > 30 * msecs_in_sec);
                 break;
         }
         if (try_now)
@@ -713,7 +718,6 @@ mav_connection::attemptReconnect()
             this->connect_to_mav();
         }
     }
-
 }
 
 

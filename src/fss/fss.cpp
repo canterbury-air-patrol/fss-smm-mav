@@ -1,6 +1,7 @@
 #include "fmu-fss-types.hpp"
 #include "fmu-fss.hpp"
 #include "internal.hpp"
+#include <cstdint>
 #include <memory>
 
 
@@ -68,7 +69,7 @@ void FSS::reportPosition(PositionData t_pd)
     if (this->client != nullptr)
     {
         Point p = t_pd.getP();
-        this->client->sendPosition(p.getLatitude(), p.getLongitude(), t_pd.getAltitude(), t_pd.getHeading(), t_pd.getVelocityHorizontal(), t_pd.getVelocityVertical());
+        this->client->sendPosition(p.getLatitude(), p.getLongitude(), static_cast<uint16_t>(t_pd.getAltitude()), t_pd.getHeading(), t_pd.getVelocityHorizontal(), t_pd.getVelocityVertical());
     }
 }
 
@@ -93,7 +94,7 @@ goto_updated (void *priv, Point p)
 {
     if (priv != nullptr)
     {
-        FSS *fss = (FSS *)priv;
+        auto fss = static_cast<FSS *>(priv);
         fss->setGoto(p);
     }
 }

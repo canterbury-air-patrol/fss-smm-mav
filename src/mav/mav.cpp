@@ -61,10 +61,11 @@ void MAV::setAltitude(uint16_t alt)
 
 void MAV::sendADSB(PositionData pd)
 {
-    auto callsign = (char *)malloc(9);
-    strncpy(callsign, pd.getCallSign().c_str(), 8);
-    callsign[8] = '\0';
-    this->connection->sendADSB(pd.getICAOAddress(), pd.getP().getLatitude(), pd.getP().getLongitude(), pd.getAltitude(), pd.getAltitudeType(), pd.getHeading(), pd.getVelocityHorizontal(), pd.getVelocityVertical(), callsign, pd.getEmitterType(), 0, pd.getFlags(), pd.getSquawk());
+    constexpr int callsign_len = 8;
+    auto callsign = (char *)malloc(callsign_len + 1);
+    strncpy(callsign, pd.getCallSign().c_str(), callsign_len);
+    callsign[callsign_len] = '\0';
+    this->connection->sendADSB(pd.getICAOAddress(), pd.getP().getLatitude(), pd.getP().getLongitude(), static_cast<uint16_t>(pd.getAltitude()), pd.getAltitudeType(), pd.getHeading(), pd.getVelocityHorizontal(), pd.getVelocityVertical(), callsign, pd.getEmitterType(), 0, pd.getFlags(), pd.getSquawk());
     free(callsign);
 }
 

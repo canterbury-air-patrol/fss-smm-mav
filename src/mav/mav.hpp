@@ -26,6 +26,10 @@ private:
     uint16_t target_altitude{0};
 public:
     MAV(std::string t_addr, uint16_t t_port);
+    MAV(MAV&) = delete;
+    MAV(MAV&&) = delete;
+    auto operator=(MAV&) -> MAV& = delete;
+    auto operator=(MAV&&) -> MAV& = delete;
     ~MAV() = default;
     auto getFlightMode() -> flight_mode { return this->mode; };
     auto getArmed() -> bool { return this->armed; };

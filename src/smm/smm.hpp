@@ -36,6 +36,10 @@ private:
     void disconnect();
 public:
     explicit SMM(std::shared_ptr<MAV> t_mav);
+    SMM(SMM&) = delete;
+    SMM(SMM&&) = delete;
+    auto operator=(SMM&) -> SMM& = delete;
+    auto operator=(SMM&&) -> SMM& = delete;
     ~SMM();
     void connect(const std::string &host, const std::string &user, const std::string &pass, const std::string &asset_name);
     void search(Point current_pos);

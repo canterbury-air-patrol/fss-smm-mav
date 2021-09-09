@@ -20,7 +20,7 @@ private:
     void report_comms_status(FSSCommsStatus);
     void report_smm_settings(SMMSettings);
     void report_position_data(PositionData);
-    flight_safety_system::transport::fss_message_asset_command last_command{flight_safety_system::transport::asset_command_unknown, 0, 0};
+    std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> last_command{};
 protected:
     void connectionStatusChange(flight_safety_system::client::connection_status status) override;
 public:

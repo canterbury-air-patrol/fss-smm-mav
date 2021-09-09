@@ -30,6 +30,10 @@ private:
 public:
     SMMSearch() = default;
     explicit SMMSearch(smm_search);
+    SMMSearch(SMMSearch&) = delete;
+    SMMSearch(SMMSearch&&) = delete;
+    auto operator=(SMMSearch&) -> SMMSearch& = delete;
+    auto operator=(SMMSearch&&) -> SMMSearch& = delete;
     ~SMMSearch();
     void addPoint(Point p) { this->points.push_back(p); };
     auto getCurrentPointIdx() -> int { return this->current_point; };

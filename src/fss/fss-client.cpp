@@ -8,11 +8,11 @@ fss_client::handleCommand(const std::shared_ptr<flight_safety_system::transport:
     /* Don't execute commands older than the last one we handled
        This can happen when there are connections to multiple servers
        and the client that set the command didn't send it to all of them */
-    if(msg->getTimeStamp() < last_command.getTimeStamp())
+    if(msg->getTimeStamp() < last_command->getTimeStamp())
     {
         return;
     }
-    last_command = *msg;
+    last_command = msg;
     /* Convert Each Command into a MavLink Command */
     switch(msg->getCommand())
     {
@@ -150,7 +150,7 @@ fss_client::report_goto_update(Point p)
 }
 
 void
-fss_client::report_smm_settings(SMMSettings settings)
+fss_client::report_smm_settings(const SMMSettings settings)
 {
     if (this->smm_settings_cb != nullptr)
     {
@@ -159,7 +159,7 @@ fss_client::report_smm_settings(SMMSettings settings)
 }
 
 void
-fss_client::report_position_data(PositionData pd)
+fss_client::report_position_data(const PositionData pd)
 {
     if (this->position_data_cb != nullptr)
     {
