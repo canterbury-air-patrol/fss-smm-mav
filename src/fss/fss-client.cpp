@@ -8,7 +8,7 @@ fss_client::handleCommand(const std::shared_ptr<flight_safety_system::transport:
     /* Don't execute commands older than the last one we handled
        This can happen when there are connections to multiple servers
        and the client that set the command didn't send it to all of them */
-    if(msg->getTimeStamp() < last_command->getTimeStamp())
+    if(last_command != nullptr && msg->getTimeStamp() < last_command->getTimeStamp())
     {
         return;
     }
