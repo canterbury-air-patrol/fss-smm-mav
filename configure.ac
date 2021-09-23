@@ -1,6 +1,6 @@
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ([2.69])
-AC_INIT([cap-fmu], [0.6.1], [sjp@canterburyairpatrol.org])
+AC_INIT([cap-fmu], [0.7.0], [sjp@canterburyairpatrol.org])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 
 m4_include([m4/ax_cxx_compile_stdcxx.m4])
@@ -22,6 +22,7 @@ PKG_INSTALLDIR
 
 # Check for required pkg-config
 PKG_CHECK_MODULES([FSS_CLIENT], [fss-client])
+PKG_CHECK_MODULES([FSS_CLIENT_SSL], [fss-client-ssl])
 PKG_CHECK_MODULES([FSS_TRANSPORT], [fss-transport])
 PKG_CHECK_MODULES([SMM_ASSET], [smm-asset])
 

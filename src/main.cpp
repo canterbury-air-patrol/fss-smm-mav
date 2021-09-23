@@ -111,10 +111,20 @@ fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &ma
 auto
 main(int argc, char *argv[]) -> int
 {
-    if (argc < 4)
+    if (argc < 4 || argc > 5)
     {
-        std::cout << "Usage: " << argv[0] << " client.json addr port" << std::endl;
+        std::cout << "Usage: " << argv[0] << " [--ssl] client.json addr port" << std::endl;
         return -1;
+    }
+    int arg_offset = 1;
+    bool ssl = false;
+    if (argc > 4)
+    {
+        if (strcmp (argv[arg_offset], "--ssl") == 0)
+        {
+            ssl = true;
+            arg_offset++;
+        }
     }
     /* Watch out for sigint */
     signal (SIGINT, sigIntHandler);
@@ -123,8 +133,8 @@ main(int argc, char *argv[]) -> int
 
     aircraft = std::make_shared<known_aircraft>();
 
-    auto fss = std::make_shared<FSS>(argv[1]);
-    auto mav = std::make_shared<MAV>(argv[2], std::stoi(argv[3]));
+    auto fss = std::make_shared<FSS>(ssl, argv[arg_offset++]);
+    auto mav = std::make_shared<MAV>(argv[arg_offset], std::stoi(argv[arg_offset+1]));
     auto smm = std::make_shared<SMM>(mav);
 
     /* Run the reconnector thread */
