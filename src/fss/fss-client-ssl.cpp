@@ -45,17 +45,17 @@ fss_client_ssl::handleCommand(const std::shared_ptr<flight_safety_system::transp
 }
 
 void
-fss_client_ssl::connectionStatusChange(flight_safety_system::client::connection_status status)
+fss_client_ssl::connectionStatusChange(flight_safety_system::client_ssl::connection_status status)
 {
     switch (status)
     {
-        case flight_safety_system::client::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER:
-        case flight_safety_system::client::CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE:
+        case flight_safety_system::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_1_SERVER:
+        case flight_safety_system::client_ssl::CLIENT_CONNECTION_STATUS_CONNECTED_2_OR_MORE:
             /* No Need for RTL in these cases */
             this->report_comms_status(fss_comms_okay);
             break;
-        case flight_safety_system::client::CLIENT_CONNECTION_STATUS_DISCONNECTED:
-        case flight_safety_system::client::CLIENT_CONNECTION_STATUS_UNKNOWN:
+        case flight_safety_system::client_ssl::CLIENT_CONNECTION_STATUS_DISCONNECTED:
+        case flight_safety_system::client_ssl::CLIENT_CONNECTION_STATUS_UNKNOWN:
             this->report_comms_status(fss_comms_failure);
             break;
     }

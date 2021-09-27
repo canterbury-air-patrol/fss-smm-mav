@@ -22,9 +22,13 @@ private:
     void report_position_data(PositionData);
     std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> last_command{};
 protected:
-    void connectionStatusChange(flight_safety_system::client::connection_status status) override;
+    void connectionStatusChange(flight_safety_system::client_ssl::connection_status status) override;
 public:
     explicit fss_client_ssl(const char *t_config_file) : flight_safety_system::client_ssl::fss_client(t_config_file) {};
+    fss_client_ssl(fss_client_ssl&) = delete;
+    fss_client_ssl(fss_client_ssl&&) = delete;
+    auto operator=(fss_client_ssl&) -> fss_client_ssl& = delete;
+    auto operator=(fss_client_ssl&&) -> fss_client_ssl& = delete;
     void handleCommand(const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg) override;
     void handlePositionReport(const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg) override;
     void handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg) override;
