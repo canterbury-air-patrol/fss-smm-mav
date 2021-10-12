@@ -29,11 +29,17 @@ You will need [MAVProxy](https://ardupilot.org/mavproxy/) running and connected 
 
 You will need at least one [Flight Safety System](https://github.com/canterbury-air-patrol/flight-safety-system/) server running.
 
+You will need a certificate generated from FSS that is signed by the CA, and the ca.public.pem file that your servers are using. The client certificate needs to match the configured 'name' exactly.
 
 Create a client.json file that refers to your server(s):
 ```
 {
         "name": "test-1",
+        "ssl": {
+                "ca_public_key": "ca.public.pem",
+                "client_private_key": "test-1.private.pem",
+                "client_public_key": "test-1.public.pem"
+        },
         "servers": [
                 {
                         "address": "localhost",
