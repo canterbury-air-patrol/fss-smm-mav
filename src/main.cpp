@@ -106,6 +106,8 @@ fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &ma
         fss->reconnectAll();
         mav->attemptReconnect();
     }
+    /* nudge the main loop, in case it hasn't got any events */
+    enqueue_event(std::make_shared<event>(event_nudge));
 }
 
 auto
@@ -201,6 +203,8 @@ main(int argc, char *argv[]) -> int
                             mav->sendADSB(pd);
                         }
                     }
+                    break;
+                case event_nudge:
                     break;
                 case event_unknown:
                     {

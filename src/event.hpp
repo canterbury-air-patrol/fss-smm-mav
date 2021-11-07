@@ -11,6 +11,7 @@ enum event_type {
     event_reached,
     event_battery_status,
     event_other_aircraft_report,
+    event_nudge,
 };
 
 class event {
