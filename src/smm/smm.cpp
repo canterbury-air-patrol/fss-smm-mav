@@ -134,6 +134,7 @@ void SMM::search(Point current_pos)
         return;
     }
     std::lock_guard<std::mutex> lk(this->search_lock);
+    int retries = 0;
     while (this->current_search == nullptr)
     {
         auto new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
@@ -151,6 +152,13 @@ void SMM::search(Point current_pos)
         else
         {
             smm_search_destroy (new_search);
+        }
+        retries++;
+        if (retries >= 3)
+        {
+            /* Failed to start a search 3 times, back-off for a while */
+            this->mav->setMode(flight_mode_rtl);
+            return;
         }
     }
     /* Load the search into AP */
