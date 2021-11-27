@@ -70,7 +70,7 @@ class mav_connection {
         void connect_to_mav();
         void disconnect_from_mav();
         void report_position(double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver);
-        void report_battery_status(int8_t, int32_t);
+        void report_battery_status(int8_t, int32_t, double);
         void report_reached(int);
         void send_waypoint(uint16_t, uint8_t);
         void mission_ack(bool);

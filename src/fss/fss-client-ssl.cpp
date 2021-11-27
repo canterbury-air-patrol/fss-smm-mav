@@ -116,9 +116,9 @@ fss_client_ssl::reachedPoint(int point, int total_points)
 }
 
 void
-fss_client_ssl::sendBatteryStatus(int8_t remaining, int32_t consumed)
+fss_client_ssl::sendBatteryStatus(int8_t remaining, int32_t consumed, double voltage)
 {
-    auto msg_status = std::make_shared<flight_safety_system::transport::fss_message_system_status>(remaining, consumed);
+    auto msg_status = std::make_shared<flight_safety_system::transport::fss_message_system_status>(remaining, consumed, voltage);
     this->sendMsgAll (msg_status);
 }
 

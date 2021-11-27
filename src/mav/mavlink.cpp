@@ -414,6 +414,8 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
                 /* Battery Status */
                 int32_t current_consumed = mavlink_msg_battery_status_get_current_consumed(msg);
                 int8_t remaining = mavlink_msg_battery_status_get_battery_remaining(msg);
+                uint16_t voltages[10] = { 0 };
+                mavlink_msg_battery_status_get_voltages(msg, voltages);
                 if (current_consumed < 0)
                 {
                     current_consumed = 0;
@@ -422,7 +424,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
                 {
                     remaining = 0;
                 }
-                this->report_battery_status(remaining, current_consumed);
+                this->report_battery_status(remaining, current_consumed, (double) voltages[0] / 1000.0);
             } break;
         case MAVLINK_MSG_ID_MISSION_ITEM_REACHED:
             {
@@ -729,11 +731,11 @@ mav_connection::attemptReconnect()
 }
 
 
-void mav_connection::report_battery_status(int8_t remaining, int32_t consumed)
+void mav_connection::report_battery_status(int8_t remaining, int32_t consumed, double voltage)
 {
     if (this->battery_cb != nullptr)
     {
-        this->battery_cb(BatteryData(remaining, consumed));
+        this->battery_cb(BatteryData(remaining, consumed, voltage));
     }
 }
 

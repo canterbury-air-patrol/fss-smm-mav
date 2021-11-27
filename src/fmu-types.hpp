@@ -56,11 +56,13 @@ class BatteryData {
 private:
     int8_t remaining{-1};
     int32_t consumed{-1};
+    double voltage{0.0};
 public:
     BatteryData() = default;
-    BatteryData(int8_t t_remaining, int32_t t_consumed) : remaining(t_remaining), consumed(t_consumed) {};
+    BatteryData(int8_t t_remaining, int32_t t_consumed, double t_voltage) : remaining(t_remaining), consumed(t_consumed), voltage(t_voltage) {};
     auto getRemaining() -> int8_t { return this->remaining; };
     auto getConsumed() -> int32_t { return this->consumed; };
+    auto getVoltage() -> double { return this->voltage; };
 };
 
 #include "fss/fmu-fss-types.hpp"

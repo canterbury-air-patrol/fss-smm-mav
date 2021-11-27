@@ -86,7 +86,7 @@ void FSS::reportBatteryStatus(BatteryData bd)
 {
     if (this->ssl_client != nullptr)
     {
-        this->ssl_client->sendBatteryStatus(bd.getRemaining(), bd.getConsumed());
+        this->ssl_client->sendBatteryStatus(bd.getRemaining(), bd.getConsumed(), bd.getVoltage());
     }
 }
 

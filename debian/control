@@ -2,10 +2,10 @@ Source: cap-fmu
 Section: main
 Priority: optional
 Maintainer: Scott Parlane <sjp@canterburyairpatrol.org>
-Build-Depends: debhelper (>= 10), autotools-dev, pkg-config, libfss-client-ssl (>=0.8.0), libsmm-asset
+Build-Depends: debhelper (>= 10), autotools-dev, pkg-config, libfss-client-ssl (>=0.9.0), libsmm-asset
 Standards-Version: 4.1.3
 
 Package: cap-fmu
 Architecture: any
-Depends: libfss-client-ssl (>=0.8.0), libsmm-asset
+Depends: libfss-client-ssl (>=0.9.0), libsmm-asset
 Description: Canterbury Air Patrol Flight Management Unit
