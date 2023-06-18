@@ -468,6 +468,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
         case MAVLINK_MSG_ID_SYS_STATUS:
         case MAVLINK_MSG_ID_PARAM_VALUE:
         case MAVLINK_MSG_ID_TIMESYNC:
+        case MAVLINK_MSG_ID_SCALED_PRESSURE2:
         case MAVLINK_MSG_ID_HOME_POSITION:
         case MAVLINK_MSG_ID_COMMAND_LONG:
         case MAVLINK_MSG_ID_AIRSPEED_AUTOCAL:
@@ -501,6 +502,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
         case MAVLINK_MSG_ID_TERRAIN_REQUEST:
         case MAVLINK_MSG_ID_POWER_STATUS:
         case MAVLINK_MSG_ID_AUTOPILOT_VERSION:
+        case MAVLINK_MSG_ID_ESC_TELEMETRY_1_TO_4:
             break;
         case MAVLINK_MSG_ID_STATUSTEXT:
         {
@@ -510,7 +512,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
             std::cout << text_buf << std::endl;
         }    break;
         default:
-            std::cout << std::endl << "Received packet: SYS: " << msg->sysid << ", COMP: " << msg->compid << ", LEN: " << msg->len << ", MSG ID: " << msg->msgid << std::endl;
+            std::cout << std::endl << "Received packet: SYS: " << (short)msg->sysid << ", COMP: " << (short)msg->compid << ", LEN: " << (short)msg->len << ", MSG ID: " << msg->msgid << std::endl;
     }
 }
 
