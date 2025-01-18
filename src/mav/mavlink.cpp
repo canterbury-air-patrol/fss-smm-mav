@@ -103,7 +103,7 @@ mav_connection::commandGoto(Point p)
     this->commandRTL();
     this->goto_position = p;
     this->goto_active = true;
-    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, 3, MAV_MISSION_TYPE_MISSION);
+    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, 3, MAV_MISSION_TYPE_MISSION, 0);
     this->sendMavLinkMsg(&msg);
     this->search_loaded = false;
 }
@@ -260,8 +260,27 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
         }
         /* Find the point */
         auto points = this->search->getPoints();
-        if (seq == 0 || seq > points.size())
+        if (seq == 0 || seq == 1)
         {
+            /* Most versions of ArduPilot ignore the zeroth mission command, so we need to send the first one twice */
+            mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+                        seq, /* Which waypoint is this */
+                        MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
+                        MAV_CMD_NAV_TAKEOFF, /* Return home */
+                        (seq == 1 && this->search->getCurrentPointIdx() == 0), /* Are we at the beginning of the search */
+                        1, /* Auto continue: No */
+                        5, /* Pitch/climb angle (plane only) */
+                        0, /* Ignored */
+                        0, /* Ignored */
+                        0, /* Yaw angle */
+                        0, /* Latitude */
+                        0, /* Longitude */
+                        search->getAltitude(), /* Altitude */
+                        mission_type);
+        }
+        else if (seq > (points.size() + 1))
+        {
+            /* Make sure the mission defaults to ending with sending the asset home */
             mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
                         seq, /* Which waypoint is this */
                         MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
@@ -273,12 +292,13 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
         }
         else
         {
-            Point p = points[seq-1];
+            /* Load each point of the search, the first 2 mission items are setup, so the seq is offset */
+            Point p = points[seq-2];
             mavlink_msg_mission_item_int_pack (SYS_ID, COMP_ID, &msg, 0, 1,
                         seq, /* Which waypoint is this */
                         MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
                         MAV_CMD_NAV_WAYPOINT, /* Navigate to a point */
-                        0, /* This waypoint is the current target */
+                        (this->search->getCurrentPointIdx() == (seq-2)), /* Is this waypoint is the current target? */
                         1, /* Auto continue */
                         0, /* Hold time: 0s */
                         acceptable_radius, /* Accept radius: m */
@@ -334,12 +354,12 @@ mav_connection::loadSearch()
     /* Enter RTL while loading the search */
     this->commandRTL();
     /* Load the existing search into the FC, and jump to the current target point */
-    /* Tell the FC how many points there are */
+    /* Tell the FC how many points there are (+2 slots for setup, +1 for RTL) */
     this->goto_active = false;
     this->search_loaded = false;
     this->search_loading = true;
     mavlink_message_t msg;
-    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints().size() + 1, MAV_MISSION_TYPE_MISSION);
+    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints().size() + 2, MAV_MISSION_TYPE_MISSION, 0);
     this->sendMavLinkMsg(&msg);
 }
 
@@ -751,9 +771,9 @@ void mav_connection::report_position(double lat, double lng, double alt, uint16_
 
 void mav_connection::report_reached(int point)
 {
-    if (this->reached_cb != nullptr)
+    if (this->reached_cb != nullptr && point > 1)
     {
-        this->reached_cb(point);
+        this->reached_cb(point - 1);
     }
 }
 
