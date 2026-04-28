@@ -5,6 +5,8 @@
 #include <mutex>
 #include <memory>
 
+#include <secure-string.hpp>
+
 #include "../fmu-types.hpp"
 #include "../mav/mav.hpp"
 
@@ -23,8 +25,8 @@ private:
     std::shared_ptr<MAV> mav{nullptr};
     smm_connection conn{nullptr};
     std::string smm_host{};
-    std::string smm_user{};
-    std::string smm_pass{};
+    flight_safety_system::secure_string smm_user{};
+    flight_safety_system::secure_string smm_pass{};
     std::string asset_name{};
     std::mutex search_lock{};
     std::shared_ptr<SMMSearch> current_search{nullptr};
@@ -41,7 +43,7 @@ public:
     auto operator=(SMM&) -> SMM& = delete;
     auto operator=(SMM&&) -> SMM& = delete;
     ~SMM();
-    void connect(const std::string &host, const std::string &user, const std::string &pass, const std::string &asset_name);
+    void connect(const std::string &host, const flight_safety_system::secure_string &user, const flight_safety_system::secure_string &pass, const std::string &asset_name);
     void search(Point current_pos);
     void reportPosition(PositionData t_pd);
     void reachedPoint(int point);

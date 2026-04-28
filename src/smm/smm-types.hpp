@@ -2,6 +2,8 @@
 #include <string>
 #include <vector>
 
+#include <secure-string.hpp>
+
 #include "../fmu-types.hpp"
 
 extern "C" {
@@ -11,14 +13,14 @@ extern "C" {
 class SMMSettings {
 private:
     std::string url{};
-    std::string user{};
-    std::string pass{};
+    flight_safety_system::secure_string user{};
+    flight_safety_system::secure_string pass{};
 public:
     SMMSettings() = default;
-    SMMSettings(std::string t_url, std::string t_user, std::string t_pass) : url(std::move(t_url)), user(std::move(t_user)), pass(std::move(t_pass)) {};
+    SMMSettings(std::string t_url, flight_safety_system::secure_string t_user, flight_safety_system::secure_string t_pass) : url(std::move(t_url)), user(std::move(t_user)), pass(std::move(t_pass)) {};
     auto getURL() -> std::string { return this->url; };
-    auto getUsername() -> std::string { return this->user; };
-    auto getPassword() -> std::string { return this->pass; };
+    auto getUsername() -> const flight_safety_system::secure_string & { return this->user; };
+    auto getPassword() -> const flight_safety_system::secure_string & { return this->pass; };
 };
 
 class SMMSearch {
