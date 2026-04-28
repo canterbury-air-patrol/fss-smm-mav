@@ -41,7 +41,9 @@ SMM::disconnect()
 void
 SMM::connect()
 {
-    this->conn = smm_asset_connect (this->smm_host.c_str(), this->smm_user.c_str(), this->smm_pass.c_str());
+    std::string user_cstr(this->smm_user.data(), this->smm_user.size());
+    std::string pass_cstr(this->smm_pass.data(), this->smm_pass.size());
+    this->conn = smm_asset_connect (this->smm_host.c_str(), user_cstr.c_str(), pass_cstr.c_str());
 
     if (smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
     {
@@ -77,7 +79,7 @@ SMM::connect()
 }
 
 void
-SMM::connect(const std::string &t_host, const std::string &t_user, const std::string &t_pass, const std::string &t_asset_name)
+SMM::connect(const std::string &t_host, const flight_safety_system::secure_string &t_user, const flight_safety_system::secure_string &t_pass, const std::string &t_asset_name)
 {
     if (this->conn != nullptr)
     {
@@ -96,7 +98,7 @@ SMM::connect(const std::string &t_host, const std::string &t_user, const std::st
         this->smm_pass = t_pass;
         this->asset_name = t_asset_name;
 
-        std::cout << "SMM: Connecting (" << this->smm_host << "," << this->smm_user << "," << this->asset_name << ")" << std::endl;
+        std::cout << "SMM: Connecting (" << this->smm_host << "," << this->asset_name << ")" << std::endl;
         this->connect();
     }
 }
