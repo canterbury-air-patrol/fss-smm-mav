@@ -150,19 +150,19 @@ fss_client_ssl::report_goto_update(Point p)
 }
 
 void
-fss_client_ssl::report_smm_settings(const SMMSettings settings)
+fss_client_ssl::report_smm_settings(const SMMSettings &settings)
 {
     if (this->smm_settings_cb != nullptr)
     {
-        this->smm_settings_cb (std::move(settings));
+        this->smm_settings_cb (settings);
     }
 }
 
 void
-fss_client_ssl::report_position_data(const PositionData pd)
+fss_client_ssl::report_position_data(const PositionData &pd)
 {
     if (this->position_data_cb != nullptr)
     {
-        this->position_data_cb (std::move(pd));
+        this->position_data_cb (pd);
     }
 }
