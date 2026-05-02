@@ -3,6 +3,7 @@
 #include <thread>
 #include <mutex>
 #include <list>
+#include <atomic>
 
 #include "../fmu-types.hpp"
 #include "../smm/smm.hpp"
@@ -53,6 +54,7 @@ class mav_connection {
         uint16_t retry_count{0};
         std::mutex send_lock{};
         std::thread recv_thread{};
+        std::atomic<bool> broken{false};
         mav_systems systems{};
         Point last_position{};
         std::mutex position_lock{};
