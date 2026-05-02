@@ -1,5 +1,6 @@
 #include "internal.hpp"
 #include "mav.hpp"
+#include "util.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -11,7 +12,6 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
-#include <sys/time.h>
 #include <cerrno>
 
 #include <ardupilotmega/mavlink.h>
@@ -765,14 +765,6 @@ mav_connection::sendMavLinkMsg(mavlink_message_t *msg) -> bool
     return true;
 }
 
-static auto
-current_timestamp() -> uint64_t
-{
-    struct timeval tv = {};
-    gettimeofday(&tv, nullptr);
-    return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
-}
-
 void
 mav_connection::attemptReconnect()
 {
@@ -784,7 +776,7 @@ mav_connection::attemptReconnect()
     }
     if (this->fd == -1)
     {
-        uint64_t ts = current_timestamp();
+        uint64_t ts = current_timestamp_ms();
         bool try_now = false;
         {
             std::lock_guard<std::mutex> lk{this->state_lock};
