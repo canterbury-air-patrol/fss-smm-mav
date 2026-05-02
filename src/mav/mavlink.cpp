@@ -12,6 +12,7 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <cerrno>
 
 #include <ardupilotmega/mavlink.h>
 
@@ -615,8 +616,16 @@ mav_connection::processMessages()
                     this->processMavLinkMsg(&msg, &status);
                 }
             }
+            continue;
         }
+        if (received < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+        {
+            continue;
+        }
+        break;
     }
+    /* Recv thread cannot tear itself down — flag for the reconnector. */
+    this->broken = true;
 }
 
 static void
@@ -639,11 +648,17 @@ mav_connection::connect_to_mav()
     if (connect(this->fd, (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + this->addr).c_str());
+        close(this->fd);
         this->fd = -1;
         return;
     }
 
+    /* Wake recv() periodically so the thread can notice fd being torn down. */
+    struct timeval rcv_timeout = { .tv_sec = 1, .tv_usec = 0 };
+    setsockopt(this->fd, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout));
+
     this->retry_count = 0;
+    this->broken = false;
 
     this->recv_thread = std::thread(recv_mav_thread, this);
 }
@@ -717,6 +732,11 @@ void
 mav_connection::attemptReconnect()
 {
     constexpr int msecs_in_sec = 1000;
+    if (this->broken)
+    {
+        this->disconnect_from_mav();
+        this->broken = false;
+    }
     if (this->fd == -1)
     {
         uint64_t ts = current_timestamp();
