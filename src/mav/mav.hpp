@@ -1,7 +1,7 @@
 #pragma once
 #include "../fmu-types.hpp"
 #include "../smm/smm-types.hpp"
-#include <bits/stdint-uintn.h>
+#include <cstdint>
 #include <memory>
 
 #include <string>

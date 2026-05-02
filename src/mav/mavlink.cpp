@@ -1,7 +1,7 @@
 #include "internal.hpp"
 #include "mav.hpp"
 
-#include <bits/stdint-intn.h>
+#include <cstdint>
 #include <iostream>
 #include <mutex>
 #include <thread>
