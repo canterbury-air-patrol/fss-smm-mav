@@ -2,6 +2,7 @@
 #include "mav.hpp"
 #include "util.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <mutex>
@@ -33,6 +34,20 @@ mav_connection::sendHeartBeat()
     mavlink_message_t msg;
     mavlink_msg_heartbeat_pack(SYS_ID, COMP_ID, &msg, MAV_TYPE_GCS, MAV_AUTOPILOT_INVALID, 0, 0, MAV_STATE_ACTIVE);
     this->sendMavLinkMsg(&msg);
+}
+
+void
+mav_connection::heartbeat_loop()
+{
+    while (!this->stopping)
+    {
+        if (this->fd.load() != -1)
+        {
+            this->sendHeartBeat();
+        }
+        std::unique_lock<std::mutex> lk(this->heartbeat_mutex);
+        this->heartbeat_cv.wait_for(lk, std::chrono::seconds(1), [this]{ return this->stopping.load(); });
+    }
 }
 
 void
@@ -621,12 +636,13 @@ convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storag
 void
 mav_connection::processMessages()
 {
-    while (this->fd != -1)
+    int cur_fd;
+    while ((cur_fd = this->fd.load()) != -1)
     {
         char buf[BUFFER_LEN];
         mavlink_message_t msg;
         mavlink_status_t status;
-        ssize_t received = recv(this->fd, buf, sizeof(buf), 0);
+        ssize_t received = recv(cur_fd, buf, sizeof(buf), 0);
         if (received > 0)
         {
             for (ssize_t i = 0; i < received; i++)
@@ -663,19 +679,19 @@ mav_connection::connect_to_mav()
         return;
     }
 
-    this->fd = socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    this->fd.store(socket(remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP));
 
-    if (connect(this->fd, (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
+    if (connect(this->fd.load(), (struct sockaddr *)&remote, remote.ss_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) < 0)
     {
         perror(("Failed to connect to " + this->addr).c_str());
-        close(this->fd);
-        this->fd = -1;
+        close(this->fd.load());
+        this->fd.store(-1);
         return;
     }
 
     /* Wake recv() periodically so the thread can notice fd being torn down. */
     struct timeval rcv_timeout = { .tv_sec = 1, .tv_usec = 0 };
-    setsockopt(this->fd, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout));
+    setsockopt(this->fd.load(), SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout));
 
     {
         std::lock_guard<std::mutex> lk{this->state_lock};
@@ -689,10 +705,10 @@ mav_connection::connect_to_mav()
 void
 mav_connection::disconnect_from_mav()
 {
-    if (this->fd != -1)
+    if (this->fd.load() != -1)
     {
-        close(this->fd);
-        this->fd = -1;
+        close(this->fd.load());
+        this->fd.store(-1);
     }
     if(this->recv_thread.joinable())
     {
@@ -703,14 +719,21 @@ mav_connection::disconnect_from_mav()
 mav_connection::mav_connection(std::string t_addr, uint16_t t_port) : addr(std::move(t_addr)), port(t_port)
 {
     this->connect_to_mav();
+    this->heartbeat_thread = std::thread([this]{ this->heartbeat_loop(); });
 }
 
 mav_connection::~mav_connection()
 {
-    if (this->fd != -1)
+    this->stopping = true;
+    this->heartbeat_cv.notify_one();
+    if (this->heartbeat_thread.joinable())
     {
-        uint32_t orig_fd = this->fd;
-        this->fd = -1;
+        this->heartbeat_thread.join();
+    }
+    if (this->fd.load() != -1)
+    {
+        int orig_fd = this->fd.load();
+        this->fd.store(-1);
         shutdown (orig_fd, 2);
         close (orig_fd);
     }
@@ -730,7 +753,7 @@ mav_connection::sendMavLinkMsg(mavlink_message_t *msg) -> bool
     size_t sent = 0;
     while (sent < to_send)
     {
-        ssize_t transfered = send(this->fd, buf + sent, to_send - sent, 0);
+        ssize_t transfered = send(this->fd.load(), buf + sent, to_send - sent, 0);
         if (transfered < 0)
         {
             this->send_lock.unlock();
@@ -752,7 +775,7 @@ mav_connection::attemptReconnect()
         this->disconnect_from_mav();
         this->broken = false;
     }
-    if (this->fd == -1)
+    if (this->fd.load() == -1)
     {
         uint64_t ts = current_timestamp_ms();
         bool try_now = false;

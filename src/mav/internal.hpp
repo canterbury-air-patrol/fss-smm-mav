@@ -1,5 +1,6 @@
 #pragma once
 #include <ardupilotmega/mavlink.h>
+#include <condition_variable>
 #include <string>
 #include <thread>
 #include <mutex>
@@ -54,12 +55,16 @@ class mav_connection {
     private:
         std::string addr;
         uint16_t port;
-        int fd{-1};
+        std::atomic<int> fd{-1};
         uint64_t last_tried{0};
         uint16_t retry_count{0};
         std::mutex send_lock{};
         std::thread recv_thread{};
+        std::thread heartbeat_thread{};
         std::atomic<bool> broken{false};
+        std::atomic<bool> stopping{false};
+        std::mutex heartbeat_mutex{};
+        std::condition_variable heartbeat_cv{};
         mav_systems systems{};
         /* state_lock guards: last_position, search, search_loaded,
          * search_loading, goto_active, goto_position, retry_count, last_tried. */
@@ -84,12 +89,17 @@ class mav_connection {
         void send_waypoint(uint16_t, uint8_t);
         void mission_ack(bool);
         void setCurrentWP(uint16_t seq);
+        void sendHeartBeat();
+        void heartbeat_loop();
     public:
         mav_connection(std::string t_addr, uint16_t t_port);
         ~mav_connection();
+        mav_connection(mav_connection&) = delete;
+        mav_connection(mav_connection&&) = delete;
+        auto operator=(mav_connection&) -> mav_connection& = delete;
+        auto operator=(mav_connection&&) -> mav_connection& = delete;
         void attemptReconnect();
         void processMessages();
-        void sendHeartBeat();
         void commandRTL();
         void commandGoto(Point p);
         void commandHold();
