@@ -18,8 +18,8 @@ private:
     void report_command(FSSCommand cmd);
     void report_goto_update(Point);
     void report_comms_status(FSSCommsStatus);
-    void report_smm_settings(SMMSettings);
-    void report_position_data(PositionData);
+    void report_smm_settings(const SMMSettings &);
+    void report_position_data(const PositionData &);
     std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> last_command{};
 protected:
     void connectionStatusChange(flight_safety_system::client_ssl::connection_status status) override;
