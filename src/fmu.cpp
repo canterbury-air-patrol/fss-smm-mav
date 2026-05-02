@@ -58,7 +58,13 @@ FMUStateMachine::updateState()
 {
     FMUState new_state = fmu_state_failsafe;
 
-    if (this->low_battery)
+    /* terminate is the highest-priority command: it overrides low_battery and
+     * comms_failure so the ground station can always halt the aircraft. */
+    if (this->fss_command == fss_cmd_terminate)
+    {
+        new_state = fmu_state_terminate;
+    }
+    else if (this->low_battery)
     {
         new_state = fmu_state_low_battery;
     }
@@ -166,6 +172,6 @@ FMUStateMachine::setCommsFailure(bool failed)
     }
 }
 
-FMUStateMachine::FMUStateMachine(std::shared_ptr<MAV> t_mav, std::shared_ptr<SMM> t_smm, std::shared_ptr<FSS> t_fss) : mav(std::move(t_mav)), smm(std::move(t_smm)), fss(std::move(t_fss))
+FMUStateMachine::FMUStateMachine(std::shared_ptr<IMAV> t_mav, std::shared_ptr<ISMM> t_smm, std::shared_ptr<IFSS> t_fss) : mav(std::move(t_mav)), smm(std::move(t_smm)), fss(std::move(t_fss))
 {
 }

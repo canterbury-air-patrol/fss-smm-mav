@@ -31,7 +31,14 @@ AC_CHECK_LIB([pthread], [pthread_create], [
     [AC_MSG_ERROR([pthread is required for this program])])
 AC_SUBST(pthread_LIBS)
 
+# Check for optional Catch2 test framework
+PKG_CHECK_MODULES([CATCH2], [catch2-with-main],
+    [have_catch2=yes], [have_catch2=no])
+AM_CONDITIONAL([HAVE_CATCH2], [test "x$have_catch2" = "xyes"])
 
 # Output Makefile files.
 AC_CONFIG_FILES([Makefile src/Makefile])
+if test "x$have_catch2" = "xyes"; then
+  AC_CONFIG_FILES([tests/Makefile])
+fi
 AC_OUTPUT

@@ -7,20 +7,15 @@
 
 #include <secure-string.hpp>
 
-#include "../fmu-types.hpp"
+#include "ismm.hpp"
+#include "smm-types.hpp"
 #include "../mav/mav.hpp"
 
 extern "C" {
 #include <smm-asset.h>
 };
 
-enum SMMCommand {
-    smm_cmd_none,
-    smm_cmd_abandon_search,
-    smm_cmd_mission_complete,
-};
-
-class SMM {
+class SMM : public ISMM {
 private:
     std::shared_ptr<MAV> mav{nullptr};
     smm_connection conn{nullptr};
@@ -42,9 +37,9 @@ public:
     SMM(SMM&&) = delete;
     auto operator=(SMM&) -> SMM& = delete;
     auto operator=(SMM&&) -> SMM& = delete;
-    ~SMM();
+    ~SMM() override;
     void connect(const std::string &host, const flight_safety_system::secure_string &user, const flight_safety_system::secure_string &pass, const std::string &asset_name);
-    void search(Point current_pos);
+    void search(Point current_pos) override;
     void reportPosition(PositionData t_pd);
     void reachedPoint(int point);
     auto currentSearchPoints() -> int;

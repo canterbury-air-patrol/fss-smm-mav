@@ -1,11 +1,12 @@
 #pragma once
 #include <memory>
 #include <mutex>
-#include <condition_variable>
 
-#include "fss/fmu-fss.hpp"
-#include "smm/smm.hpp"
-#include "mav/mav.hpp"
+#include "mav/imav.hpp"
+#include "smm/ismm.hpp"
+#include "smm/smm-command.hpp"
+#include "fss/ifss.hpp"
+#include "fss/fmu-fss-types.hpp"
 
 enum FMUState {
     fmu_state_manual,
@@ -29,12 +30,12 @@ private:
     SMMCommand smm_command{smm_cmd_none};
     bool low_battery{false};
     bool fss_comms_lost{false};
-    std::shared_ptr<MAV> mav{nullptr};
-    std::shared_ptr<SMM> smm{nullptr};
-    std::shared_ptr<FSS> fss{nullptr};
+    std::shared_ptr<IMAV> mav{nullptr};
+    std::shared_ptr<ISMM> smm{nullptr};
+    std::shared_ptr<IFSS> fss{nullptr};
     std::mutex lock{};
 public:
-    FMUStateMachine(std::shared_ptr<MAV> t_mav, std::shared_ptr<SMM> t_smm, std::shared_ptr<FSS> t_fss);
+    FMUStateMachine(std::shared_ptr<IMAV> t_mav, std::shared_ptr<ISMM> t_smm, std::shared_ptr<IFSS> t_fss);
 
     void FSSNewCommand(FSSCommand cmd);
     void SMMNewCommand(SMMCommand cmd);

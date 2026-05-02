@@ -1,4 +1,5 @@
 #pragma once
+#include "imav.hpp"
 #include "../fmu-types.hpp"
 #include "../smm/smm-types.hpp"
 #include <cstdint>
@@ -6,18 +7,9 @@
 
 #include <string>
 
-enum flight_mode {
-    flight_mode_unknown,
-    flight_mode_manual,
-    flight_mode_search,
-    flight_mode_rtl,
-    flight_mode_goto,
-    flight_mode_hold,
-};
-
 class mav_connection;
 
-class MAV {
+class MAV : public IMAV {
 private:
     std::shared_ptr<mav_connection> connection;
     flight_mode mode{flight_mode_unknown};
@@ -30,16 +22,16 @@ public:
     MAV(MAV&&) = delete;
     auto operator=(MAV&) -> MAV& = delete;
     auto operator=(MAV&&) -> MAV& = delete;
-    ~MAV() = default;
+    ~MAV() override = default;
     auto getFlightMode() -> flight_mode { return this->mode; };
     auto getArmed() -> bool { return this->armed; };
     void attemptReconnect();
-    void setMode(flight_mode fm);
-    void disarm();
-    void terminate();
-    void gotoPosition(Point to);
-    void setAltitude(uint16_t alt);
-    auto getCurrentPosition() -> Point;
+    void setMode(flight_mode fm) override;
+    void disarm() override;
+    void terminate() override;
+    void gotoPosition(Point to) override;
+    void setAltitude(uint16_t alt) override;
+    auto getCurrentPosition() -> Point override;
     void loadSearch(const std::shared_ptr<SMMSearch> &);
     void sendADSB(PositionData pd);
     void registerPositionCB(notify_position_cb cb);

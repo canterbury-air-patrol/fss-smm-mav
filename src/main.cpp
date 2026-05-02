@@ -13,6 +13,9 @@
 #include <unistd.h>
 #include "fmu-types.hpp"
 #include "fmu.hpp"
+#include "mav/mav.hpp"
+#include "smm/smm.hpp"
+#include "fss/fmu-fss.hpp"
 #include "fss/fmu-fss-types.hpp"
 #include "smm/smm-types.hpp"
 #include "event.hpp"

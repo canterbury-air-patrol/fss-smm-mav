@@ -4,7 +4,8 @@
 
 #include <secure-string.hpp>
 
-#include "../fmu-types.hpp"
+#include "../fmu-core-types.hpp"
+#include "smm-command.hpp"
 
 extern "C" {
 #include <smm-asset.h>
