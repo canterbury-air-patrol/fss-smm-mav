@@ -9,7 +9,6 @@
 
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <cerrno>
@@ -580,64 +579,43 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
 }
 
 auto
-convert_str_to_sa(const std::string addr, uint16_t port, struct sockaddr_storage *sa) -> bool
+convert_str_to_sa(const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool
 {
-    int family = AF_UNSPEC;
-    /* Try converting an IP(v4) address first */
-    if (family == AF_UNSPEC)
+    struct addrinfo hints = {};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo *ai = nullptr;
+    if (getaddrinfo(addr.c_str(), nullptr, &hints, &ai) != 0)
+        return false;
+
+    if (ai->ai_addrlen > sizeof(struct sockaddr_storage))
     {
-        struct in_addr ia = {};
-        if (inet_pton(AF_INET, addr.c_str(), &ia) == 1)
-        {
-            family = AF_INET;
-            auto sa_in = (struct sockaddr_in *)sa;
-            memset(sa_in, 0, sizeof(struct sockaddr_in));
-            sa_in->sin_family = AF_INET;
-            sa_in->sin_addr = ia;
-        }
-    }
-    /* Try converting an IPv6 address */
-    if (family == AF_UNSPEC)
-    {
-        struct in6_addr ia = {};
-        if (inet_pton (AF_INET6, addr.c_str(), &ia) == 1)
-        {
-            family = AF_INET6;
-            auto sa_in = (struct sockaddr_in6 *)sa;
-            memset(sa_in, 0, sizeof(struct sockaddr_in6));
-            sa_in->sin6_family = AF_INET6;
-            sa_in->sin6_addr = ia;
-        }
-    }
-    /* Use host name lookup (probably DNS) to resolve the name */
-    if (family == AF_UNSPEC)
-    {
-        struct addrinfo *ai = nullptr;
-        
-        if (getaddrinfo(addr.c_str(), nullptr, nullptr, &ai) == 0)
-        {
-            memcpy (sa, ai->ai_addr, ai->ai_addrlen);
-            family = ai->ai_family;
-        }
-        
         freeaddrinfo(ai);
+        return false;
     }
+
+    memcpy(sa, ai->ai_addr, ai->ai_addrlen);
+    int family = ai->ai_family;
+    freeaddrinfo(ai);
 
     switch (family)
     {
         case AF_INET:
         {
             auto sa_in = (struct sockaddr_in *)sa;
-            sa_in->sin_port = ntohs (port);
+            sa_in->sin_port = htons(port);
         } break;
         case AF_INET6:
         {
             auto sa_in = (struct sockaddr_in6 *)sa;
-            sa_in->sin6_port = ntohs (port);
-        }
+            sa_in->sin6_port = htons(port);
+        } break;
+        default:
+            return false;
     }
-    
-    return family != AF_UNSPEC;
+
+    return true;
 }
 
 void
