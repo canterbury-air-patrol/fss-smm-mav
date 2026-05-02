@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "smm.hpp"
+#include "util.hpp"
 #include <smm-asset.h>
 
 SMM::SMM(std::shared_ptr<MAV> t_mav) : mav(std::move(t_mav))
@@ -100,22 +101,13 @@ SMM::connect(const std::string &t_host, const std::string &t_user, const std::st
     }
 }
 
-#include <sys/time.h>
-
-static auto
-current_ts() -> uint64_t
-{
-    struct timeval tv = {};
-    gettimeofday(&tv, nullptr);
-    return tv.tv_sec * 1000 + (tv.tv_usec / 1000);
-}
 
 void
 SMM::reportPosition(PositionData t_pd)
 {
     if (this->asset)
     {
-        uint64_t curr_ts = current_ts();
+        uint64_t curr_ts = current_timestamp_ms();
         if (this->position_report_last_ts + 1000 <= curr_ts)
         {
             Point p = t_pd.getP();
