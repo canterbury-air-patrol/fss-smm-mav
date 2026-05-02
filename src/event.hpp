@@ -1,3 +1,4 @@
+#pragma once
 #include "fss/fmu-fss-types.hpp"
 #include "fmu-types.hpp"
 #include "smm/smm-types.hpp"

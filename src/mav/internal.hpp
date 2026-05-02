@@ -1,3 +1,4 @@
+#pragma once
 #include <ardupilotmega/mavlink.h>
 #include <string>
 #include <thread>
