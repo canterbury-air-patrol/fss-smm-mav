@@ -34,7 +34,7 @@ public:
     auto getFlightMode() -> flight_mode { return this->mode; };
     auto getArmed() -> bool { return this->armed; };
     void attemptReconnect();
-    auto setMode(flight_mode fm) -> bool;
+    void setMode(flight_mode fm);
     void disarm();
     void terminate();
     void gotoPosition(Point to);
