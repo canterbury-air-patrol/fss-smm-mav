@@ -83,6 +83,7 @@ mav_connection::commandRTL()
     if (fmode != 0)
     {
         this->setFlightMode(fmode);
+        std::lock_guard<std::mutex> lk{this->state_lock};
         this->search_loaded = false;
     }
 }
@@ -93,7 +94,10 @@ mav_connection::commandDisARM()
     mavlink_message_t msg;
     mavlink_msg_command_long_pack(SYS_ID, COMP_ID, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0);
     this->sendMavLinkMsg(&msg);
-    this->search_loaded = false;
+    {
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        this->search_loaded = false;
+    }
 }
 
 void
@@ -102,11 +106,14 @@ mav_connection::commandGoto(Point p)
     mavlink_message_t msg;
     // RTL the aircraft so we can load a mission
     this->commandRTL();
-    this->goto_position = p;
-    this->goto_active = true;
-    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, 3, MAV_MISSION_TYPE_MISSION, 0);
+    {
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        this->goto_position = p;
+        this->goto_active = true;
+        this->search_loaded = false;
+        mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, 3, MAV_MISSION_TYPE_MISSION, 0);
+    }
     this->sendMavLinkMsg(&msg);
-    this->search_loaded = false;
 }
 
 void
@@ -138,6 +145,7 @@ mav_connection::commandManual()
     if (fmode != 0)
     {
         this->setFlightMode(fmode);
+        std::lock_guard<std::mutex> lk{this->state_lock};
         this->search_loaded = false;
     }
 
@@ -172,6 +180,7 @@ mav_connection::commandHold()
     if (fmode != 0)
     {
         this->setFlightMode(fmode);
+        std::lock_guard<std::mutex> lk{this->state_lock};
         this->search_loaded = false;
     }
 }
@@ -213,6 +222,7 @@ mav_connection::commandTerminate()
 {
     /* Do nothing for now */
     /* TODO: Implement terminate */
+    std::lock_guard<std::mutex> lk{this->state_lock};
     this->search_loaded = false;
 }
 
@@ -222,7 +232,16 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
     constexpr int acceptable_radius = 5;
     constexpr int goto_alt = 50;
     mavlink_message_t msg;
-    if (this->goto_active)
+    bool local_goto_active;
+    Point local_goto_position;
+    std::shared_ptr<SMMSearch> local_search;
+    {
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        local_goto_active = this->goto_active;
+        local_goto_position = this->goto_position;
+        local_search = this->search;
+    }
+    if (local_goto_active)
     {
         if (seq >= 2)
         {
@@ -247,20 +266,20 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                     acceptable_radius, /* Accept radius: m */
                     0, /* Pass radius: 0m */
                     NAN, /* Yaw: NaN for dont care */
-                    this->goto_position.getLatitude() / LAT_LNG_COV, /* Latitude */
-                    this->goto_position.getLongitude() / LAT_LNG_COV, /* Longitude */
+                    local_goto_position.getLatitude() / LAT_LNG_COV, /* Latitude */
+                    local_goto_position.getLongitude() / LAT_LNG_COV, /* Longitude */
                     goto_alt,  /* Altitude (m) */
                     mission_type);
         }
     }
     else
     {
-        if (this->search == nullptr)
+        if (local_search == nullptr)
         {
             return;
         }
         /* Find the point */
-        auto points = this->search->getPoints();
+        auto points = local_search->getPoints();
         if (seq == 0 || seq == 1)
         {
             /* Most versions of ArduPilot ignore the zeroth mission command, so we need to send the first one twice */
@@ -268,7 +287,7 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                         seq, /* Which waypoint is this */
                         MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
                         MAV_CMD_NAV_TAKEOFF, /* Return home */
-                        (seq == 1 && this->search->getCurrentPointIdx() == 0), /* Are we at the beginning of the search */
+                        (seq == 1 && local_search->getCurrentPointIdx() == 0), /* Are we at the beginning of the search */
                         1, /* Auto continue: No */
                         5, /* Pitch/climb angle (plane only) */
                         0, /* Ignored */
@@ -276,7 +295,7 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                         0, /* Yaw angle */
                         0, /* Latitude */
                         0, /* Longitude */
-                        search->getAltitude(), /* Altitude */
+                        local_search->getAltitude(), /* Altitude */
                         mission_type);
         }
         else if (seq > (points.size() + 1))
@@ -299,7 +318,7 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                         seq, /* Which waypoint is this */
                         MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
                         MAV_CMD_NAV_WAYPOINT, /* Navigate to a point */
-                        (this->search->getCurrentPointIdx() == (seq-2)), /* Is this waypoint is the current target? */
+                        (local_search->getCurrentPointIdx() == (seq-2)), /* Is this waypoint is the current target? */
                         1, /* Auto continue */
                         0, /* Hold time: 0s */
                         acceptable_radius, /* Accept radius: m */
@@ -307,7 +326,7 @@ mav_connection::send_waypoint(uint16_t seq, uint8_t mission_type)
                         NAN, /* Yaw: NaN for dont care */
                         p.getLatitude() / LAT_LNG_COV, /* Latitude */
                         p.getLongitude() / LAT_LNG_COV, /* Longitude */
-                        this->search->getAltitude(),  /* Altitude (m) */
+                        local_search->getAltitude(),  /* Altitude (m) */
                         mission_type);
         }
     }
@@ -325,27 +344,42 @@ mav_connection::setCurrentWP(uint16_t seq)
 void
 mav_connection::mission_ack(bool accepted)
 {
-    if (this->goto_active)
+    bool goto_set_current = false;
+    bool search_set_current = false;
+    uint16_t search_seq = 0;
     {
-        if (accepted)
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        if (this->goto_active && accepted)
         {
-            this->commandAuto();
-            this->setCurrentWP(0);
+            goto_set_current = true;
+        }
+        if (this->search_loading)
+        {
+            this->search_loading = false;
+            if (accepted)
+            {
+                this->search_loaded = true;
+                search_set_current = true;
+                if (this->search != nullptr)
+                {
+                    search_seq = this->search->getCurrentPointIdx();
+                }
+            }
+            else
+            {
+                this->search = nullptr;
+            }
         }
     }
-    if (this->search_loading)
+    if (goto_set_current)
     {
-        this->search_loading = false;
-        if (accepted)
-        {
-            this->search_loaded = true;
-            this->commandAuto();
-            this->setCurrentWP(this->search->getCurrentPointIdx());
-        }
-        else
-        {
-            this->search = nullptr;
-        }
+        this->commandAuto();
+        this->setCurrentWP(0);
+    }
+    if (search_set_current)
+    {
+        this->commandAuto();
+        this->setCurrentWP(search_seq);
     }
 }
 
@@ -356,24 +390,32 @@ mav_connection::loadSearch()
     this->commandRTL();
     /* Load the existing search into the FC, and jump to the current target point */
     /* Tell the FC how many points there are (+2 slots for setup, +1 for RTL) */
-    this->goto_active = false;
-    this->search_loaded = false;
-    this->search_loading = true;
     mavlink_message_t msg;
-    mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints().size() + 2, MAV_MISSION_TYPE_MISSION, 0);
+    {
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        this->goto_active = false;
+        this->search_loaded = false;
+        this->search_loading = true;
+        mavlink_msg_mission_count_pack(SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints().size() + 2, MAV_MISSION_TYPE_MISSION, 0);
+    }
     this->sendMavLinkMsg(&msg);
 }
 
 void
 mav_connection::loadSearch(const std::shared_ptr<SMMSearch> &t_search)
 {
-    if (this->search != t_search || !this->search_loaded)
+    bool need_reload = false;
     {
-        this->search = t_search;
-        if (this->search != nullptr)
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        if (this->search != t_search || !this->search_loaded)
         {
-            this->loadSearch();
+            this->search = t_search;
+            need_reload = (this->search != nullptr);
         }
+    }
+    if (need_reload)
+    {
+        this->loadSearch();
     }
 }
 
@@ -425,7 +467,7 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
                 int16_t vz = mavlink_msg_global_position_int_get_vz(msg);
                 uint16_t vh = sqrt((vx * vx) + (vy * vy));
                 {
-                    std::lock_guard<std::mutex> lk(this->position_lock);
+                    std::lock_guard<std::mutex> lk(this->state_lock);
                     this->last_position = Point(latd, lngd);
                 }
                 this->report_position(latd, lngd, (alt / ALT_COV), heading, vh, vz);
@@ -657,7 +699,10 @@ mav_connection::connect_to_mav()
     struct timeval rcv_timeout = { .tv_sec = 1, .tv_usec = 0 };
     setsockopt(this->fd, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout));
 
-    this->retry_count = 0;
+    {
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        this->retry_count = 0;
+    }
     this->broken = false;
 
     this->recv_thread = std::thread(recv_mav_thread, this);
@@ -741,32 +786,38 @@ mav_connection::attemptReconnect()
     {
         uint64_t ts = current_timestamp();
         bool try_now = false;
-        uint64_t elapsed_time = ts - this->last_tried;
-        switch (this->retry_count)
         {
-            case 0:
-                try_now = (elapsed_time > msecs_in_sec);
-                break;
-            case 1:
-                try_now = (elapsed_time > 2 * msecs_in_sec);
-                break;
-            case 2:
-                try_now = (elapsed_time > 4 * msecs_in_sec);
-                break;
-            case 3:
-                try_now = (elapsed_time > 8 * msecs_in_sec);
-                break;
-            case 4:
-                try_now = (elapsed_time > 15 * msecs_in_sec);
-                break;
-            default:
-                try_now = (elapsed_time > 30 * msecs_in_sec);
-                break;
+            std::lock_guard<std::mutex> lk{this->state_lock};
+            uint64_t elapsed_time = ts - this->last_tried;
+            switch (this->retry_count)
+            {
+                case 0:
+                    try_now = (elapsed_time > msecs_in_sec);
+                    break;
+                case 1:
+                    try_now = (elapsed_time > 2 * msecs_in_sec);
+                    break;
+                case 2:
+                    try_now = (elapsed_time > 4 * msecs_in_sec);
+                    break;
+                case 3:
+                    try_now = (elapsed_time > 8 * msecs_in_sec);
+                    break;
+                case 4:
+                    try_now = (elapsed_time > 15 * msecs_in_sec);
+                    break;
+                default:
+                    try_now = (elapsed_time > 30 * msecs_in_sec);
+                    break;
+            }
+            if (try_now)
+            {
+                this->retry_count++;
+                this->last_tried = ts;
+            }
         }
         if (try_now)
         {
-            this->retry_count++;
-            this->last_tried = ts;
             this->connect_to_mav();
         }
     }
