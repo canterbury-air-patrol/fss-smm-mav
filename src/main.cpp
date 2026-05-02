@@ -1,4 +1,6 @@
 #include <bits/stdint-uintn.h>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -24,11 +26,22 @@ std::queue<std::shared_ptr<event>> event_queue;
 std::mutex main_lock;
 std::condition_variable main_cv;
 
-bool running = true;
+std::mutex reconnect_lock;
+std::condition_variable reconnect_cv;
 
-void sigIntHandler(__attribute__((unused)) int signum)
+std::atomic<bool> running{true};
+
+static void
+signal_waiter()
 {
-    running = false;
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    int signum = 0;
+    sigwait(&mask, &signum);
+    running.store(false);
+    main_cv.notify_one();
+    reconnect_cv.notify_one();
 }
 
 static void
@@ -100,9 +113,16 @@ fss_other_traffic_cb (const PositionData &pd)
 static void
 fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &mav)
 {
-    while (running)
+    while (running.load())
     {
-        sleep (reconnect_interval);
+        {
+            std::unique_lock<std::mutex> lk(reconnect_lock);
+            reconnect_cv.wait_for(lk, std::chrono::seconds(reconnect_interval), []{ return !running.load(); });
+        }
+        if (!running.load())
+        {
+            break;
+        }
         fss->reconnectAll();
         mav->attemptReconnect();
     }
@@ -120,8 +140,14 @@ main(int argc, char *argv[]) -> int
     }
     int arg_offset = 1;
 
-    /* Watch out for sigint */
-    signal (SIGINT, sigIntHandler);
+    /* Block SIGINT so it can be handled synchronously by signal_waiter.
+     * This mask is inherited by all threads spawned below, ensuring the
+     * signal is delivered to the dedicated waiter rather than interrupting
+     * arbitrary threads from a signal-handler context. */
+    sigset_t sigint_mask;
+    sigemptyset(&sigint_mask);
+    sigaddset(&sigint_mask, SIGINT);
+    pthread_sigmask(SIG_BLOCK, &sigint_mask, nullptr);
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
 
@@ -130,6 +156,9 @@ main(int argc, char *argv[]) -> int
     auto fss = std::make_shared<FSS>(argv[arg_offset++]);
     auto mav = std::make_shared<MAV>(argv[arg_offset], std::stoi(argv[arg_offset+1]));
     auto smm = std::make_shared<SMM>(mav);
+
+    /* Run the signal-handling thread */
+    std::thread sig_thread = std::thread(signal_waiter);
 
     /* Run the reconnector thread */
     std::thread reconnector = std::thread(fss_reconnector, fss, mav);
@@ -150,7 +179,7 @@ main(int argc, char *argv[]) -> int
     mav->registerReachedCB(mav_reached_cb);
     mav->registerBatteryCB(mav_battery_cb);
 
-    while (running)
+    while (running.load())
     {
         std::unique_lock<std::mutex> lk(main_lock);
         while (!event_queue.empty())
@@ -220,6 +249,10 @@ main(int argc, char *argv[]) -> int
     if (reconnector.joinable())
     {
         reconnector.join();
+    }
+    if (sig_thread.joinable())
+    {
+        sig_thread.join();
     }
 
     /* Cleanup */
