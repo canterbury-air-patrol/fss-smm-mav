@@ -3,10 +3,9 @@
 #include "mav.hpp"
 #include "internal.hpp"
 
-auto
-MAV::setMode(flight_mode fm) -> bool
+void
+MAV::setMode(flight_mode fm)
 {
-    bool res = false;
     switch (fm)
     {
         case flight_mode_manual:
@@ -31,7 +30,6 @@ MAV::setMode(flight_mode fm) -> bool
             this->connection->commandRTL();
             break;
     }
-    return res;
 }
 
 void MAV::disarm()

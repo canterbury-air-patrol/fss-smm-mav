@@ -35,7 +35,6 @@ private:
     std::mutex lock{};
 public:
     FMUStateMachine(std::shared_ptr<MAV> t_mav, std::shared_ptr<SMM> t_smm, std::shared_ptr<FSS> t_fss);
-    auto getCurrentstate() -> FMUState;
 
     void FSSNewCommand(FSSCommand cmd);
     void SMMNewCommand(SMMCommand cmd);
