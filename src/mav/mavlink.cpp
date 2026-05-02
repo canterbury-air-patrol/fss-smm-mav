@@ -493,14 +493,6 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
                 int8_t remaining = mavlink_msg_battery_status_get_battery_remaining(msg);
                 uint16_t voltages[10] = { 0 };
                 mavlink_msg_battery_status_get_voltages(msg, voltages);
-                if (current_consumed < 0)
-                {
-                    current_consumed = 0;
-                }
-                if (remaining < 0)
-                {
-                    remaining = 0;
-                }
                 this->report_battery_status(remaining, current_consumed, (double) voltages[0] / 1000.0);
             } break;
         case MAVLINK_MSG_ID_MISSION_ITEM_REACHED:

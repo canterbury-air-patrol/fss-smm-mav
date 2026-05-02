@@ -215,7 +215,8 @@ main(int argc, char *argv[]) -> int
                     break;
                 case event_battery_status:
                     {
-                        if (e->getBatteryData().getRemaining() < lowbat_threshold)
+                        auto remaining = e->getBatteryData().getRemaining();
+                        if (remaining >= 0 && remaining < lowbat_threshold)
                         {
                             /* Time to go home */
                             state_machine->setLowBattery();
