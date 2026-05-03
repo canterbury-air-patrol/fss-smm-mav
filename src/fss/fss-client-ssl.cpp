@@ -125,7 +125,7 @@ fss_client_ssl::sendBatteryStatus(int8_t remaining, int32_t consumed, double vol
 void
 fss_client_ssl::report_command(FSSCommand cmd)
 {
-    if (this->command_cb != nullptr)
+    if (this->command_cb)
     {
         this->command_cb(cmd);
     }
@@ -134,35 +134,35 @@ fss_client_ssl::report_command(FSSCommand cmd)
 void
 fss_client_ssl::report_comms_status(FSSCommsStatus status)
 {
-    if (this->comms_status_cb != nullptr)
+    if (this->comms_status_cb)
     {
-        this->comms_status_cb (status);
+        this->comms_status_cb(status);
     }
 }
 
 void
 fss_client_ssl::report_goto_update(Point p)
 {
-    if (this->goto_cb != nullptr)
+    if (this->goto_cb)
     {
-        this->goto_cb (this->goto_cb_priv, p);
+        this->goto_cb(p);
     }
 }
 
 void
 fss_client_ssl::report_smm_settings(const SMMSettings &settings)
 {
-    if (this->smm_settings_cb != nullptr)
+    if (this->smm_settings_cb)
     {
-        this->smm_settings_cb (settings);
+        this->smm_settings_cb(settings);
     }
 }
 
 void
 fss_client_ssl::report_position_data(const PositionData &pd)
 {
-    if (this->position_data_cb != nullptr)
+    if (this->position_data_cb)
     {
-        this->position_data_cb (pd);
+        this->position_data_cb(pd);
     }
 }

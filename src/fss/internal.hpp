@@ -5,16 +5,15 @@
 #include "../smm/smm-types.hpp"
 #include "fmu-fss-types.hpp"
 
-using notify_goto_update_cb = void (*)(void *, Point);
+using notify_goto_update_cb = std::function<void(Point)>;
 
 class fss_client_ssl : public flight_safety_system::client_ssl::fss_client {
 private:
-    notify_fss_command_cb command_cb{nullptr};
-    notify_fss_comms_cb comms_status_cb{nullptr};
-    notify_goto_update_cb goto_cb{nullptr};
-    void *goto_cb_priv{nullptr};
-    notify_smm_settings_cb smm_settings_cb{nullptr};
-    notify_position_cb position_data_cb{nullptr};
+    notify_fss_command_cb command_cb{};
+    notify_fss_comms_cb comms_status_cb{};
+    notify_goto_update_cb goto_cb{};
+    notify_smm_settings_cb smm_settings_cb{};
+    notify_position_cb position_data_cb{};
     void report_command(FSSCommand cmd);
     void report_goto_update(Point);
     void report_comms_status(FSSCommsStatus);
@@ -34,7 +33,7 @@ public:
     void handleSMMSettings(const std::shared_ptr<flight_safety_system::transport::fss_message_smm_settings> &msg) override;
     void registerCommandCB(notify_fss_command_cb cb) { this->command_cb = cb; };
     void registerCommsStatusCB(notify_fss_comms_cb cb) { this->comms_status_cb = cb; };
-    void registerGotoUpdateCB(notify_goto_update_cb cb, void *priv) { this->goto_cb = cb; this->goto_cb_priv = priv; };
+    void registerGotoUpdateCB(notify_goto_update_cb cb) { this->goto_cb = cb; };
     void registerSMMSettingsCB(notify_smm_settings_cb cb) { this->smm_settings_cb = cb; };
     void registerPositionDataCB(notify_position_cb cb) { this->position_data_cb = cb; };
     void sendPosition(double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel);
