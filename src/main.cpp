@@ -12,6 +12,7 @@
 #include <variant>
 #include <csignal>
 #include <unistd.h>
+#include <getopt.h>
 
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
@@ -30,9 +31,9 @@ constexpr int reconnect_interval = 10;
 
 class App {
 public:
-    App(const char *config_file, const char *addr, int port)
+    App(const char *config_file, const char *addr, int port, terminate_action ta)
         : fss(std::make_unique<FSS>(config_file))
-        , mav(std::make_unique<MAV>(addr, port))
+        , mav(std::make_unique<MAV>(addr, port, ta))
         , smm(std::make_unique<SMM>(*mav))
         , aircraft{}
         , event_queue{}
@@ -203,9 +204,59 @@ private:
 auto
 main(int argc, char *argv[]) -> int
 {
-    if (argc != 4)
+    static const struct option long_options[] = {
+        {"terminate-action", required_argument, nullptr, 't'},
+        {nullptr, 0, nullptr, 0}
+    };
+
+    terminate_action ta = terminate_action::none;
+    bool ta_set = false;
+
+    int opt;
+    int option_index = 0;
+    while ((opt = getopt_long(argc, argv, "", long_options, &option_index)) != -1)
     {
-        std::cout << "Usage: " << argv[0] << " client.json addr port" << std::endl;
+        if (opt == 't')
+        {
+            std::string val(optarg);
+            if (val == "none")
+            {
+                ta = terminate_action::none;
+                ta_set = true;
+            }
+            else if (val == "disarm")
+            {
+                ta = terminate_action::disarm;
+                ta_set = true;
+            }
+            else if (val == "terminate")
+            {
+                ta = terminate_action::terminate;
+                ta_set = true;
+            }
+            else
+            {
+                std::cerr << "Error: unknown --terminate-action value '" << val << "' (must be none, disarm, or terminate)" << std::endl;
+                return -1;
+            }
+        }
+        else
+        {
+            std::cerr << "Usage: " << argv[0] << " --terminate-action=none|disarm|terminate client.json addr port" << std::endl;
+            return -1;
+        }
+    }
+
+    if (!ta_set)
+    {
+        std::cerr << "Error: --terminate-action is required (none, disarm, or terminate)" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " --terminate-action=none|disarm|terminate client.json addr port" << std::endl;
+        return -1;
+    }
+
+    if (argc - optind != 3)
+    {
+        std::cerr << "Usage: " << argv[0] << " --terminate-action=none|disarm|terminate client.json addr port" << std::endl;
         return -1;
     }
 
@@ -220,7 +271,7 @@ main(int argc, char *argv[]) -> int
     /* Ignore SIGPIPE */
     signal(SIGPIPE, SIG_IGN);
 
-    App app(argv[1], argv[2], std::stoi(argv[3]));
+    App app(argv[optind], argv[optind + 1], std::stoi(argv[optind + 2]), ta);
     app.run();
     return 0;
 }

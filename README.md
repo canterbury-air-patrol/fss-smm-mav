@@ -49,7 +49,18 @@ Create a client.json file that refers to your server(s):
 }
 ```
 
-Then start this client with `cap-fmu client.json 127.0.0.1 5760`
+Then start this client with:
+```
+cap-fmu --terminate-action=<action> client.json 127.0.0.1 5760
+```
+
+`--terminate-action` is required. There is no default — the correct action is airframe-dependent and must be chosen explicitly:
+
+| Action | What it does | Airframe requirements |
+|---|---|---|
+| `terminate` | Sends `MAV_CMD_DO_FLIGHTTERMINATION` (param1=1) to hard-cut motors or deploy a parachute | Requires `AFS_ENABLE=1` and `AFS_TERM_ACTION` configured on the autopilot |
+| `disarm` | Sends `MAV_CMD_COMPONENT_ARM_DISARM` with force-disarm | Only safe on the ground; suitable for ground vehicles or bench testing |
+| `none` | Logs a loud warning and falls through to RTL — the safest non-destructive action | No special airframe configuration; use when AFS is not available |
 
 This requires [MAVProxy](https://ardupilot.org/mavproxy/) on the local device with `--tcpin:127.0.0.1:5760` you can adjust parameters as required to access a remote device.
 

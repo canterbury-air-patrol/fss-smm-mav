@@ -1,4 +1,5 @@
 #include <cstring>
+#include <iostream>
 
 #include "mav.hpp"
 #include "internal.hpp"
@@ -43,7 +44,19 @@ void MAV::disarm()
 
 void MAV::terminate()
 {
-    this->connection->commandTerminate();
+    switch (this->action)
+    {
+        case terminate_action::terminate:
+            this->connection->commandTerminate();
+            break;
+        case terminate_action::disarm:
+            this->connection->commandForceDisARM();
+            break;
+        case terminate_action::none:
+            std::cerr << "WARN: terminate-action is none, falling through to RTL\n";
+            this->connection->commandRTL();
+            break;
+    }
 }
 
 void MAV::attemptReconnect()
@@ -68,7 +81,7 @@ void MAV::sendADSB(PositionData pd)
     this->connection->sendADSB(pd.getICAOAddress(), pd.getP().getLatitude(), pd.getP().getLongitude(), static_cast<uint16_t>(pd.getAltitude()), pd.getAltitudeType(), pd.getHeading(), pd.getVelocityHorizontal(), pd.getVelocityVertical(), callsign, pd.getEmitterType(), 0, pd.getFlags(), pd.getSquawk());
 }
 
-MAV::MAV(std::string t_addr, uint16_t t_port) : connection(std::make_shared<mav_connection>(std::move(t_addr), t_port))
+MAV::MAV(std::string t_addr, uint16_t t_port, terminate_action ta) : connection(std::make_shared<mav_connection>(std::move(t_addr), t_port)), action(ta)
 {
 }
 

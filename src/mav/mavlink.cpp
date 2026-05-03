@@ -232,12 +232,28 @@ mav_connection::commandAuto()
 }
 
 void
+mav_connection::commandForceDisARM()
+{
+    constexpr float force_magic = 21196.0f;
+    mavlink_message_t msg;
+    mavlink_msg_command_long_pack(SYS_ID, COMP_ID, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, force_magic, 0, 0, 0, 0, 0);
+    this->sendMavLinkMsg(&msg);
+    {
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        this->search_loaded = false;
+    }
+}
+
+void
 mav_connection::commandTerminate()
 {
-    /* Do nothing for now */
-    /* TODO: Implement terminate */
-    std::lock_guard<std::mutex> lk{this->state_lock};
-    this->search_loaded = false;
+    mavlink_message_t msg;
+    mavlink_msg_command_long_pack(SYS_ID, COMP_ID, &msg, 1, 1, MAV_CMD_DO_FLIGHTTERMINATION, 0, 1, 0, 0, 0, 0, 0, 0);
+    this->sendMavLinkMsg(&msg);
+    {
+        std::lock_guard<std::mutex> lk{this->state_lock};
+        this->search_loaded = false;
+    }
 }
 
 void
