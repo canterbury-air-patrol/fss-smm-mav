@@ -81,7 +81,7 @@ FMUStateMachine::updateState()
         }
     }
 
-    if (new_state != this->current_state || new_state == fmu_state_searching || new_state == fmu_state_goto)
+    if (new_state != this->current_state)
     {
         this->current_state = new_state;
         this->actionState(this->current_state);
@@ -91,6 +91,10 @@ FMUStateMachine::updateState()
 void
 FMUStateMachine::actionState(FMUState state)
 {
+    if (state != fmu_state_searching)
+    {
+        this->smm->cancelSearch();
+    }
     switch(state)
     {
         case fmu_state_manual:

@@ -30,6 +30,7 @@ public:
 class MockSMM : public ISMM {
 public:
     int search_calls{0};
+    int cancel_calls{0};
 
     MockSMM() = default;
     MockSMM(const MockSMM&) = delete;
@@ -39,6 +40,7 @@ public:
     ~MockSMM() override = default;
 
     void search(Point) override { search_calls++; }
+    void cancelSearch() override { cancel_calls++; }
 };
 
 class MockFSS : public IFSS {
@@ -181,7 +183,7 @@ TEST_CASE("same non-searching state does not re-action", "[state_machine]")
     REQUIRE(mav->set_mode_calls == calls);
 }
 
-TEST_CASE("searching always re-actions on new SMM command", "[state_machine]")
+TEST_CASE("searching does not re-action on repeated state update", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm();
 
@@ -189,5 +191,16 @@ TEST_CASE("searching always re-actions on new SMM command", "[state_machine]")
     int calls = smm->search_calls;
 
     sm->SMMNewCommand(smm_cmd_none);
-    REQUIRE(smm->search_calls > calls);
+    REQUIRE(smm->search_calls == calls);
+}
+
+TEST_CASE("goto does not re-action on repeated FSS goto", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm();
+
+    sm->FSSNewCommand(fss_cmd_goto);
+    int calls = mav->set_mode_calls;
+
+    sm->FSSNewCommand(fss_cmd_goto);
+    REQUIRE(mav->set_mode_calls == calls);
 }

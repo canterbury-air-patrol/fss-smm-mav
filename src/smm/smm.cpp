@@ -117,46 +117,75 @@ SMM::reportPosition(PositionData t_pd)
             this->position_report_last_ts = curr_ts;
         }
     }
+    {
+        std::lock_guard<std::mutex> lk(this->search_lock);
+        if (this->search_active && this->current_search == nullptr)
+        {
+            this->tryAcquireSearch(t_pd.getP());
+        }
+    }
 }
 
-void SMM::search(Point current_pos)
+/* Called with search_lock held. Tries to acquire a search from SMM.
+ * On failure, sets a retry timestamp so periodic calls back off. */
+void SMM::tryAcquireSearch(Point current_pos)
 {
-    /* Search, or find a search to perform */
-    if (this->asset == nullptr)
+    uint64_t curr_ts = current_timestamp_ms();
+    if (this->search_retry_ts > curr_ts)
     {
-        this->mav->setMode(flight_mode_rtl);
         return;
     }
-    std::lock_guard<std::mutex> lk(this->search_lock);
     int retries = 0;
     while (this->current_search == nullptr)
     {
         auto new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
         if (new_search == nullptr)
         {
-            /* No search to perform */
-            /* Enter RTL and exit */
             this->mav->setMode(flight_mode_rtl);
+            this->search_retry_ts = current_timestamp_ms() + search_retry_interval_ms;
             return;
         }
-        if (smm_search_accept (new_search))
+        if (smm_search_accept(new_search))
         {
             this->current_search = std::make_shared<SMMSearch>(new_search);
         }
         else
         {
-            smm_search_destroy (new_search);
+            smm_search_destroy(new_search);
         }
         retries++;
         if (retries >= 3)
         {
-            /* Failed to start a search 3 times, back-off for a while */
             this->mav->setMode(flight_mode_rtl);
+            this->search_retry_ts = current_timestamp_ms() + search_retry_interval_ms;
             return;
         }
     }
-    /* Load the search into AP */
     this->mav->loadSearch(this->current_search);
+    this->search_retry_ts = 0;
+}
+
+void SMM::search(Point current_pos)
+{
+    if (this->asset == nullptr)
+    {
+        this->mav->setMode(flight_mode_rtl);
+        return;
+    }
+    std::lock_guard<std::mutex> lk(this->search_lock);
+    this->search_active = true;
+    if (this->current_search != nullptr)
+    {
+        return;
+    }
+    this->tryAcquireSearch(current_pos);
+}
+
+void SMM::cancelSearch()
+{
+    std::lock_guard<std::mutex> lk(this->search_lock);
+    this->search_active = false;
+    this->search_retry_ts = 0;
 }
 
 void SMM::reachedPoint(int point)

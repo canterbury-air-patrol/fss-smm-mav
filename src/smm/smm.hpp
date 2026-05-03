@@ -29,8 +29,12 @@ private:
     size_t assets_list_count{0};
     smm_asset asset{nullptr};
     uint64_t position_report_last_ts{0};
+    bool search_active{false};
+    uint64_t search_retry_ts{0};
+    static constexpr uint64_t search_retry_interval_ms{5000};
     void connect();
     void disconnect();
+    void tryAcquireSearch(Point current_pos);
 public:
     explicit SMM(std::shared_ptr<MAV> t_mav);
     SMM(SMM&) = delete;
@@ -40,6 +44,7 @@ public:
     ~SMM() override;
     void connect(const std::string &host, const flight_safety_system::secure_string &user, const flight_safety_system::secure_string &pass, const std::string &asset_name);
     void search(Point current_pos) override;
+    void cancelSearch() override;
     void reportPosition(PositionData t_pd);
     void reachedPoint(int point);
     auto currentSearchPoints() -> int;
