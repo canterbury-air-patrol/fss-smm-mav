@@ -61,10 +61,10 @@ enqueue_event (const std::shared_ptr<event> &e)
     main_cv.notify_one();
 }
 
-std::shared_ptr<known_aircraft> aircraft = nullptr;
+known_aircraft aircraft;
 
 static void
-fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &mav)
+fss_reconnector (FSS &fss, MAV &mav)
 {
     while (running.load())
     {
@@ -76,8 +76,8 @@ fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &ma
         {
             break;
         }
-        fss->reconnectAll();
-        mav->attemptReconnect();
+        fss.reconnectAll();
+        mav.attemptReconnect();
     }
     /* nudge the main loop, in case it hasn't got any events */
     enqueue_event(std::make_shared<event>(Nudge{}));
@@ -104,23 +104,21 @@ main(int argc, char *argv[]) -> int
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
 
-    aircraft = std::make_shared<known_aircraft>();
-
-    auto fss = std::make_shared<FSS>(argv[arg_offset++]);
-    auto mav = std::make_shared<MAV>(argv[arg_offset], std::stoi(argv[arg_offset+1]));
-    auto smm = std::make_shared<SMM>(mav);
+    auto fss = std::make_unique<FSS>(argv[arg_offset++]);
+    auto mav = std::make_unique<MAV>(argv[arg_offset], std::stoi(argv[arg_offset+1]));
+    auto smm = std::make_unique<SMM>(*mav);
 
     /* Run the signal-handling thread */
     std::thread sig_thread = std::thread(signal_waiter);
 
     /* Run the reconnector thread */
-    std::thread reconnector = std::thread(fss_reconnector, fss, mav);
+    std::thread reconnector = std::thread(fss_reconnector, std::ref(*fss), std::ref(*mav));
 
     /* Get the asset name */
     asset_name = fss->getAssetName();
 
     /* Setup the State Machine */
-    auto state_machine = std::make_shared<FMUStateMachine>(mav, smm, fss);
+    FMUStateMachine state_machine{*mav, *smm, *fss};
 
     /* Connect up the notifications */
     fss->registerCommandCB([](FSSCommand command) {
@@ -134,16 +132,13 @@ main(int argc, char *argv[]) -> int
     });
     fss->registerPositionDataCB([](const PositionData &pd) {
         auto pd_modified = PositionData(pd);
-        if (aircraft != nullptr)
+        if (aircraft.newPositionReport(pd_modified))
         {
-            if (aircraft->newPositionReport(pd_modified))
+            if (pd_modified.getICAOAddress() == 0)
             {
-                if (pd_modified.getICAOAddress() == 0)
-                {
-                    pd_modified.setICAOAddress(aircraft->getAircraftICAOAddress(pd_modified.getCallSign()));
-                }
-                enqueue_event(std::make_shared<event>(OtherAircraftReport{pd_modified}));
+                pd_modified.setICAOAddress(aircraft.getAircraftICAOAddress(pd_modified.getCallSign()));
             }
+            enqueue_event(std::make_shared<event>(OtherAircraftReport{pd_modified}));
         }
     });
 
@@ -167,10 +162,10 @@ main(int argc, char *argv[]) -> int
             lk.unlock();
             std::visit(overloaded{
                 [&](FSSCommand cmd) {
-                    state_machine->FSSNewCommand(cmd);
+                    state_machine.FSSNewCommand(cmd);
                 },
                 [&](FSSCommsStatus status) {
-                    state_machine->setCommsFailure(status == fss_comms_failure);
+                    state_machine.setCommsFailure(status == fss_comms_failure);
                 },
                 [&](SMMSettings settings) {
                     smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
@@ -188,7 +183,7 @@ main(int argc, char *argv[]) -> int
                     if (remaining >= 0 && remaining < lowbat_threshold)
                     {
                         /* Time to go home */
-                        state_machine->setLowBattery();
+                        state_machine.setLowBattery();
                     }
                     fss->reportBatteryStatus(bd);
                 },
@@ -214,12 +209,6 @@ main(int argc, char *argv[]) -> int
     {
         sig_thread.join();
     }
-
-    /* Cleanup */
-    state_machine.reset();
-    smm.reset();
-    fss.reset();
-    mav.reset();
 
     while (!event_queue.empty())
     {
