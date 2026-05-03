@@ -9,8 +9,12 @@
 #include <queue>
 #include <iostream>
 #include <thread>
+#include <variant>
 #include <csignal>
 #include <unistd.h>
+
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 #include "fmu-types.hpp"
 #include "fmu.hpp"
 #include "mav/mav.hpp"
@@ -78,13 +82,13 @@ smm_settings_cb (const SMMSettings &settings)
 static void
 mav_position_cb (const PositionData &pd)
 {
-    enqueue_event(std::make_shared<event>(event_position, pd));
+    enqueue_event(std::make_shared<event>(pd));
 }
 
 static void
 mav_reached_cb (int point)
 {
-    enqueue_event(std::make_shared<event>(point));
+    enqueue_event(std::make_shared<event>(ReachedPoint{point}));
 }
 
 static void
@@ -108,7 +112,7 @@ fss_other_traffic_cb (const PositionData &pd)
             {
                 pd_modified.setICAOAddress(aircraft->getAircraftICAOAddress(pd_modified.getCallSign()));
             }
-            enqueue_event(std::make_shared<event>(event_other_aircraft_report, pd_modified));
+            enqueue_event(std::make_shared<event>(OtherAircraftReport{pd_modified}));
         }
     }
 }
@@ -130,7 +134,7 @@ fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &ma
         mav->attemptReconnect();
     }
     /* nudge the main loop, in case it hasn't got any events */
-    enqueue_event(std::make_shared<event>(event_nudge));
+    enqueue_event(std::make_shared<event>(Nudge{}));
 }
 
 auto
@@ -190,61 +194,42 @@ main(int argc, char *argv[]) -> int
             auto e = event_queue.front();
             event_queue.pop();
             lk.unlock();
-            switch(e->getType())
-            {
-                case event_fss_command:
-                    state_machine->FSSNewCommand(e->getFSSCommand());
-                    break;
-                case event_fss_comms_status:
-                    state_machine->setCommsFailure((e->getFSSCommsStatus() == fss_comms_failure));
-                    break;
-                case event_smm_settings:
+            std::visit(overloaded{
+                [&](FSSCommand cmd) {
+                    state_machine->FSSNewCommand(cmd);
+                },
+                [&](FSSCommsStatus status) {
+                    state_machine->setCommsFailure(status == fss_comms_failure);
+                },
+                [&](SMMSettings settings) {
+                    smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
+                },
+                [&](PositionData pd) {
+                    fss->reportPosition(pd);
+                    smm->reportPosition(pd);
+                },
+                [&](const ReachedPoint &rp) {
+                    fss->reachedPoint(rp.point, smm->currentSearchPoints());
+                    smm->reachedPoint(rp.point);
+                },
+                [&](BatteryData bd) {
+                    auto remaining = bd.getRemaining();
+                    if (remaining >= 0 && remaining < lowbat_threshold)
                     {
-                        auto settings = e->getSMMSettings();
-                        smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
+                        /* Time to go home */
+                        state_machine->setLowBattery();
                     }
-                    break;
-                case event_position:
+                    fss->reportBatteryStatus(bd);
+                },
+                [&](OtherAircraftReport oar) {
+                    if (oar.pd.getCallSign() != fss->getAssetName())
                     {
-                        fss->reportPosition(e->getPositionData());
-                        smm->reportPosition(e->getPositionData());
+                        /* Don't tell it about ourself */
+                        mav->sendADSB(oar.pd);
                     }
-                    break;
-                case event_reached:
-                    {
-                        fss->reachedPoint(e->getReachedPoint(), smm->currentSearchPoints());
-                        smm->reachedPoint(e->getReachedPoint());
-                    }
-                    break;
-                case event_battery_status:
-                    {
-                        auto remaining = e->getBatteryData().getRemaining();
-                        if (remaining >= 0 && remaining < lowbat_threshold)
-                        {
-                            /* Time to go home */
-                            state_machine->setLowBattery();
-                        }
-                        fss->reportBatteryStatus(e->getBatteryData());
-                    }
-                    break;
-                case event_other_aircraft_report:
-                    {
-                        PositionData pd = e->getPositionData();
-                        if (pd.getCallSign() != fss->getAssetName())
-                        {
-                            /* Don't tell it about ourself */
-                            mav->sendADSB(pd);
-                        }
-                    }
-                    break;
-                case event_nudge:
-                    break;
-                case event_unknown:
-                    {
-                        std::cout << "Unknown event in queue";
-                    }
-                    break;
-            }
+                },
+                [](const Nudge &) {},
+            }, *e);
             lk.lock();
         }
         main_cv.wait(lk);
