@@ -28,60 +28,177 @@ template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 constexpr int lowbat_threshold = 20;
 constexpr int reconnect_interval = 10;
 
-std::string asset_name;
-std::queue<std::shared_ptr<event>> event_queue;
-std::mutex main_lock;
-std::condition_variable main_cv;
+class App {
+public:
+    App(const char *config_file, const char *addr, int port)
+        : fss(std::make_unique<FSS>(config_file))
+        , mav(std::make_unique<MAV>(addr, port))
+        , smm(std::make_unique<SMM>(*mav))
+        , aircraft{}
+        , event_queue{}
+        , main_lock{}
+        , main_cv{}
+        , reconnect_lock{}
+        , reconnect_cv{}
+        , running{true}
+        , asset_name(fss->getAssetName())
+    {}
 
-std::mutex reconnect_lock;
-std::condition_variable reconnect_cv;
-
-std::atomic<bool> running{true};
-
-static void
-signal_waiter()
-{
-    sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
-    int signum = 0;
-    sigwait(&mask, &signum);
-    running.store(false);
-    main_cv.notify_one();
-    reconnect_cv.notify_one();
-}
-
-static void
-enqueue_event (const std::shared_ptr<event> &e)
-{
+    void run()
     {
-        std::lock_guard<std::mutex> lk(main_lock);
-        event_queue.push(e);
+        FMUStateMachine state_machine{*mav, *smm, *fss};
+
+        fss->registerCommandCB([this](FSSCommand command) {
+            enqueue_event(std::make_shared<event>(command));
+        });
+        fss->registerCommsStatusCB([this](FSSCommsStatus status) {
+            enqueue_event(std::make_shared<event>(status));
+        });
+        fss->registerSMMSettingsCB([this](const SMMSettings &settings) {
+            enqueue_event(std::make_shared<event>(settings));
+        });
+        fss->registerPositionDataCB([this](const PositionData &pd) {
+            auto pd_modified = PositionData(pd);
+            if (aircraft.newPositionReport(pd_modified))
+            {
+                if (pd_modified.getICAOAddress() == 0)
+                {
+                    pd_modified.setICAOAddress(aircraft.getAircraftICAOAddress(pd_modified.getCallSign()));
+                }
+                enqueue_event(std::make_shared<event>(OtherAircraftReport{pd_modified}));
+            }
+        });
+
+        mav->registerPositionCB([this](const PositionData &pd) {
+            enqueue_event(std::make_shared<event>(pd));
+        });
+        mav->registerReachedCB([this](int point) {
+            enqueue_event(std::make_shared<event>(ReachedPoint{point}));
+        });
+        mav->registerBatteryCB([this](const BatteryData &bd) {
+            enqueue_event(std::make_shared<event>(bd));
+        });
+
+        std::thread sig_thread([this]{ signal_waiter(); });
+        std::thread reconnector([this]{ fss_reconnector(); });
+
+        while (running.load())
+        {
+            std::unique_lock<std::mutex> lk(main_lock);
+            while (!event_queue.empty())
+            {
+                auto e = event_queue.front();
+                event_queue.pop();
+                lk.unlock();
+                std::visit(overloaded{
+                    [&](FSSCommand cmd) {
+                        state_machine.FSSNewCommand(cmd);
+                    },
+                    [&](FSSCommsStatus status) {
+                        state_machine.setCommsFailure(status == fss_comms_failure);
+                    },
+                    [&](SMMSettings settings) {
+                        smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
+                    },
+                    [&](PositionData pd) {
+                        fss->reportPosition(pd);
+                        smm->reportPosition(pd);
+                    },
+                    [&](const ReachedPoint &rp) {
+                        fss->reachedPoint(rp.point, smm->currentSearchPoints());
+                        smm->reachedPoint(rp.point);
+                    },
+                    [&](BatteryData bd) {
+                        auto remaining = bd.getRemaining();
+                        if (remaining >= 0 && remaining < lowbat_threshold)
+                        {
+                            state_machine.setLowBattery();
+                        }
+                        fss->reportBatteryStatus(bd);
+                    },
+                    [&](OtherAircraftReport oar) {
+                        if (oar.pd.getCallSign() != fss->getAssetName())
+                        {
+                            mav->sendADSB(oar.pd);
+                        }
+                    },
+                    [](const Nudge &) {},
+                }, *e);
+                lk.lock();
+            }
+            main_cv.wait(lk);
+        }
+
+        if (reconnector.joinable())
+        {
+            reconnector.join();
+        }
+        if (sig_thread.joinable())
+        {
+            sig_thread.join();
+        }
+
+        while (!event_queue.empty())
+        {
+            event_queue.pop();
+        }
     }
-    main_cv.notify_one();
-}
 
-known_aircraft aircraft;
-
-static void
-fss_reconnector (FSS &fss, MAV &mav)
-{
-    while (running.load())
+private:
+    void enqueue_event(const std::shared_ptr<event> &e)
     {
         {
-            std::unique_lock<std::mutex> lk(reconnect_lock);
-            reconnect_cv.wait_for(lk, std::chrono::seconds(reconnect_interval), []{ return !running.load(); });
+            std::lock_guard<std::mutex> lk(main_lock);
+            event_queue.push(e);
         }
-        if (!running.load())
-        {
-            break;
-        }
-        fss.reconnectAll();
-        mav.attemptReconnect();
+        main_cv.notify_one();
     }
-    /* nudge the main loop, in case it hasn't got any events */
-    enqueue_event(std::make_shared<event>(Nudge{}));
-}
+
+    void signal_waiter()
+    {
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGINT);
+        int signum = 0;
+        sigwait(&mask, &signum);
+        running.store(false);
+        main_cv.notify_one();
+        reconnect_cv.notify_one();
+    }
+
+    void fss_reconnector()
+    {
+        while (running.load())
+        {
+            {
+                std::unique_lock<std::mutex> lk(reconnect_lock);
+                reconnect_cv.wait_for(lk, std::chrono::seconds(reconnect_interval), [this]{ return !running.load(); });
+            }
+            if (!running.load())
+            {
+                break;
+            }
+            fss->reconnectAll();
+            mav->attemptReconnect();
+        }
+        enqueue_event(std::make_shared<event>(Nudge{}));
+    }
+
+    std::unique_ptr<FSS> fss;
+    std::unique_ptr<MAV> mav;
+    std::unique_ptr<SMM> smm;
+    known_aircraft aircraft;
+
+    std::queue<std::shared_ptr<event>> event_queue;
+    std::mutex main_lock;
+    std::condition_variable main_cv;
+
+    std::mutex reconnect_lock;
+    std::condition_variable reconnect_cv;
+
+    std::atomic<bool> running{true};
+    std::string asset_name;
+};
 
 auto
 main(int argc, char *argv[]) -> int
@@ -91,7 +208,6 @@ main(int argc, char *argv[]) -> int
         std::cout << "Usage: " << argv[0] << " client.json addr port" << std::endl;
         return -1;
     }
-    int arg_offset = 1;
 
     /* Block SIGINT so it can be handled synchronously by signal_waiter.
      * This mask is inherited by all threads spawned below, ensuring the
@@ -102,117 +218,9 @@ main(int argc, char *argv[]) -> int
     sigaddset(&sigint_mask, SIGINT);
     pthread_sigmask(SIG_BLOCK, &sigint_mask, nullptr);
     /* Ignore SIGPIPE */
-    signal (SIGPIPE, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
 
-    auto fss = std::make_unique<FSS>(argv[arg_offset++]);
-    auto mav = std::make_unique<MAV>(argv[arg_offset], std::stoi(argv[arg_offset+1]));
-    auto smm = std::make_unique<SMM>(*mav);
-
-    /* Run the signal-handling thread */
-    std::thread sig_thread = std::thread(signal_waiter);
-
-    /* Run the reconnector thread */
-    std::thread reconnector = std::thread(fss_reconnector, std::ref(*fss), std::ref(*mav));
-
-    /* Get the asset name */
-    asset_name = fss->getAssetName();
-
-    /* Setup the State Machine */
-    FMUStateMachine state_machine{*mav, *smm, *fss};
-
-    /* Connect up the notifications */
-    fss->registerCommandCB([](FSSCommand command) {
-        enqueue_event(std::make_shared<event>(command));
-    });
-    fss->registerCommsStatusCB([](FSSCommsStatus status) {
-        enqueue_event(std::make_shared<event>(status));
-    });
-    fss->registerSMMSettingsCB([](const SMMSettings &settings) {
-        enqueue_event(std::make_shared<event>(settings));
-    });
-    fss->registerPositionDataCB([](const PositionData &pd) {
-        auto pd_modified = PositionData(pd);
-        if (aircraft.newPositionReport(pd_modified))
-        {
-            if (pd_modified.getICAOAddress() == 0)
-            {
-                pd_modified.setICAOAddress(aircraft.getAircraftICAOAddress(pd_modified.getCallSign()));
-            }
-            enqueue_event(std::make_shared<event>(OtherAircraftReport{pd_modified}));
-        }
-    });
-
-    mav->registerPositionCB([](const PositionData &pd) {
-        enqueue_event(std::make_shared<event>(pd));
-    });
-    mav->registerReachedCB([](int point) {
-        enqueue_event(std::make_shared<event>(ReachedPoint{point}));
-    });
-    mav->registerBatteryCB([](const BatteryData &bd) {
-        enqueue_event(std::make_shared<event>(bd));
-    });
-
-    while (running.load())
-    {
-        std::unique_lock<std::mutex> lk(main_lock);
-        while (!event_queue.empty())
-        {
-            auto e = event_queue.front();
-            event_queue.pop();
-            lk.unlock();
-            std::visit(overloaded{
-                [&](FSSCommand cmd) {
-                    state_machine.FSSNewCommand(cmd);
-                },
-                [&](FSSCommsStatus status) {
-                    state_machine.setCommsFailure(status == fss_comms_failure);
-                },
-                [&](SMMSettings settings) {
-                    smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
-                },
-                [&](PositionData pd) {
-                    fss->reportPosition(pd);
-                    smm->reportPosition(pd);
-                },
-                [&](const ReachedPoint &rp) {
-                    fss->reachedPoint(rp.point, smm->currentSearchPoints());
-                    smm->reachedPoint(rp.point);
-                },
-                [&](BatteryData bd) {
-                    auto remaining = bd.getRemaining();
-                    if (remaining >= 0 && remaining < lowbat_threshold)
-                    {
-                        /* Time to go home */
-                        state_machine.setLowBattery();
-                    }
-                    fss->reportBatteryStatus(bd);
-                },
-                [&](OtherAircraftReport oar) {
-                    if (oar.pd.getCallSign() != fss->getAssetName())
-                    {
-                        /* Don't tell it about ourself */
-                        mav->sendADSB(oar.pd);
-                    }
-                },
-                [](const Nudge &) {},
-            }, *e);
-            lk.lock();
-        }
-        main_cv.wait(lk);
-    }
-
-    if (reconnector.joinable())
-    {
-        reconnector.join();
-    }
-    if (sig_thread.joinable())
-    {
-        sig_thread.join();
-    }
-
-    while (!event_queue.empty())
-    {
-        auto e = event_queue.front();
-        event_queue.pop();
-    }
+    App app(argv[1], argv[2], std::stoi(argv[3]));
+    app.run();
+    return 0;
 }
