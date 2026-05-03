@@ -17,7 +17,7 @@ extern "C" {
 
 class SMM : public ISMM {
 private:
-    std::shared_ptr<MAV> mav{nullptr};
+    MAV& mav;
     smm_connection conn{nullptr};
     std::string smm_host{};
     flight_safety_system::secure_string smm_user{};
@@ -36,7 +36,7 @@ private:
     void disconnect();
     void tryAcquireSearch(Point current_pos);
 public:
-    explicit SMM(std::shared_ptr<MAV> t_mav);
+    explicit SMM(MAV& t_mav);
     SMM(SMM&) = delete;
     SMM(SMM&&) = delete;
     auto operator=(SMM&) -> SMM& = delete;

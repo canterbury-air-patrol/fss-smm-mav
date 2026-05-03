@@ -93,44 +93,44 @@ FMUStateMachine::actionState(FMUState state)
 {
     if (state != fmu_state_searching)
     {
-        this->smm->cancelSearch();
+        this->smm.cancelSearch();
     }
     switch(state)
     {
         case fmu_state_manual:
             /* Tell MAV to exit auto mode */
-            this->mav->setMode(flight_mode_manual);
+            this->mav.setMode(flight_mode_manual);
             break;
         case fmu_state_searching:
             /* Tell SMM to implement the search */
-            this->smm->search(this->mav->getCurrentPosition());
+            this->smm.search(this->mav.getCurrentPosition());
             break;
         case fmu_state_rtl:
         case fmu_state_failsafe:
         case fmu_state_low_battery:
             /* Tell MAV to RTL */
-            this->mav->setMode(flight_mode_rtl);
+            this->mav.setMode(flight_mode_rtl);
             break;
         case fmu_state_goto:
             /* Tell MAV to Goto the fss position */
-            this->mav->gotoPosition(this->fss->getGoto());
-            this->mav->setMode(flight_mode_goto);
+            this->mav.gotoPosition(this->fss.getGoto());
+            this->mav.setMode(flight_mode_goto);
             break;
         case fmu_state_hold:
             /* Tell MAV to Circle/Hold Position */
-            this->mav->setMode(flight_mode_hold);
+            this->mav.setMode(flight_mode_hold);
             break;
         case fmu_state_altitude_adjust:
             /* Tell MAV to adjust the altitude */
-            this->mav->setAltitude(this->fss->getAltitude());
+            this->mav.setAltitude(this->fss.getAltitude());
             break;
         case fmu_state_disarmed:
             /* Tell MAV to disarm the aircraft */
-            this->mav->disarm();
+            this->mav.disarm();
             break;
         case fmu_state_terminate:
             /* Tell MAV to terminate the flight */
-            this->mav->terminate();
+            this->mav.terminate();
             break;
     }
 }
@@ -176,6 +176,6 @@ FMUStateMachine::setCommsFailure(bool failed)
     }
 }
 
-FMUStateMachine::FMUStateMachine(std::shared_ptr<IMAV> t_mav, std::shared_ptr<ISMM> t_smm, std::shared_ptr<IFSS> t_fss) : mav(std::move(t_mav)), smm(std::move(t_smm)), fss(std::move(t_fss))
+FMUStateMachine::FMUStateMachine(IMAV& t_mav, ISMM& t_smm, IFSS& t_fss) : mav(t_mav), smm(t_smm), fss(t_fss)
 {
 }

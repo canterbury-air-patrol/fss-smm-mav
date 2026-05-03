@@ -5,7 +5,7 @@
 #include "util.hpp"
 #include <smm-asset.h>
 
-SMM::SMM(std::shared_ptr<MAV> t_mav) : mav(std::move(t_mav))
+SMM::SMM(MAV& t_mav) : mav(t_mav)
 {
 //    smm_asset_debugging_set (true);
 }
@@ -141,7 +141,7 @@ void SMM::tryAcquireSearch(Point current_pos)
         auto new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
         if (new_search == nullptr)
         {
-            this->mav->setMode(flight_mode_rtl);
+            this->mav.setMode(flight_mode_rtl);
             this->search_retry_ts = current_timestamp_ms() + search_retry_interval_ms;
             return;
         }
@@ -156,12 +156,12 @@ void SMM::tryAcquireSearch(Point current_pos)
         retries++;
         if (retries >= 3)
         {
-            this->mav->setMode(flight_mode_rtl);
+            this->mav.setMode(flight_mode_rtl);
             this->search_retry_ts = current_timestamp_ms() + search_retry_interval_ms;
             return;
         }
     }
-    this->mav->loadSearch(this->current_search);
+    this->mav.loadSearch(this->current_search);
     this->search_retry_ts = 0;
 }
 
@@ -169,7 +169,7 @@ void SMM::search(Point current_pos)
 {
     if (this->asset == nullptr)
     {
-        this->mav->setMode(flight_mode_rtl);
+        this->mav.setMode(flight_mode_rtl);
         return;
     }
     std::lock_guard<std::mutex> lk(this->search_lock);

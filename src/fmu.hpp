@@ -1,5 +1,4 @@
 #pragma once
-#include <memory>
 #include <mutex>
 
 #include "mav/imav.hpp"
@@ -30,12 +29,12 @@ private:
     SMMCommand smm_command{smm_cmd_none};
     bool low_battery{false};
     bool fss_comms_lost{false};
-    std::shared_ptr<IMAV> mav{nullptr};
-    std::shared_ptr<ISMM> smm{nullptr};
-    std::shared_ptr<IFSS> fss{nullptr};
+    IMAV& mav;
+    ISMM& smm;
+    IFSS& fss;
     std::mutex lock{};
 public:
-    FMUStateMachine(std::shared_ptr<IMAV> t_mav, std::shared_ptr<ISMM> t_smm, std::shared_ptr<IFSS> t_fss);
+    FMUStateMachine(IMAV& t_mav, ISMM& t_smm, IFSS& t_fss);
 
     void FSSNewCommand(FSSCommand cmd);
     void SMMNewCommand(SMMCommand cmd);

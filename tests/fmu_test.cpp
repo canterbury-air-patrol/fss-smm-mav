@@ -66,7 +66,7 @@ static auto make_sm() -> SM
     auto mav = std::make_shared<MockMAV>();
     auto smm = std::make_shared<MockSMM>();
     auto fss = std::make_shared<MockFSS>();
-    auto sm  = std::make_shared<FMUStateMachine>(mav, smm, fss);
+    auto sm  = std::make_shared<FMUStateMachine>(*mav, *smm, *fss);
     return {mav, smm, fss, sm};
 }
 
