@@ -7,6 +7,12 @@
 
 #include <string>
 
+enum class terminate_action {
+    none,
+    disarm,
+    terminate,
+};
+
 class mav_connection;
 
 class MAV : public IMAV {
@@ -17,8 +23,9 @@ private:
     Point goto_position{};
     Point goto_position_sent{};
     uint16_t target_altitude{0};
+    terminate_action action;
 public:
-    MAV(std::string t_addr, uint16_t t_port);
+    MAV(std::string t_addr, uint16_t t_port, terminate_action ta);
     MAV(MAV&) = delete;
     MAV(MAV&&) = delete;
     auto operator=(MAV&) -> MAV& = delete;

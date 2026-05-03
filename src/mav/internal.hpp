@@ -106,6 +106,7 @@ class mav_connection {
         void commandAuto();
         void commandAltitute();
         void commandDisARM();
+        void commandForceDisARM();
         void commandManual();
         void commandTerminate();
         void loadSearch();
