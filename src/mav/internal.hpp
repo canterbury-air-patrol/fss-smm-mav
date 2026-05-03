@@ -71,9 +71,9 @@ class mav_connection {
         std::mutex state_lock{};
         Point last_position{};
         std::shared_ptr<SMMSearch> search{nullptr};
-        notify_position_cb position_cb{nullptr};
-        notify_battery_status_cb battery_cb{nullptr};
-        notify_reached_cb reached_cb{nullptr};
+        notify_position_cb position_cb{};
+        notify_battery_status_cb battery_cb{};
+        notify_reached_cb reached_cb{};
         bool search_loading{false};
         bool search_loaded{false};
         Point goto_position{};

@@ -61,61 +61,7 @@ enqueue_event (const std::shared_ptr<event> &e)
     main_cv.notify_one();
 }
 
-static void
-fss_command_cb (FSSCommand command)
-{
-    enqueue_event(std::make_shared<event>(command));
-}
-
-static void
-fss_comms_status_cb (FSSCommsStatus status)
-{
-    enqueue_event(std::make_shared<event>(status));
-}
-
-static void
-smm_settings_cb (const SMMSettings &settings)
-{
-    enqueue_event(std::make_shared<event>(settings));
-}
-
-static void
-mav_position_cb (const PositionData &pd)
-{
-    enqueue_event(std::make_shared<event>(pd));
-}
-
-static void
-mav_reached_cb (int point)
-{
-    enqueue_event(std::make_shared<event>(ReachedPoint{point}));
-}
-
-static void
-mav_battery_cb (const BatteryData &bd)
-{
-    enqueue_event(std::make_shared<event>(bd));
-}
-
 std::shared_ptr<known_aircraft> aircraft = nullptr;
-
-static void
-fss_other_traffic_cb (const PositionData &pd)
-{
-    auto pd_modified = PositionData(pd);
-    if (aircraft != nullptr)
-    {
-        if (aircraft->newPositionReport(pd_modified))
-        {
-            // Update the ICAO if we didn't get it in the original report
-            if (pd_modified.getICAOAddress() == 0)
-            {
-                pd_modified.setICAOAddress(aircraft->getAircraftICAOAddress(pd_modified.getCallSign()));
-            }
-            enqueue_event(std::make_shared<event>(OtherAircraftReport{pd_modified}));
-        }
-    }
-}
 
 static void
 fss_reconnector (const std::shared_ptr<FSS> &fss, const std::shared_ptr<MAV> &mav)
@@ -177,14 +123,39 @@ main(int argc, char *argv[]) -> int
     auto state_machine = std::make_shared<FMUStateMachine>(mav, smm, fss);
 
     /* Connect up the notifications */
-    fss->registerCommandCB(fss_command_cb);
-    fss->registerCommsStatusCB(fss_comms_status_cb);
-    fss->registerSMMSettingsCB(smm_settings_cb);
-    fss->registerPositionDataCB(fss_other_traffic_cb);
+    fss->registerCommandCB([](FSSCommand command) {
+        enqueue_event(std::make_shared<event>(command));
+    });
+    fss->registerCommsStatusCB([](FSSCommsStatus status) {
+        enqueue_event(std::make_shared<event>(status));
+    });
+    fss->registerSMMSettingsCB([](const SMMSettings &settings) {
+        enqueue_event(std::make_shared<event>(settings));
+    });
+    fss->registerPositionDataCB([](const PositionData &pd) {
+        auto pd_modified = PositionData(pd);
+        if (aircraft != nullptr)
+        {
+            if (aircraft->newPositionReport(pd_modified))
+            {
+                if (pd_modified.getICAOAddress() == 0)
+                {
+                    pd_modified.setICAOAddress(aircraft->getAircraftICAOAddress(pd_modified.getCallSign()));
+                }
+                enqueue_event(std::make_shared<event>(OtherAircraftReport{pd_modified}));
+            }
+        }
+    });
 
-    mav->registerPositionCB(mav_position_cb);
-    mav->registerReachedCB(mav_reached_cb);
-    mav->registerBatteryCB(mav_battery_cb);
+    mav->registerPositionCB([](const PositionData &pd) {
+        enqueue_event(std::make_shared<event>(pd));
+    });
+    mav->registerReachedCB([](int point) {
+        enqueue_event(std::make_shared<event>(ReachedPoint{point}));
+    });
+    mav->registerBatteryCB([](const BatteryData &bd) {
+        enqueue_event(std::make_shared<event>(bd));
+    });
 
     while (running.load())
     {

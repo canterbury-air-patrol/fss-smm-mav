@@ -90,16 +90,6 @@ void FSS::reportBatteryStatus(BatteryData bd)
     }
 }
 
-static void
-goto_updated (void *priv, Point p)
-{
-    if (priv != nullptr)
-    {
-        auto fss = static_cast<FSS *>(priv);
-        fss->setGoto(p);
-    }
-}
-
 void
 FSS::reconnectAll()
 {
@@ -112,5 +102,5 @@ FSS::reconnectAll()
 FSS::FSS(std::string config_file)
 {
     this->ssl_client = std::make_shared<fss_client_ssl>(config_file.c_str());
-    this->ssl_client->registerGotoUpdateCB(goto_updated, this);
+    this->ssl_client->registerGotoUpdateCB([this](Point p){ this->setGoto(p); });
 }

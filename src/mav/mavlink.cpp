@@ -811,7 +811,7 @@ mav_connection::attemptReconnect()
 
 void mav_connection::report_battery_status(int8_t remaining, int32_t consumed, double voltage)
 {
-    if (this->battery_cb != nullptr)
+    if (this->battery_cb)
     {
         this->battery_cb(BatteryData(remaining, consumed, voltage));
     }
@@ -819,7 +819,7 @@ void mav_connection::report_battery_status(int8_t remaining, int32_t consumed, d
 
 void mav_connection::report_position(double lat, double lng, double alt, uint16_t hdg, uint16_t vh, int16_t vv)
 {
-    if (this->position_cb != nullptr)
+    if (this->position_cb)
     {
         this->position_cb(PositionData(lat, lng, alt, hdg, vh, vv));
     }
@@ -827,7 +827,7 @@ void mav_connection::report_position(double lat, double lng, double alt, uint16_
 
 void mav_connection::report_reached(int point)
 {
-    if (this->reached_cb != nullptr && point > 1)
+    if (this->reached_cb && point > 1)
     {
         this->reached_cb(point - 1);
     }
