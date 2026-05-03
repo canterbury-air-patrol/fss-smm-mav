@@ -12,4 +12,5 @@ public:
     virtual ~ISMM() = default;
 
     virtual void search(Point current_pos) = 0;
+    virtual void cancelSearch() = 0;
 };

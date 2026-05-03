@@ -12,6 +12,7 @@ public:
     Point(double lat, double lng) : latitude(lat), longitude(lng) {};
     auto getLatitude() -> double { return latitude; };
     auto getLongitude() -> double { return longitude; };
+    auto operator==(const Point& other) const -> bool { return latitude == other.latitude && longitude == other.longitude; };
 };
 
 class PositionData {
