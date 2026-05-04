@@ -19,17 +19,20 @@ FSS::getAssetName() -> std::string
 auto
 FSS::getAltitude() -> uint16_t
 {
+    std::lock_guard<std::mutex> lk(this->state_lock);
     return this->assigned_altitude;
 }
 
 auto
 FSS::getGoto() -> Point
 {
+    std::lock_guard<std::mutex> lk(this->state_lock);
     return this->goto_point;
 }
 
 void FSS::setGoto(Point p)
 {
+    std::lock_guard<std::mutex> lk(this->state_lock);
     this->goto_point = p;
 }
 
