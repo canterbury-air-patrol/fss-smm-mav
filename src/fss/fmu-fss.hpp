@@ -3,6 +3,7 @@
 #include "ifss.hpp"
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "internal.hpp"
@@ -10,6 +11,7 @@
 class FSS : public IFSS {
 private:
     std::shared_ptr<fss_client_ssl> ssl_client{nullptr};
+    std::mutex state_lock{};
     uint16_t assigned_altitude{0};
     Point goto_point{};
 public:

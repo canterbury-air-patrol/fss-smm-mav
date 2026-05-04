@@ -12,13 +12,9 @@ SMM::SMM(MAV& t_mav) : mav(t_mav)
 
 SMM::~SMM()
 {
+    std::lock_guard<std::mutex> lk(this->search_lock);
     this->disconnect();
-    this->search_lock.lock();
-    if (this->current_search)
-    {
-        this->current_search = nullptr;
-    }
-    this->search_lock.unlock();
+    this->current_search = nullptr;
 }
 
 void
@@ -81,6 +77,7 @@ SMM::connect()
 void
 SMM::connect(const std::string &t_host, const flight_safety_system::secure_string &t_user, const flight_safety_system::secure_string &t_pass, const std::string &t_asset_name)
 {
+    std::lock_guard<std::mutex> lk(this->search_lock);
     if (this->conn != nullptr)
     {
         /* If the details have changed, or the connection has failed, disconnect */
@@ -107,6 +104,7 @@ SMM::connect(const std::string &t_host, const flight_safety_system::secure_strin
 void
 SMM::reportPosition(PositionData t_pd)
 {
+    std::lock_guard<std::mutex> lk(this->search_lock);
     if (this->asset)
     {
         uint64_t curr_ts = current_timestamp_ms();
@@ -117,12 +115,9 @@ SMM::reportPosition(PositionData t_pd)
             this->position_report_last_ts = curr_ts;
         }
     }
+    if (this->search_active && this->current_search == nullptr)
     {
-        std::lock_guard<std::mutex> lk(this->search_lock);
-        if (this->search_active && this->current_search == nullptr)
-        {
-            this->tryAcquireSearch(t_pd.getP());
-        }
+        this->tryAcquireSearch(t_pd.getP());
     }
 }
 
@@ -167,12 +162,12 @@ void SMM::tryAcquireSearch(Point current_pos)
 
 void SMM::search(Point current_pos)
 {
+    std::lock_guard<std::mutex> lk(this->search_lock);
     if (this->asset == nullptr)
     {
         this->mav.setMode(flight_mode_rtl);
         return;
     }
-    std::lock_guard<std::mutex> lk(this->search_lock);
     this->search_active = true;
     if (this->current_search != nullptr)
     {
