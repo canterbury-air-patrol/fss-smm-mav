@@ -39,11 +39,24 @@ mav_connection::sendHeartBeat()
 void
 mav_connection::heartbeat_loop()
 {
+    constexpr uint64_t heartbeat_timeout_ms = 5000;
     while (!this->stopping)
     {
         if (this->fd.load() != -1)
         {
             this->sendHeartBeat();
+            uint64_t ts = this->last_heartbeat_ts.load();
+            bool timed_out = (current_timestamp_ms() - ts) > heartbeat_timeout_ms;
+            if (timed_out)
+            {
+                bool expected = true;
+                if (this->mav_comms_ok.compare_exchange_strong(expected, false))
+                {
+                    std::cerr << "WARN: Autopilot heartbeat timeout — MAV comms failure\n";
+                    if (this->mav_comms_cb)
+                        this->mav_comms_cb(MavCommsStatus::failure);
+                }
+            }
         }
         std::unique_lock<std::mutex> lk(this->heartbeat_mutex);
         this->heartbeat_cv.wait_for(lk, std::chrono::seconds(1), [this]{ return this->stopping.load(); });
@@ -478,7 +491,13 @@ mav_connection::processMavLinkMsg(mavlink_message_t *msg, mavlink_status_t *stat
     {
         case MAVLINK_MSG_ID_HEARTBEAT:
         {
-            /* Update the type and flight mode */
+            this->last_heartbeat_ts.store(current_timestamp_ms());
+            bool expected = false;
+            if (this->mav_comms_ok.compare_exchange_strong(expected, true))
+            {
+                if (this->mav_comms_cb)
+                    this->mav_comms_cb(MavCommsStatus::ok);
+            }
             sys->setAutoPilotMode(mavlink_msg_heartbeat_get_type(msg));
             sys->setFlightMode(mavlink_msg_heartbeat_get_custom_mode(msg));
         }
@@ -706,6 +725,8 @@ mav_connection::connect_to_mav()
         this->retry_count = 0;
     }
     this->broken = false;
+    this->last_heartbeat_ts.store(current_timestamp_ms());
+    this->mav_comms_ok.store(false);
 
     this->recv_thread = std::thread(recv_mav_thread, this);
 }
@@ -862,4 +883,9 @@ void mav_connection::registerReachedCB(notify_reached_cb cb)
 void mav_connection::registerBatteryCB(notify_battery_status_cb cb)
 {
     this->battery_cb = cb;
+}
+
+void mav_connection::registerMavCommsStatusCB(notify_mav_comms_cb cb)
+{
+    this->mav_comms_cb = cb;
 }

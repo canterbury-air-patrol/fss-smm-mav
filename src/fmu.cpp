@@ -68,7 +68,7 @@ FMUStateMachine::updateState()
     {
         new_state = fmu_state_low_battery;
     }
-    else if (this->fss_comms_lost)
+    else if (this->fss_comms_lost || this->mav_comms_lost)
     {
         new_state = fmu_state_failsafe;
     }
@@ -172,6 +172,16 @@ FMUStateMachine::setCommsFailure(bool failed)
     {
         std::lock_guard<std::mutex> lk(this->lock);
         this->fss_comms_lost = failed;
+        this->updateState();
+    }
+}
+
+void
+FMUStateMachine::setMavCommsFailure(bool failed)
+{
+    {
+        std::lock_guard<std::mutex> lk(this->lock);
+        this->mav_comms_lost = failed;
         this->updateState();
     }
 }

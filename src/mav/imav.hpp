@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../fmu-core-types.hpp"
+#include "../fmu-types.hpp"
 #include <cstdint>
 
 enum flight_mode {
@@ -27,4 +28,5 @@ public:
     virtual void gotoPosition(Point to) = 0;
     virtual void setAltitude(uint16_t alt) = 0;
     virtual auto getCurrentPosition() -> Point = 0;
+    virtual void registerMavCommsStatusCB(notify_mav_comms_cb cb) = 0;
 };

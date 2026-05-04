@@ -110,3 +110,8 @@ void MAV::registerBatteryCB(notify_battery_status_cb cb)
 {
     this->connection->registerBatteryCB(cb);
 }
+
+void MAV::registerMavCommsStatusCB(notify_mav_comms_cb cb)
+{
+    this->connection->registerMavCommsStatusCB(cb);
+}

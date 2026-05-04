@@ -29,6 +29,7 @@ private:
     SMMCommand smm_command{smm_cmd_none};
     bool low_battery{false};
     bool fss_comms_lost{false};
+    bool mav_comms_lost{false};
     IMAV& mav;
     ISMM& smm;
     IFSS& fss;
@@ -40,4 +41,5 @@ public:
     void SMMNewCommand(SMMCommand cmd);
     void setLowBattery();
     void setCommsFailure(bool failed);
+    void setMavCommsFailure(bool failed);
 };

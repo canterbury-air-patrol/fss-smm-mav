@@ -9,6 +9,7 @@
 
 #include "../fmu-types.hpp"
 #include "../smm/smm.hpp"
+#include "../util.hpp"
 
 class mav_comp {
     private:
@@ -65,6 +66,9 @@ class mav_connection {
         std::atomic<bool> stopping{false};
         std::mutex heartbeat_mutex{};
         std::condition_variable heartbeat_cv{};
+        std::atomic<uint64_t> last_heartbeat_ts{0};
+        std::atomic<bool> mav_comms_ok{false};
+        notify_mav_comms_cb mav_comms_cb{};
         mav_systems systems{};
         /* state_lock guards: last_position, search, search_loaded,
          * search_loading, goto_active, goto_position, retry_count, last_tried. */
@@ -117,4 +121,5 @@ class mav_connection {
         void registerPositionCB(notify_position_cb cb);
         void registerReachedCB(notify_reached_cb cb);
         void registerBatteryCB(notify_battery_status_cb cb);
+        void registerMavCommsStatusCB(notify_mav_comms_cb cb);
 };
