@@ -65,3 +65,8 @@ public:
     auto getConsumed() -> int32_t { return this->consumed; };
     auto getVoltage() -> double { return this->voltage; };
 };
+
+enum class MavCommsStatus {
+    ok,
+    failure,
+};

@@ -45,4 +45,5 @@ public:
     void registerPositionCB(notify_position_cb cb);
     void registerReachedCB(notify_reached_cb);
     void registerBatteryCB(notify_battery_status_cb cb);
+    void registerMavCommsStatusCB(notify_mav_comms_cb cb) override;
 };

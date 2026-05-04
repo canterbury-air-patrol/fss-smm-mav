@@ -79,6 +79,9 @@ public:
         mav->registerBatteryCB([this](const BatteryData &bd) {
             enqueue_event(std::make_shared<event>(bd));
         });
+        mav->registerMavCommsStatusCB([this](MavCommsStatus status) {
+            enqueue_event(std::make_shared<event>(status));
+        });
 
         std::thread sig_thread([this]{ signal_waiter(); });
         std::thread reconnector([this]{ fss_reconnector(); });
@@ -97,6 +100,9 @@ public:
                     },
                     [&](FSSCommsStatus status) {
                         state_machine.setCommsFailure(status == fss_comms_failure);
+                    },
+                    [&](MavCommsStatus status) {
+                        state_machine.setMavCommsFailure(status == MavCommsStatus::failure);
                     },
                     [&](SMMSettings settings) {
                         smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
