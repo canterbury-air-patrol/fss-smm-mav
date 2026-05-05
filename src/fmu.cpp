@@ -133,6 +133,10 @@ FMUStateMachine::actionState(FMUState state)
             this->mav.terminate();
             break;
     }
+
+    if (this->state_change_cb) {
+        this->state_change_cb(state);
+    }
 }
 
 
@@ -186,6 +190,13 @@ FMUStateMachine::setMavCommsFailure(bool failed)
     }
 }
 
-FMUStateMachine::FMUStateMachine(IMAV& t_mav, ISMM& t_smm, IFSS& t_fss) : mav(t_mav), smm(t_smm), fss(t_fss)
+FMUStateMachine::FMUStateMachine(IMAV& t_mav, ISMM& t_smm, IFSS& t_fss) : mav(t_mav), smm(t_smm), fss(t_fss), state_change_cb{}
 {
+}
+
+void
+FMUStateMachine::setStateChangeCB(std::function<void(FMUState)> cb)
+{
+    std::lock_guard<std::mutex> lk(this->lock);
+    this->state_change_cb = std::move(cb);
 }
