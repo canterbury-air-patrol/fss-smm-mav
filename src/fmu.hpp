@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <mutex>
 
 #include "mav/imav.hpp"
@@ -34,9 +35,11 @@ private:
     ISMM& smm;
     IFSS& fss;
     std::mutex lock{};
+    std::function<void(FMUState)> state_change_cb;
 public:
     FMUStateMachine(IMAV& t_mav, ISMM& t_smm, IFSS& t_fss);
 
+    void setStateChangeCB(std::function<void(FMUState)> cb);
     void FSSNewCommand(FSSCommand cmd);
     void SMMNewCommand(SMMCommand cmd);
     void setLowBattery();

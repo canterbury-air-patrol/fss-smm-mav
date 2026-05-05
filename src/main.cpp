@@ -25,13 +25,14 @@ template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 #include "smm/smm-types.hpp"
 #include "event.hpp"
 #include "aircraft.hpp"
+#include "logger.hpp"
 
 constexpr int lowbat_threshold = 20;
 constexpr int reconnect_interval = 10;
 
 class App {
 public:
-    App(const char *config_file, const char *addr, int port, terminate_action ta)
+    App(const char *config_file, const char *addr, int port, terminate_action ta, Logger &t_logger)
         : fss(std::make_unique<FSS>(config_file))
         , mav(std::make_unique<MAV>(addr, port, ta))
         , smm(std::make_unique<SMM>(*mav))
@@ -43,11 +44,16 @@ public:
         , reconnect_cv{}
         , running{true}
         , asset_name(fss->getAssetName())
+        , logger(t_logger)
     {}
 
     void run()
     {
         FMUStateMachine state_machine{*mav, *smm, *fss};
+        state_machine.setStateChangeCB([this](FMUState s) {
+            logger.log(std::string("STATE ") + fmu_state_name(s));
+        });
+        logger.log("START " + asset_name);
 
         fss->registerCommandCB([this](FSSCommand command) {
             enqueue_event(std::make_shared<event>(command));
@@ -96,15 +102,19 @@ public:
                 lk.unlock();
                 std::visit(overloaded{
                     [&](FSSCommand cmd) {
+                        logger.log(std::string("CMD fss ") + fss_cmd_name(cmd));
                         state_machine.FSSNewCommand(cmd);
                     },
                     [&](FSSCommsStatus status) {
+                        logger.log(std::string("COMMS fss ") + (status == fss_comms_failure ? "failure" : "okay"));
                         state_machine.setCommsFailure(status == fss_comms_failure);
                     },
                     [&](MavCommsStatus status) {
+                        logger.log(std::string("COMMS mav ") + (status == MavCommsStatus::failure ? "failure" : "okay"));
                         state_machine.setMavCommsFailure(status == MavCommsStatus::failure);
                     },
                     [&](SMMSettings settings) {
+                        logger.log("SMM connect " + settings.getURL());
                         smm->connect(settings.getURL(), settings.getUsername(), settings.getPassword(), asset_name);
                     },
                     [&](PositionData pd) {
@@ -112,6 +122,7 @@ public:
                         smm->reportPosition(pd);
                     },
                     [&](const ReachedPoint &rp) {
+                        logger.log("WAYPOINT " + std::to_string(rp.point));
                         fss->reachedPoint(rp.point, smm->currentSearchPoints());
                         smm->reachedPoint(rp.point);
                     },
@@ -119,6 +130,7 @@ public:
                         auto remaining = bd.getRemaining();
                         if (remaining >= 0 && remaining < lowbat_threshold)
                         {
+                            logger.log("BATTERY low " + std::to_string(remaining) + "%");
                             state_machine.setLowBattery();
                         }
                         fss->reportBatteryStatus(bd);
@@ -149,6 +161,8 @@ public:
         {
             event_queue.pop();
         }
+
+        logger.log("STOP");
     }
 
 private:
@@ -205,6 +219,7 @@ private:
 
     std::atomic<bool> running{true};
     std::string asset_name;
+    Logger &logger;
 };
 
 auto
@@ -277,7 +292,8 @@ main(int argc, char *argv[]) -> int
     /* Ignore SIGPIPE */
     signal(SIGPIPE, SIG_IGN);
 
-    App app(argv[optind], argv[optind + 1], std::stoi(argv[optind + 2]), ta);
+    Logger logger("/var/log/cap-fmu");
+    App app(argv[optind], argv[optind + 1], std::stoi(argv[optind + 2]), ta, logger);
     app.run();
     return 0;
 }

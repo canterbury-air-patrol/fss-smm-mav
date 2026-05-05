@@ -8,7 +8,7 @@ AM_CXXFLAGS+= -pthread -Wno-address-of-packed-member
 AM_CXXFLAGS+= -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wduplicated-cond -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
 AM_CXXFLAGS+= -I ../mavlink
 
-cap_fmu_SOURCES = main.cpp fmu.cpp fmu.hpp fmu-types.hpp event.hpp aircraft.hpp
+cap_fmu_SOURCES = main.cpp fmu.cpp fmu.hpp fmu-types.hpp event.hpp aircraft.hpp logger.cpp logger.hpp
 cap_fmu_SOURCES += fss/fss.cpp fss/fmu-fss.hpp fss/fmu-fss-types.hpp fss/fss-client-ssl.cpp fss/internal.hpp
 cap_fmu_SOURCES += mav/internal.hpp mav/mav.cpp mav/mav.hpp mav/mav-sys.cpp mav/mavlink.cpp
 cap_fmu_SOURCES += smm/smm.cpp smm/smm.hpp smm/smm-types.hpp
