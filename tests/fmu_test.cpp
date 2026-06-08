@@ -25,6 +25,7 @@ public:
     void gotoPosition(Point) override {}
     void setAltitude(uint16_t) override {}
     auto getCurrentPosition() -> Point override { return Point{}; }
+    void registerMavCommsStatusCB(notify_mav_comms_cb) override {}
 };
 
 class MockSMM : public ISMM {
