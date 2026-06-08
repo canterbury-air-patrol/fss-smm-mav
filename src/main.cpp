@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <list>
 #include <queue>
@@ -226,6 +227,30 @@ private:
     Logger &logger;
 };
 
+static void
+print_usage(const char *progname)
+{
+    std::cerr << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port" << std::endl;
+}
+
+static auto
+parse_terminate_action(const std::string &val) -> std::optional<terminate_action>
+{
+    if (val == "none")
+    {
+        return terminate_action::none;
+    }
+    if (val == "disarm")
+    {
+        return terminate_action::disarm;
+    }
+    if (val == "terminate")
+    {
+        return terminate_action::terminate;
+    }
+    return std::nullopt;
+}
+
 auto
 main(int argc, char *argv[]) -> int
 {
@@ -234,8 +259,7 @@ main(int argc, char *argv[]) -> int
         {nullptr, 0, nullptr, 0}
     };
 
-    terminate_action ta = terminate_action::none;
-    bool ta_set = false;
+    std::optional<terminate_action> ta;
 
     int opt;
     int option_index = 0;
@@ -243,46 +267,31 @@ main(int argc, char *argv[]) -> int
     {
         if (opt == 't')
         {
-            std::string val(optarg);
-            if (val == "none")
+            ta = parse_terminate_action(optarg);
+            if (!ta)
             {
-                ta = terminate_action::none;
-                ta_set = true;
-            }
-            else if (val == "disarm")
-            {
-                ta = terminate_action::disarm;
-                ta_set = true;
-            }
-            else if (val == "terminate")
-            {
-                ta = terminate_action::terminate;
-                ta_set = true;
-            }
-            else
-            {
-                std::cerr << "Error: unknown --terminate-action value '" << val << "' (must be none, disarm, or terminate)" << std::endl;
-                return -1;
+                std::cerr << "Error: unknown --terminate-action value '" << optarg << "' (must be none, disarm, or terminate)" << std::endl;
+                return 1;
             }
         }
         else
         {
-            std::cerr << "Usage: " << argv[0] << " --terminate-action=none|disarm|terminate client.json addr port" << std::endl;
-            return -1;
+            print_usage(argv[0]);
+            return 1;
         }
     }
 
-    if (!ta_set)
+    if (!ta)
     {
         std::cerr << "Error: --terminate-action is required (none, disarm, or terminate)" << std::endl;
-        std::cerr << "Usage: " << argv[0] << " --terminate-action=none|disarm|terminate client.json addr port" << std::endl;
-        return -1;
+        print_usage(argv[0]);
+        return 1;
     }
 
     if (argc - optind != 3)
     {
-        std::cerr << "Usage: " << argv[0] << " --terminate-action=none|disarm|terminate client.json addr port" << std::endl;
-        return -1;
+        print_usage(argv[0]);
+        return 1;
     }
 
     /* Block SIGINT so it can be handled synchronously by signal_waiter.
@@ -297,7 +306,7 @@ main(int argc, char *argv[]) -> int
     signal(SIGPIPE, SIG_IGN);
 
     Logger logger("/var/log/cap-fmu");
-    App app(argv[optind], argv[optind + 1], std::stoi(argv[optind + 2]), ta, logger);
+    App app(argv[optind], argv[optind + 1], std::stoi(argv[optind + 2]), *ta, logger);
     app.run();
     return 0;
 }
