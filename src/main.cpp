@@ -92,9 +92,14 @@ public:
         std::thread sig_thread([this]{ signal_waiter(); });
         std::thread reconnector([this]{ fss_reconnector(); });
 
-        while (running.load())
+        while (true)
         {
             std::unique_lock<std::mutex> lk(main_lock);
+            main_cv.wait(lk, [this]{ return !event_queue.empty() || !running.load(); });
+            if (!running.load() && event_queue.empty())
+            {
+                break;
+            }
             while (!event_queue.empty())
             {
                 auto e = event_queue.front();
@@ -145,7 +150,6 @@ public:
                 }, *e);
                 lk.lock();
             }
-            main_cv.wait(lk);
         }
 
         if (reconnector.joinable())
