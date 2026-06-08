@@ -149,6 +149,26 @@ TEST_CASE("terminate overrides comms failure", "[state_machine]")
     REQUIRE(mav->terminated);
 }
 
+/* Design decision: low_battery outranks comms_failure.  Both drive RTL, but
+ * low_battery latches, so clearing comms (or sending FSS commands) must not
+ * release the aircraft from RTL while the battery is still low. */
+TEST_CASE("low battery outranks comms failure", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm();
+
+    sm->setCommsFailure(true);
+    REQUIRE(mav->last_mode == flight_mode_rtl);
+
+    sm->setLowBattery();
+    REQUIRE(mav->last_mode == flight_mode_rtl);
+
+    sm->setCommsFailure(false);
+    REQUIRE(mav->last_mode == flight_mode_rtl);
+
+    sm->FSSNewCommand(fss_cmd_hold);
+    REQUIRE(mav->last_mode == flight_mode_rtl);
+}
+
 /* Design decision: low_battery BLOCKS manual and disarm.  Allowing manual
  * override or a mid-air disarm when the battery is critically low risks loss
  * of the aircraft; RTL is the safe action. */
@@ -160,6 +180,27 @@ TEST_CASE("manual blocked when low battery is set", "[state_machine]")
     sm->FSSNewCommand(fss_cmd_manual);
 
     REQUIRE(mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE("manual allowed when battery OK", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm();
+
+    /* The machine starts in fmu_state_manual, so move away first to make the
+     * transition back to manual observable. */
+    sm->FSSNewCommand(fss_cmd_hold);
+    sm->FSSNewCommand(fss_cmd_manual);
+
+    REQUIRE(mav->last_mode == flight_mode_manual);
+}
+
+TEST_CASE("disarm allowed when battery OK", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm();
+
+    sm->FSSNewCommand(fss_cmd_disarm);
+
+    REQUIRE(mav->disarmed);
 }
 
 TEST_CASE("disarm blocked when low battery is set", "[state_machine]")
