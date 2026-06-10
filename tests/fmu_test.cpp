@@ -189,8 +189,9 @@ TEST_CASE("manual allowed when battery OK", "[state_machine]")
     /* The machine starts in fmu_state_manual, so move away first to make the
      * transition back to manual observable. */
     sm->FSSNewCommand(fss_cmd_hold);
-    sm->FSSNewCommand(fss_cmd_manual);
+    REQUIRE(mav->last_mode == flight_mode_hold);
 
+    sm->FSSNewCommand(fss_cmd_manual);
     REQUIRE(mav->last_mode == flight_mode_manual);
 }
 
