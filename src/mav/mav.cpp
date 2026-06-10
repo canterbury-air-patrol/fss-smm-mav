@@ -14,12 +14,11 @@ MAV::setMode(flight_mode fm)
             this->connection->commandManual();
             break;
         case flight_mode_goto:
-            /* Load a track with a single waypoint + RTL, skip if unchanged */
-            if (!(this->goto_position == this->goto_position_sent))
-            {
-                this->connection->commandGoto(this->goto_position);
-                this->goto_position_sent = this->goto_position;
-            }
+            /* Load a track with a single waypoint + RTL.  setMode() is only
+             * called by the state machine on an actual transition into goto,
+             * so this must always re-send: a goto->hold->goto cycle with the
+             * same waypoint still needs the track re-loaded to re-engage. */
+            this->connection->commandGoto(this->goto_position);
             break;
         case flight_mode_hold:
             /* Circle or similar */
