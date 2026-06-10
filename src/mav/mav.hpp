@@ -21,7 +21,6 @@ private:
     flight_mode mode{flight_mode_unknown};
     bool armed{false};
     Point goto_position{};
-    Point goto_position_sent{};
     uint16_t target_altitude{0};
     terminate_action action;
 public:
