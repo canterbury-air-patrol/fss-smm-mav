@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <list>
 #include <queue>
 #include <iostream>
@@ -234,7 +235,7 @@ print_usage(const char *progname)
 }
 
 static auto
-parse_terminate_action(const std::string &val) -> std::optional<terminate_action>
+parse_terminate_action(std::string_view val) -> std::optional<terminate_action>
 {
     if (val == "none")
     {
@@ -306,7 +307,7 @@ main(int argc, char *argv[]) -> int
     signal(SIGPIPE, SIG_IGN);
 
     Logger logger("/var/log/cap-fmu");
-    App app(argv[optind], argv[optind + 1], std::stoi(argv[optind + 2]), *ta, logger);
+    App app(argv[optind], argv[optind + 1], std::stoi(argv[optind + 2]), ta.value(), logger);
     app.run();
     return 0;
 }
