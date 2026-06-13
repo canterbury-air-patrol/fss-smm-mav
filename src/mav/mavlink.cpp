@@ -824,7 +824,7 @@ mav_connection::~mav_connection ()
 auto
 mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
 {
-    this->send_lock.lock ();
+    std::lock_guard<std::mutex> lk (this->send_lock);
     uint8_t buf[BUFFER_LEN];
     size_t to_send = mavlink_msg_to_send_buffer (buf, msg);
     size_t sent = 0;
@@ -833,13 +833,11 @@ mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
         ssize_t transfered = send (this->fd.load (), buf + sent, to_send - sent, 0);
         if (transfered < 0)
         {
-            this->send_lock.unlock ();
             this->broken = true;
             return false;
         }
         sent += transfered;
     }
-    this->send_lock.unlock ();
     return true;
 }
 
