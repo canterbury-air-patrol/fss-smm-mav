@@ -322,5 +322,10 @@ main (int argc, char *argv[]) -> int
         std::cerr << "Fatal: " << e.what () << '\n';
         return 1;
     }
+    catch (...)
+    {
+        std::cerr << "Fatal: unknown exception\n";
+        return 1;
+    }
     return 0;
 }
