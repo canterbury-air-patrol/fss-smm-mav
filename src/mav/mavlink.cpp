@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -833,6 +834,8 @@ mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
         ssize_t transfered = send (this->fd.load (), buf + sent, to_send - sent, 0);
         if (transfered < 0)
         {
+            /* Preserve the failure detail before tearing anything down. */
+            std::cerr << "WARN: MAV send() failed: " << std::strerror (errno) << "\n";
             /* Only flag the connection broken and let the reconnector tear it
              * down. We must not call disconnect_from_mav() here: sendMavLinkMsg
              * can run on the recv thread (via processMessages), and that path
