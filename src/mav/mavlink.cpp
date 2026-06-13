@@ -899,23 +899,23 @@ mav_connection::report_reached (int point)
 void
 mav_connection::registerPositionCB (notify_position_cb cb)
 {
-    this->position_cb = cb;
+    this->position_cb = std::move (cb);
 }
 
 void
 mav_connection::registerReachedCB (notify_reached_cb cb)
 {
-    this->reached_cb = cb;
+    this->reached_cb = std::move (cb);
 }
 
 void
 mav_connection::registerBatteryCB (notify_battery_status_cb cb)
 {
-    this->battery_cb = cb;
+    this->battery_cb = std::move (cb);
 }
 
 void
 mav_connection::registerMavCommsStatusCB (notify_mav_comms_cb cb)
 {
-    this->mav_comms_cb = cb;
+    this->mav_comms_cb = std::move (cb);
 }

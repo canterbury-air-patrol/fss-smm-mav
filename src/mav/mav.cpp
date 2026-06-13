@@ -109,23 +109,23 @@ MAV::loadSearch (const std::shared_ptr<SMMSearch> &search)
 void
 MAV::registerPositionCB (notify_position_cb cb)
 {
-    this->connection->registerPositionCB (cb);
+    this->connection->registerPositionCB (std::move (cb));
 }
 
 void
 MAV::registerReachedCB (notify_reached_cb cb)
 {
-    this->connection->registerReachedCB (cb);
+    this->connection->registerReachedCB (std::move (cb));
 }
 
 void
 MAV::registerBatteryCB (notify_battery_status_cb cb)
 {
-    this->connection->registerBatteryCB (cb);
+    this->connection->registerBatteryCB (std::move (cb));
 }
 
 void
 MAV::registerMavCommsStatusCB (notify_mav_comms_cb cb)
 {
-    this->connection->registerMavCommsStatusCB (cb);
+    this->connection->registerMavCommsStatusCB (std::move (cb));
 }

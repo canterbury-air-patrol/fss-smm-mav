@@ -17,7 +17,7 @@ class FSS : public IFSS
     Point goto_point{};
 
   public:
-    FSS (std::string config_file);
+    explicit FSS (const std::string &config_file);
     FSS (FSS &) = delete;
     FSS (FSS &&) = delete;
     auto operator= (FSS &) -> FSS & = delete;
