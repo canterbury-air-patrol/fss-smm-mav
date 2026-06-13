@@ -631,13 +631,13 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             std::cout << "Status: ";
             char text_buf[BUFFER_LEN];
             mavlink_msg_statustext_get_text (msg, text_buf);
-            std::cout << text_buf << std::endl;
+            std::cout << text_buf << '\n';
         }
         break;
         default:
-            std::cout << std::endl
+            std::cout << '\n'
                       << "Received packet: SYS: " << (short)msg->sysid << ", COMP: " << (short)msg->compid
-                      << ", LEN: " << (short)msg->len << ", MSG ID: " << msg->msgid << std::endl;
+                      << ", LEN: " << (short)msg->len << ", MSG ID: " << msg->msgid << '\n';
     }
 }
 

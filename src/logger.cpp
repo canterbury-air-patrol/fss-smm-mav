@@ -16,7 +16,7 @@ Logger::Logger (std::string_view dir) : file{}, lock{}
     std::filesystem::create_directories (log_dir, ec);
     if (ec)
     {
-        std::cerr << "logger: cannot create " << log_dir << ": " << ec.message () << std::endl;
+        std::cerr << "logger: cannot create " << log_dir << ": " << ec.message () << '\n';
         return;
     }
 
@@ -25,7 +25,7 @@ Logger::Logger (std::string_view dir) : file{}, lock{}
     file.open (log_path, std::ios::out | std::ios::trunc);
     if (!file.is_open ())
     {
-        std::cerr << "logger: cannot open " << log_path << std::endl;
+        std::cerr << "logger: cannot open " << log_path << '\n';
     }
 }
 
