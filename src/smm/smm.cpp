@@ -44,7 +44,7 @@ SMM::connect ()
     if (smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
     {
         /* Oh dear */
-        std::cout << "SMM: Connection failed (" << smm_asset_connection_get_state (this->conn) << ")" << std::endl;
+        std::cout << "SMM: Connection failed (" << smm_asset_connection_get_state (this->conn) << ")" << '\n';
         this->disconnect ();
         return;
     }
@@ -62,14 +62,14 @@ SMM::connect ()
         }
         if (this->asset == nullptr)
         {
-            std::cout << "SMM: Failed to find this asset" << std::endl;
+            std::cout << "SMM: Failed to find this asset" << '\n';
             this->disconnect ();
             return;
         }
     }
     else
     {
-        std::cout << "SMM: Failed to get assets" << std::endl;
+        std::cout << "SMM: Failed to get assets" << '\n';
         this->disconnect ();
     }
 }
@@ -86,7 +86,7 @@ SMM::connect (const std::string &t_host, const flight_safety_system::secure_stri
             || this->asset_name != t_asset_name
             || smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
         {
-            std::cout << "SMM: Details have changed" << std::endl;
+            std::cout << "SMM: Details have changed" << '\n';
             this->disconnect ();
         }
     }
@@ -98,7 +98,7 @@ SMM::connect (const std::string &t_host, const flight_safety_system::secure_stri
         this->smm_pass = t_pass;
         this->asset_name = t_asset_name;
 
-        std::cout << "SMM: Connecting (" << this->smm_host << "," << this->asset_name << ")" << std::endl;
+        std::cout << "SMM: Connecting (" << this->smm_host << "," << this->asset_name << ")" << '\n';
         this->connect ();
     }
 }

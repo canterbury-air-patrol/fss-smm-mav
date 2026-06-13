@@ -237,7 +237,7 @@ static void
 print_usage (const char *progname)
 {
     std::cerr << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port"
-              << std::endl;
+              << '\n';
 }
 
 static auto
@@ -276,7 +276,7 @@ main (int argc, char *argv[]) -> int
             if (!ta)
             {
                 std::cerr << "Error: unknown --terminate-action value '" << optarg
-                          << "' (must be none, disarm, or terminate)" << std::endl;
+                          << "' (must be none, disarm, or terminate)" << '\n';
                 return 1;
             }
         }
@@ -289,7 +289,7 @@ main (int argc, char *argv[]) -> int
 
     if (!ta)
     {
-        std::cerr << "Error: --terminate-action is required (none, disarm, or terminate)" << std::endl;
+        std::cerr << "Error: --terminate-action is required (none, disarm, or terminate)" << '\n';
         print_usage (argv[0]);
         return 1;
     }
