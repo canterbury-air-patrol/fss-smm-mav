@@ -24,6 +24,7 @@ PKG_INSTALLDIR
 PKG_CHECK_MODULES([FSS_CLIENT_SSL], [fss-client-ssl])
 PKG_CHECK_MODULES([FSS_TRANSPORT], [fss-transport])
 PKG_CHECK_MODULES([SMM_ASSET], [smm-asset])
+PKG_CHECK_MODULES([JSONCPP], [jsoncpp])
 
 AC_CHECK_LIB([pthread], [pthread_create], [
        have_pthread=yes

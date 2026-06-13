@@ -25,6 +25,9 @@ class SMM : public ISMM
     flight_safety_system::secure_string smm_user{};
     flight_safety_system::secure_string smm_pass{};
     std::string asset_name{};
+    /* Local asset properties (from client.json), fixed at construction. */
+    uint16_t altitude_cap{ 122 };
+    double camera_fov_deg{ 90.0 };
     std::mutex search_lock{};
     std::shared_ptr<SMMSearch> current_search{ nullptr };
     smm_assets assets_list{ nullptr };
@@ -39,7 +42,7 @@ class SMM : public ISMM
     void tryAcquireSearch (Point current_pos);
 
   public:
-    explicit SMM (MAV &t_mav);
+    SMM (MAV &t_mav, uint16_t t_altitude_cap, double t_camera_fov_deg);
     SMM (SMM &) = delete;
     SMM (SMM &&) = delete;
     auto operator= (SMM &) -> SMM & = delete;
