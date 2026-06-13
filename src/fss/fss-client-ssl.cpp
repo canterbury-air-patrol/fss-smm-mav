@@ -35,6 +35,10 @@ fss_client_ssl::handleCommand (const std::shared_ptr<flight_safety_system::trans
             this->report_goto_update (Point (msg->getLatitude (), msg->getLongitude ()));
             this->report_command (fss_cmd_goto);
             break;
+        case flight_safety_system::transport::asset_command_altitude:
+            this->report_altitude_update (msg->getAltitude ());
+            this->report_command (fss_cmd_altitude);
+            break;
         case flight_safety_system::transport::asset_command_hold:
             this->report_command (fss_cmd_hold);
             break;
@@ -161,6 +165,15 @@ fss_client_ssl::report_goto_update (Point p)
     if (this->goto_cb)
     {
         this->goto_cb (p);
+    }
+}
+
+void
+fss_client_ssl::report_altitude_update (uint32_t alt)
+{
+    if (this->altitude_cb)
+    {
+        this->altitude_cb (alt);
     }
 }
 
