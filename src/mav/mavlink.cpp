@@ -252,6 +252,23 @@ mav_connection::commandAuto ()
 }
 
 void
+mav_connection::commandAltitude (uint16_t alt)
+{
+    mavlink_message_t msg;
+    /* Map feet to meters for MAVLink */
+    constexpr float FEET_TO_METERS = 0.3048f;
+    float alt_m = static_cast<float> (alt) * FEET_TO_METERS;
+
+    /* MAV_CMD_DO_CHANGE_ALTITUDE:
+       Param 1: Altitude (float, meters)
+       Param 2: Frame (MAV_FRAME_GLOBAL_RELATIVE_ALT = 3)
+    */
+    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, TARGET_SYS_ID, 1, MAV_CMD_DO_CHANGE_ALTITUDE, 0, alt_m,
+                                   MAV_FRAME_GLOBAL_RELATIVE_ALT, 0, 0, 0, 0, 0);
+    this->sendMavLinkMsg (&msg);
+}
+
+void
 mav_connection::commandForceDisARM ()
 {
     constexpr float force_magic = 21196.0f;

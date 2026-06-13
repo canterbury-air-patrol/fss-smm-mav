@@ -12,6 +12,8 @@ class MockMAV : public IMAV
     int set_mode_calls{ 0 };
     bool disarmed{ false };
     bool terminated{ false };
+    uint16_t last_altitude{ 0 };
+    int set_altitude_calls{ 0 };
 
     MockMAV () = default;
     MockMAV (const MockMAV &) = delete;
@@ -41,8 +43,10 @@ class MockMAV : public IMAV
     {
     }
     void
-    setAltitude (uint16_t) override
+    setAltitude (uint16_t alt) override
     {
+        last_altitude = alt;
+        set_altitude_calls++;
     }
     auto
     getCurrentPosition () -> Point override
@@ -293,4 +297,26 @@ TEST_CASE ("goto does not re-action on repeated FSS goto", "[state_machine]")
 
     sm->FSSNewCommand (fss_cmd_goto);
     REQUIRE (mav->set_mode_calls == calls);
+}
+
+TEST_CASE ("altitude adjust command calls mav setAltitude", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    fss->altitude_val = 150;
+    sm->FSSNewCommand (fss_cmd_altitude);
+
+    REQUIRE (mav->last_altitude == 150);
+}
+
+TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    fss->altitude_val = 150;
+    sm->FSSNewCommand (fss_cmd_altitude);
+    int calls = mav->set_altitude_calls;
+
+    sm->FSSNewCommand (fss_cmd_altitude);
+    REQUIRE (mav->set_altitude_calls == calls);
 }
