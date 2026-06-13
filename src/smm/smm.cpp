@@ -113,8 +113,8 @@ SMM::reportPosition (PositionData t_pd)
         if (this->position_report_last_ts + 1000 <= curr_ts)
         {
             Point p = t_pd.getP ();
-            smm_asset_report_position (this->asset, p.getLatitude (), p.getLongitude (), t_pd.getAltitude (),
-                                       t_pd.getHeading () / 100, 3);
+            smm_asset_report_position (this->asset, p.getLatitude (), p.getLongitude (),
+                                       static_cast<int32_t> (t_pd.getAltitude ()), t_pd.getHeading () / 100, 3);
             this->position_report_last_ts = curr_ts;
         }
     }
@@ -226,13 +226,13 @@ SMMSearch::SMMSearch (smm_search t_search)
         this->addPoint (wp);
     }
     smm_waypoints_free (wps, wps_count);
-    this->altitude = smm_search_sweep_width (search);
+    this->altitude = static_cast<int> (smm_search_sweep_width (search));
 }
 
 auto
 SMMSearch::getPointsCount () -> int
 {
-    return this->points.size ();
+    return static_cast<int> (this->points.size ());
 }
 
 auto
