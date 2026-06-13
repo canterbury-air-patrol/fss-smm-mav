@@ -122,6 +122,9 @@ FSS::FSS (const std::string &config_file)
 {
     this->ssl_client = std::make_shared<fss_client_ssl> (config_file.c_str ());
     this->ssl_client->registerGotoUpdateCB ([this] (Point p) { this->setGoto (p); });
+    /* The wire altitude is uint32_t; assigned_altitude is uint16_t. Altitudes
+     * are in feet, so the value always fits well within 16 bits (65535ft is far
+     * above any operating ceiling) and the narrowing cast cannot lose data. */
     this->ssl_client->registerAltitudeUpdateCB ([this] (uint32_t alt)
                                                 { this->setAltitude (static_cast<uint16_t> (alt)); });
 }
