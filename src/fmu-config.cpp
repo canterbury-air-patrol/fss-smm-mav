@@ -125,16 +125,20 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         {
             std::cerr << "Config: camera_fov_deg is not numeric, using default " << cfg.camera_fov_deg << "\n";
         }
-        /* A total field of view outside (0, 180) makes the altitude derivation
-         * degenerate (tan(fov/2) <= 0 or undefined). */
-        else if (double fov = fov_value.asDouble (); fov > 0.0 && fov < 180.0)
-        {
-            cfg.camera_fov_deg = fov;
-        }
         else
         {
-            std::cerr << "Config: camera_fov_deg (" << fov << ") out of range (0,180), using default "
-                      << cfg.camera_fov_deg << "\n";
+            double fov = fov_value.asDouble ();
+            /* A total field of view outside (0, 180) makes the altitude
+             * derivation degenerate (tan(fov/2) <= 0 or undefined). */
+            if (fov > 0.0 && fov < 180.0)
+            {
+                cfg.camera_fov_deg = fov;
+            }
+            else
+            {
+                std::cerr << "Config: camera_fov_deg (" << fov << ") out of range (0,180), using default "
+                          << cfg.camera_fov_deg << "\n";
+            }
         }
     }
 
