@@ -23,6 +23,13 @@ FSS::getAltitude () -> uint16_t
     return this->assigned_altitude;
 }
 
+void
+FSS::setAltitude (uint16_t alt)
+{
+    std::lock_guard<std::mutex> lk (this->state_lock);
+    this->assigned_altitude = alt;
+}
+
 auto
 FSS::getGoto () -> Point
 {
@@ -115,4 +122,6 @@ FSS::FSS (const std::string &config_file)
 {
     this->ssl_client = std::make_shared<fss_client_ssl> (config_file.c_str ());
     this->ssl_client->registerGotoUpdateCB ([this] (Point p) { this->setGoto (p); });
+    this->ssl_client->registerAltitudeUpdateCB ([this] (uint32_t alt)
+                                                { this->setAltitude (static_cast<uint16_t> (alt)); });
 }

@@ -27,6 +27,7 @@ class FSS : public IFSS
     auto getGoto () -> Point override;
     void setGoto (Point);
     auto getAltitude () -> uint16_t override;
+    void setAltitude (uint16_t);
     void reportPosition (PositionData pd);
     void registerCommandCB (notify_fss_command_cb cb);
     void registerCommsStatusCB (notify_fss_comms_cb cb);
