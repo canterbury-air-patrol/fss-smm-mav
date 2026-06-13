@@ -19,8 +19,11 @@ clang_format="${CLANG_FORMAT:-clang-format}"
 mapfile -t cxx_files < <(find src tests \( -name '*.cpp' -o -name '*.hpp' \) | sort)
 "$clang_format" --dry-run -Werror "${cxx_files[@]}"
 
+# normalCheckLevelMaxBranches is an informational note (emitted by cppcheck
+# >= 2.15 when it caps branch analysis on a large function); it is not a code
+# defect but still trips --error-exitcode, so suppress it explicitly.
 cppcheck --enable=warning,performance,portability,style --error-exitcode=1 \
-	--inline-suppr --std=c++17 -I src src/
+	--inline-suppr --suppress=normalCheckLevelMaxBranches --std=c++17 -I src src/
 
 # The clang-tidy gate is enforced primarily by WarningsAsErrors in .clang-tidy:
 # run-clang-tidy then exits non-zero and `set -o pipefail` fails the pipeline.
