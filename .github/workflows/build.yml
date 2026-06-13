@@ -41,7 +41,8 @@ jobs:
           pkg-config \
           catch2 \
           libfss-client-ssl \
-          libsmm-asset-dev
+          libsmm-asset-dev \
+          libjsoncpp-dev
 
     - name: Build and test
       run: |
@@ -84,6 +85,7 @@ jobs:
           catch2 \
           libfss-client-ssl \
           libsmm-asset-dev \
+          libjsoncpp-dev \
           cppcheck \
           clang-tidy \
           bear \
