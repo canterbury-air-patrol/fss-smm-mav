@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <cstdint>
+#include <exception>
 #include <getopt.h>
 #include <iostream>
 #include <list>
@@ -310,8 +311,16 @@ main (int argc, char *argv[]) -> int
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
 
-    Logger logger ("/var/log/cap-fmu");
-    App app (argv[optind], argv[optind + 1], std::stoi (argv[optind + 2]), ta.value (), logger);
-    app.run ();
+    try
+    {
+        Logger logger ("/var/log/cap-fmu");
+        App app (argv[optind], argv[optind + 1], std::stoi (argv[optind + 2]), ta.value (), logger);
+        app.run ();
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Fatal: " << e.what () << '\n';
+        return 1;
+    }
     return 0;
 }
