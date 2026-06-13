@@ -249,6 +249,12 @@ SMMSearch::SMMSearch (smm_search t_search)
 auto
 SMMSearch::accept () -> bool
 {
+    /* accept() must only be called on a valid search; guard against misuse so
+     * we never commit an empty search to the server. */
+    if (!this->valid)
+    {
+        return false;
+    }
     return smm_search_accept (this->search);
 }
 
