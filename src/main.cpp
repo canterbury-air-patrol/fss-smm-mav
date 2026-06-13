@@ -315,9 +315,26 @@ main (int argc, char *argv[]) -> int
 
     try
     {
+        int port = std::stoi (argv[optind + 2]);
+        if (port <= 0 || port > 65535)
+        {
+            throw std::out_of_range ("port out of range");
+        }
         Logger logger ("/var/log/cap-fmu");
-        App app (argv[optind], argv[optind + 1], std::stoi (argv[optind + 2]), ta.value (), logger);
+        App app (argv[optind], argv[optind + 1], static_cast<uint16_t> (port), ta.value (), logger);
         app.run ();
+    }
+    catch (const std::invalid_argument &e)
+    {
+        std::cerr << "Error: invalid port '" << argv[optind + 2] << "'\n";
+        print_usage (argv[0]);
+        return 1;
+    }
+    catch (const std::out_of_range &e)
+    {
+        std::cerr << "Error: port '" << argv[optind + 2] << "' is out of range (1-65535)\n";
+        print_usage (argv[0]);
+        return 1;
     }
     catch (const std::exception &e)
     {
