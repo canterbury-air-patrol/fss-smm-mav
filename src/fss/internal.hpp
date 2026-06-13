@@ -24,6 +24,7 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     void report_smm_settings (const SMMSettings &);
     void report_position_data (const PositionData &);
     std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> last_command{};
+    std::chrono::steady_clock::time_point position_last_sent{};
 
   protected:
     void connectionStatusChange (flight_safety_system::client_ssl::connection_status status) override;

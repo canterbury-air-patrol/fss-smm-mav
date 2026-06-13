@@ -96,12 +96,11 @@ fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t head
 {
     static constexpr std::chrono::milliseconds ts_1sec_interval{ 1000 };
     static constexpr uint16_t squawk_vfr = 1200;
-    static std::chrono::steady_clock::time_point position_last_sent{};
     static constexpr uint32_t valid_fields = 1 | 2 | 4 | 8 | 16 | 32;
     static constexpr uint8_t aircraft_type = 14;
 
     auto now = std::chrono::steady_clock::now ();
-    if ((now - position_last_sent) >= ts_1sec_interval)
+    if ((now - this->position_last_sent) >= ts_1sec_interval)
     {
         uint64_t curr_ts = flight_safety_system::fss_current_timestamp ();
         auto msg_pos = std::make_shared<flight_safety_system::transport::fss_message_position_report> (
@@ -121,7 +120,7 @@ fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t head
             /* Type is UAV */
             aircraft_type, curr_ts);
         this->sendMsgAll (msg_pos);
-        position_last_sent = now;
+        this->position_last_sent = now;
     }
 }
 
