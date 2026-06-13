@@ -6,6 +6,7 @@
 #include "fmu-fss-types.hpp"
 
 using notify_goto_update_cb = std::function<void (Point)>;
+using notify_altitude_update_cb = std::function<void (uint32_t)>;
 
 class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
 {
@@ -13,10 +14,12 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     notify_fss_command_cb command_cb{};
     notify_fss_comms_cb comms_status_cb{};
     notify_goto_update_cb goto_cb{};
+    notify_altitude_update_cb altitude_cb{};
     notify_smm_settings_cb smm_settings_cb{};
     notify_position_cb position_data_cb{};
     void report_command (FSSCommand cmd);
     void report_goto_update (Point);
+    void report_altitude_update (uint32_t);
     void report_comms_status (FSSCommsStatus);
     void report_smm_settings (const SMMSettings &);
     void report_position_data (const PositionData &);
@@ -52,6 +55,11 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     registerGotoUpdateCB (notify_goto_update_cb cb)
     {
         this->goto_cb = cb;
+    };
+    void
+    registerAltitudeUpdateCB (notify_altitude_update_cb cb)
+    {
+        this->altitude_cb = cb;
     };
     void
     registerSMMSettingsCB (notify_smm_settings_cb cb)
