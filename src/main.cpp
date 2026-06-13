@@ -305,11 +305,11 @@ main (int argc, char *argv[]) -> int
      * This mask is inherited by all threads spawned below, ensuring the
      * signal is delivered to the dedicated waiter rather than interrupting
      * arbitrary threads from a signal-handler context. */
-    sigset_t sigint_mask;
-    sigemptyset (&sigint_mask);
-    sigaddset (&sigint_mask, SIGINT);
-    sigaddset (&sigint_mask, SIGTERM);
-    pthread_sigmask (SIG_BLOCK, &sigint_mask, nullptr);
+    sigset_t signal_mask;
+    sigemptyset (&signal_mask);
+    sigaddset (&signal_mask, SIGINT);
+    sigaddset (&signal_mask, SIGTERM);
+    pthread_sigmask (SIG_BLOCK, &signal_mask, nullptr);
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
 
