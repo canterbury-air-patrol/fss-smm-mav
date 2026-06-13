@@ -1,6 +1,7 @@
 #pragma once
 
-enum FSSCommand {
+enum FSSCommand
+{
     fss_cmd_unknown,
     fss_cmd_manual,
     fss_cmd_rtl,
@@ -12,7 +13,8 @@ enum FSSCommand {
     fss_cmd_terminate,
 };
 
-enum FSSCommsStatus {
+enum FSSCommsStatus
+{
     fss_comms_unknown,
     fss_comms_okay,
     fss_comms_failure,

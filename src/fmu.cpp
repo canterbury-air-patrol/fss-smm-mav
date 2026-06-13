@@ -2,11 +2,13 @@
 #include <iostream>
 #include <mutex>
 
-auto map_smm_state(SMMCommand cmd) -> FMUState
+auto
+map_smm_state (SMMCommand cmd) -> FMUState
 {
     FMUState new_state = fmu_state_rtl;
 
-    switch (cmd) {
+    switch (cmd)
+    {
         case smm_cmd_abandon_search:
         case smm_cmd_none:
             new_state = fmu_state_searching;
@@ -19,7 +21,8 @@ auto map_smm_state(SMMCommand cmd) -> FMUState
     return new_state;
 }
 
-auto map_fss_state(FSSCommand cmd) -> FMUState
+auto
+map_fss_state (FSSCommand cmd) -> FMUState
 {
     FMUState new_state = fmu_state_searching;
     switch (cmd)
@@ -54,7 +57,7 @@ auto map_fss_state(FSSCommand cmd) -> FMUState
 }
 
 void
-FMUStateMachine::updateState()
+FMUStateMachine::updateState ()
 {
     FMUState new_state = fmu_state_failsafe;
 
@@ -74,129 +77,130 @@ FMUStateMachine::updateState()
     }
     else
     {
-        new_state = map_fss_state(this->fss_command);
+        new_state = map_fss_state (this->fss_command);
         if (new_state == fmu_state_searching)
         {
-            new_state = map_smm_state(this->smm_command);
+            new_state = map_smm_state (this->smm_command);
         }
     }
 
     if (new_state != this->current_state)
     {
         this->current_state = new_state;
-        this->actionState(this->current_state);
+        this->actionState (this->current_state);
     }
 }
 
 void
-FMUStateMachine::actionState(FMUState state)
+FMUStateMachine::actionState (FMUState state)
 {
     if (state != fmu_state_searching)
     {
-        this->smm.cancelSearch();
+        this->smm.cancelSearch ();
     }
-    switch(state)
+    switch (state)
     {
         case fmu_state_manual:
             /* Tell MAV to exit auto mode */
-            this->mav.setMode(flight_mode_manual);
+            this->mav.setMode (flight_mode_manual);
             break;
         case fmu_state_searching:
             /* Tell SMM to implement the search */
-            this->smm.search(this->mav.getCurrentPosition());
+            this->smm.search (this->mav.getCurrentPosition ());
             break;
         case fmu_state_rtl:
         case fmu_state_failsafe:
         case fmu_state_low_battery:
             /* Tell MAV to RTL */
-            this->mav.setMode(flight_mode_rtl);
+            this->mav.setMode (flight_mode_rtl);
             break;
         case fmu_state_goto:
             /* Tell MAV to Goto the fss position */
-            this->mav.gotoPosition(this->fss.getGoto());
-            this->mav.setMode(flight_mode_goto);
+            this->mav.gotoPosition (this->fss.getGoto ());
+            this->mav.setMode (flight_mode_goto);
             break;
         case fmu_state_hold:
             /* Tell MAV to Circle/Hold Position */
-            this->mav.setMode(flight_mode_hold);
+            this->mav.setMode (flight_mode_hold);
             break;
         case fmu_state_altitude_adjust:
             /* Tell MAV to adjust the altitude */
-            this->mav.setAltitude(this->fss.getAltitude());
+            this->mav.setAltitude (this->fss.getAltitude ());
             break;
         case fmu_state_disarmed:
             /* Tell MAV to disarm the aircraft */
-            this->mav.disarm();
+            this->mav.disarm ();
             break;
         case fmu_state_terminate:
             /* Tell MAV to terminate the flight */
-            this->mav.terminate();
+            this->mav.terminate ();
             break;
     }
 
-    if (this->state_change_cb) {
-        this->state_change_cb(state);
+    if (this->state_change_cb)
+    {
+        this->state_change_cb (state);
     }
 }
 
-
 void
-FMUStateMachine::FSSNewCommand(FSSCommand cmd)
+FMUStateMachine::FSSNewCommand (FSSCommand cmd)
 {
     {
-        std::lock_guard<std::mutex> lk(this->lock);
+        std::lock_guard<std::mutex> lk (this->lock);
         this->fss_command = cmd;
-        this->updateState();
+        this->updateState ();
     }
 }
 
 void
-FMUStateMachine::SMMNewCommand(SMMCommand cmd)
+FMUStateMachine::SMMNewCommand (SMMCommand cmd)
 {
     {
-        std::lock_guard<std::mutex> lk(this->lock);
+        std::lock_guard<std::mutex> lk (this->lock);
         this->smm_command = cmd;
-        this->updateState();
+        this->updateState ();
     }
 }
 
 void
-FMUStateMachine::setLowBattery()
+FMUStateMachine::setLowBattery ()
 {
     {
-        std::lock_guard<std::mutex> lk(this->lock);
+        std::lock_guard<std::mutex> lk (this->lock);
         this->low_battery = true;
-        this->updateState();
+        this->updateState ();
     }
 }
 
 void
-FMUStateMachine::setCommsFailure(bool failed)
+FMUStateMachine::setCommsFailure (bool failed)
 {
     {
-        std::lock_guard<std::mutex> lk(this->lock);
+        std::lock_guard<std::mutex> lk (this->lock);
         this->fss_comms_lost = failed;
-        this->updateState();
+        this->updateState ();
     }
 }
 
 void
-FMUStateMachine::setMavCommsFailure(bool failed)
+FMUStateMachine::setMavCommsFailure (bool failed)
 {
     {
-        std::lock_guard<std::mutex> lk(this->lock);
+        std::lock_guard<std::mutex> lk (this->lock);
         this->mav_comms_lost = failed;
-        this->updateState();
+        this->updateState ();
     }
 }
 
-FMUStateMachine::FMUStateMachine(IMAV& t_mav, ISMM& t_smm, IFSS& t_fss) : mav(t_mav), smm(t_smm), fss(t_fss), state_change_cb{}
+FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm, IFSS &t_fss)
+    : mav (t_mav), smm (t_smm), fss (t_fss), state_change_cb{}
 {
 }
 
 void
-FMUStateMachine::setStateChangeCB(std::function<void(FMUState)> cb)
+FMUStateMachine::setStateChangeCB (std::function<void (FMUState)> cb)
 {
-    std::lock_guard<std::mutex> lk(this->lock);
-    this->state_change_cb = std::move(cb);
+    std::lock_guard<std::mutex> lk (this->lock);
+    this->state_change_cb = std::move (cb);
 }

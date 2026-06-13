@@ -5,20 +5,20 @@
 #include "util.hpp"
 #include <smm-asset.h>
 
-SMM::SMM(MAV& t_mav) : mav(t_mav)
+SMM::SMM (MAV &t_mav) : mav (t_mav)
 {
-//    smm_asset_debugging_set (true);
+    //    smm_asset_debugging_set (true);
 }
 
-SMM::~SMM()
+SMM::~SMM ()
 {
-    std::lock_guard<std::mutex> lk(this->search_lock);
-    this->disconnect();
+    std::lock_guard<std::mutex> lk (this->search_lock);
+    this->disconnect ();
     this->current_search = nullptr;
 }
 
 void
-SMM::disconnect()
+SMM::disconnect ()
 {
     if (this->assets_list != nullptr)
     {
@@ -35,17 +35,17 @@ SMM::disconnect()
 }
 
 void
-SMM::connect()
+SMM::connect ()
 {
-    std::string user_cstr(this->smm_user.data(), this->smm_user.size());
-    std::string pass_cstr(this->smm_pass.data(), this->smm_pass.size());
-    this->conn = smm_asset_connect (this->smm_host.c_str(), user_cstr.c_str(), pass_cstr.c_str());
+    std::string user_cstr (this->smm_user.data (), this->smm_user.size ());
+    std::string pass_cstr (this->smm_pass.data (), this->smm_pass.size ());
+    this->conn = smm_asset_connect (this->smm_host.c_str (), user_cstr.c_str (), pass_cstr.c_str ());
 
     if (smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
     {
         /* Oh dear */
-        std::cout << "SMM: Connection failed (" << smm_asset_connection_get_state(this->conn) << ")" << std::endl;
-        this->disconnect();
+        std::cout << "SMM: Connection failed (" << smm_asset_connection_get_state (this->conn) << ")" << std::endl;
+        this->disconnect ();
         return;
     }
 
@@ -54,7 +54,7 @@ SMM::connect()
     {
         for (size_t i = 0; i < this->assets_list_count; i++)
         {
-            if (strcmp (smm_asset_name (this->assets_list[i]), this->asset_name.c_str()) == 0)
+            if (strcmp (smm_asset_name (this->assets_list[i]), this->asset_name.c_str ()) == 0)
             {
                 this->asset = this->assets_list[i];
                 break;
@@ -63,28 +63,31 @@ SMM::connect()
         if (this->asset == nullptr)
         {
             std::cout << "SMM: Failed to find this asset" << std::endl;
-            this->disconnect();
+            this->disconnect ();
             return;
         }
     }
     else
     {
         std::cout << "SMM: Failed to get assets" << std::endl;
-        this->disconnect();
+        this->disconnect ();
     }
 }
 
 void
-SMM::connect(const std::string &t_host, const flight_safety_system::secure_string &t_user, const flight_safety_system::secure_string &t_pass, const std::string &t_asset_name)
+SMM::connect (const std::string &t_host, const flight_safety_system::secure_string &t_user,
+              const flight_safety_system::secure_string &t_pass, const std::string &t_asset_name)
 {
-    std::lock_guard<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk (this->search_lock);
     if (this->conn != nullptr)
     {
         /* If the details have changed, or the connection has failed, disconnect */
-        if (this->smm_host != t_host || this->smm_user != t_user || this->smm_pass != t_pass || this->asset_name != t_asset_name || smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
+        if (this->smm_host != t_host || this->smm_user != t_user || this->smm_pass != t_pass
+            || this->asset_name != t_asset_name
+            || smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
         {
             std::cout << "SMM: Details have changed" << std::endl;
-            this->disconnect();
+            this->disconnect ();
         }
     }
     /* If there is no connection, store the details and connect */
@@ -96,36 +99,37 @@ SMM::connect(const std::string &t_host, const flight_safety_system::secure_strin
         this->asset_name = t_asset_name;
 
         std::cout << "SMM: Connecting (" << this->smm_host << "," << this->asset_name << ")" << std::endl;
-        this->connect();
+        this->connect ();
     }
 }
 
-
 void
-SMM::reportPosition(PositionData t_pd)
+SMM::reportPosition (PositionData t_pd)
 {
-    std::lock_guard<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk (this->search_lock);
     if (this->asset)
     {
-        uint64_t curr_ts = current_timestamp_ms();
+        uint64_t curr_ts = current_timestamp_ms ();
         if (this->position_report_last_ts + 1000 <= curr_ts)
         {
-            Point p = t_pd.getP();
-            smm_asset_report_position (this->asset, p.getLatitude(), p.getLongitude(), t_pd.getAltitude(), t_pd.getHeading() / 100, 3);
+            Point p = t_pd.getP ();
+            smm_asset_report_position (this->asset, p.getLatitude (), p.getLongitude (), t_pd.getAltitude (),
+                                       t_pd.getHeading () / 100, 3);
             this->position_report_last_ts = curr_ts;
         }
     }
     if (this->search_active && this->current_search == nullptr)
     {
-        this->tryAcquireSearch(t_pd.getP());
+        this->tryAcquireSearch (t_pd.getP ());
     }
 }
 
 /* Called with search_lock held. Tries to acquire a search from SMM.
  * On failure, sets a retry timestamp so periodic calls back off. */
-void SMM::tryAcquireSearch(Point current_pos)
+void
+SMM::tryAcquireSearch (Point current_pos)
 {
-    uint64_t curr_ts = current_timestamp_ms();
+    uint64_t curr_ts = current_timestamp_ms ();
     if (this->search_retry_ts > curr_ts)
     {
         return;
@@ -133,39 +137,40 @@ void SMM::tryAcquireSearch(Point current_pos)
     int retries = 0;
     while (this->current_search == nullptr)
     {
-        auto new_search = smm_asset_get_search(this->asset, current_pos.getLatitude(), current_pos.getLongitude());
+        auto new_search = smm_asset_get_search (this->asset, current_pos.getLatitude (), current_pos.getLongitude ());
         if (new_search == nullptr)
         {
-            this->mav.setMode(flight_mode_rtl);
-            this->search_retry_ts = current_timestamp_ms() + search_retry_interval_ms;
+            this->mav.setMode (flight_mode_rtl);
+            this->search_retry_ts = current_timestamp_ms () + search_retry_interval_ms;
             return;
         }
-        if (smm_search_accept(new_search))
+        if (smm_search_accept (new_search))
         {
-            this->current_search = std::make_shared<SMMSearch>(new_search);
+            this->current_search = std::make_shared<SMMSearch> (new_search);
         }
         else
         {
-            smm_search_destroy(new_search);
+            smm_search_destroy (new_search);
         }
         retries++;
         if (retries >= 3)
         {
-            this->mav.setMode(flight_mode_rtl);
-            this->search_retry_ts = current_timestamp_ms() + search_retry_interval_ms;
+            this->mav.setMode (flight_mode_rtl);
+            this->search_retry_ts = current_timestamp_ms () + search_retry_interval_ms;
             return;
         }
     }
-    this->mav.loadSearch(this->current_search);
+    this->mav.loadSearch (this->current_search);
     this->search_retry_ts = 0;
 }
 
-void SMM::search(Point current_pos)
+void
+SMM::search (Point current_pos)
 {
-    std::lock_guard<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk (this->search_lock);
     if (this->asset == nullptr)
     {
-        this->mav.setMode(flight_mode_rtl);
+        this->mav.setMode (flight_mode_rtl);
         return;
     }
     this->search_active = true;
@@ -173,66 +178,69 @@ void SMM::search(Point current_pos)
     {
         return;
     }
-    this->tryAcquireSearch(current_pos);
+    this->tryAcquireSearch (current_pos);
 }
 
-void SMM::cancelSearch()
+void
+SMM::cancelSearch ()
 {
-    std::lock_guard<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk (this->search_lock);
     this->search_active = false;
     this->search_retry_ts = 0;
 }
 
-void SMM::reachedPoint(int point)
+void
+SMM::reachedPoint (int point)
 {
     /* See if we have completed this search or not */
-    std::lock_guard<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk (this->search_lock);
     if (this->current_search != nullptr)
     {
-        if (this->current_search->reachedPoint(point))
+        if (this->current_search->reachedPoint (point))
         {
             this->current_search = nullptr;
         }
     }
 }
 
-auto SMM::currentSearchPoints() -> int
+auto
+SMM::currentSearchPoints () -> int
 {
-    std::lock_guard<std::mutex> lk(this->search_lock);
+    std::lock_guard<std::mutex> lk (this->search_lock);
     if (this->current_search != nullptr)
     {
-        return this->current_search->getPointsCount();
+        return this->current_search->getPointsCount ();
     }
     return 0;
 }
 
-SMMSearch::SMMSearch(smm_search t_search)
+SMMSearch::SMMSearch (smm_search t_search)
 {
     this->search = t_search;
     smm_waypoints wps = nullptr;
-	size_t wps_count = 0;
+    size_t wps_count = 0;
     smm_search_get_waypoints (this->search, &wps, &wps_count);
-	for (size_t i = 0; i < wps_count; i++)
-	{
-		Point wp(wps[i]->lat, wps[i]->lon);
-        this->addPoint(wp);
-	}
-	smm_waypoints_free (wps, wps_count);
+    for (size_t i = 0; i < wps_count; i++)
+    {
+        Point wp (wps[i]->lat, wps[i]->lon);
+        this->addPoint (wp);
+    }
+    smm_waypoints_free (wps, wps_count);
     this->altitude = smm_search_sweep_width (search);
 }
 
 auto
-SMMSearch::getPointsCount() -> int
+SMMSearch::getPointsCount () -> int
 {
-    return this->points.size();
+    return this->points.size ();
 }
 
 auto
-SMMSearch::reachedPoint(int point) -> bool
+SMMSearch::reachedPoint (int point) -> bool
 {
     if (this->search != nullptr)
     {
-        if (point >= this->getPointsCount())
+        if (point >= this->getPointsCount ())
         {
             /* Search completed, yay */
             smm_search_complete (this->search);
@@ -245,7 +253,7 @@ SMMSearch::reachedPoint(int point) -> bool
     return false;
 }
 
-SMMSearch::~SMMSearch()
+SMMSearch::~SMMSearch ()
 {
     if (this->search != nullptr)
     {
