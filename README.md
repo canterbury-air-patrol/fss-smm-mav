@@ -60,7 +60,10 @@ block is absent entirely):
         "...": "... name / ssl / servers as above ...",
         "fmu": {
                 "altitude_cap_ft": 400,
-                "camera_fov_deg": 90.0
+                "camera_fov_deg": 90.0,
+                "lowbat_threshold": 20,
+                "reconnect_interval_s": 10,
+                "log_level": "info"
         }
 }
 ```
@@ -70,6 +73,9 @@ block is absent entirely):
 | `altitude_cap_m` | `122` | Regulatory ceiling for the derived search altitude, in metres AGL. |
 | `altitude_cap_ft` | – | The same ceiling expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
 | `camera_fov_deg` | `90.0` | Camera total cross-track (across-flight) field of view, in degrees. The flight altitude for a search is derived from its sweep width as `altitude = sweep_width / (2 * tan(fov / 2))`, then clamped to the altitude cap. Must be in the open range (0, 180). |
+| `lowbat_threshold` | `20` | Battery percentage at or below which a low-battery RTL is triggered. Range 0–100. |
+| `reconnect_interval_s` | `10` | Seconds between FSS/MAV reconnection attempts. Range 1–3600. |
+| `log_level` | `info` | Logging verbosity: `error`, `info`, or `debug`. |
 
 Then start this client with:
 ```
