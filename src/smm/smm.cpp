@@ -148,7 +148,21 @@ SMM::tryAcquireSearch (Point current_pos)
     int retries = 0;
     while (this->current_search == nullptr)
     {
+        /* Release lock during blocking network call to avoid stalling other threads. */
+        this->search_lock.unlock ();
         auto new_search = smm_asset_get_search (this->asset, current_pos.getLatitude (), current_pos.getLongitude ());
+        this->search_lock.lock ();
+
+        /* If the search was cancelled while we were waiting, clean up and exit. */
+        if (!this->search_active)
+        {
+            if (new_search != nullptr)
+            {
+                smm_search_destroy (new_search);
+            }
+            return;
+        }
+
         if (new_search == nullptr)
         {
             this->mav.setMode (flight_mode_rtl);
