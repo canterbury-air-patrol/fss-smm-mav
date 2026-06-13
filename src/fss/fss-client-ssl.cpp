@@ -99,6 +99,10 @@ fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t head
     static constexpr uint32_t valid_fields = 1 | 2 | 4 | 8 | 16 | 32;
     static constexpr uint8_t aircraft_type = 14;
 
+    /* steady_clock is used only for local rate limiting (it is monotonic and
+     * immune to wall-clock jumps). The on-the-wire timestamp below deliberately
+     * uses fss_current_timestamp() (wall clock) so it is comparable across
+     * hosts; do not collapse these two into a single clock. */
     auto now = std::chrono::steady_clock::now ();
     if ((now - this->position_last_sent) >= ts_1sec_interval)
     {
