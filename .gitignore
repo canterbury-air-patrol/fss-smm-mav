@@ -17,3 +17,7 @@ ltmain.sh
 m4/
 missing
 stamp-h1
+
+# Static-analysis artefacts (see check-code.sh)
+compile_commands.json
+clang-tidy.log

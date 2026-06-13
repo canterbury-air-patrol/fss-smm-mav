@@ -1,0 +1,26 @@
+---
+# Check families enabled for this C++ project.
+#
+# Disabled checks and why:
+#  - portability-avoid-pragma-once: every header uses '#pragma once'
+#    deliberately; it is supported by every compiler we target.
+#  - bugprone-easily-swappable-parameters: the geo/MAVLink APIs legitimately
+#    take adjacent same-type pairs - (latitude, longitude), (vx, vy), etc.;
+#    renaming or retyping them would not improve safety.
+#  - clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling:
+#    flags every memcpy/snprintf in favour of the C11 Annex K *_s functions,
+#    which are not available in glibc; not actionable here.
+Checks: >-
+  -*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  clang-analyzer-*,
+  -portability-avoid-pragma-once,
+  -bugprone-easily-swappable-parameters,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+
+# Headers under src/ are part of the project; include findings from them.
+HeaderFilterRegex: "src/.*"
+WarningsAsErrors: "*"
+...
