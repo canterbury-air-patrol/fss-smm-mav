@@ -79,9 +79,8 @@ FSS::reportPosition (PositionData t_pd)
     if (this->ssl_client != nullptr)
     {
         Point p = t_pd.getP ();
-        this->ssl_client->sendPosition (p.getLatitude (), p.getLongitude (),
-                                        static_cast<uint16_t> (t_pd.getAltitude ()), t_pd.getHeading (),
-                                        t_pd.getVelocityHorizontal (), t_pd.getVelocityVertical ());
+        this->ssl_client->sendPosition (p.getLatitude (), p.getLongitude (), static_cast<int16_t> (t_pd.getAltitude ()),
+                                        t_pd.getHeading (), t_pd.getVelocityHorizontal (), t_pd.getVelocityVertical ());
     }
 }
 

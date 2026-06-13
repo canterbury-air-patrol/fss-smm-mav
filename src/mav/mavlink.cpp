@@ -69,9 +69,10 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, uint32_
                           uint8_t tslc, uint16_t flags, uint16_t squawk)
 {
     mavlink_message_t msg;
-    mavlink_msg_adsb_vehicle_pack (SYS_ID, COMP_ID, &msg, icao_address, lat / LAT_LNG_COV, lng / LAT_LNG_COV,
-                                   altitude_type, altitude * ALT_COV, heading, hor_vel, ver_vel, callsign, emitter_type,
-                                   tslc, flags, squawk);
+    mavlink_msg_adsb_vehicle_pack (SYS_ID, COMP_ID, &msg, icao_address, static_cast<int32_t> (lat / LAT_LNG_COV),
+                                   static_cast<int32_t> (lng / LAT_LNG_COV), altitude_type,
+                                   static_cast<int32_t> (altitude * ALT_COV), heading, hor_vel,
+                                   static_cast<int16_t> (ver_vel), callsign, emitter_type, tslc, flags, squawk);
     this->sendMavLinkMsg (&msg);
 }
 
@@ -306,19 +307,22 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
         }
         else
         {
+            /* The scaled int32 lat/lon legitimately sit next to the float altitude in this MAVLink message;
+             * clang-tidy's swapped-arguments heuristic cannot tell them apart. */
+            // NOLINTNEXTLINE(bugprone-swapped-arguments)
             mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq,                  /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT,                     /* Use altitude relative to the home point */
-                MAV_CMD_NAV_WAYPOINT,                              /* Navigate to a point */
-                0,                                                 /* This waypoint is the current target */
-                1,                                                 /* Auto continue */
-                0,                                                 /* Hold time: 0s */
-                acceptable_radius,                                 /* Accept radius: m */
-                0,                                                 /* Pass radius: 0m */
-                NAN,                                               /* Yaw: NaN for dont care */
-                local_goto_position.getLatitude () / LAT_LNG_COV,  /* Latitude */
-                local_goto_position.getLongitude () / LAT_LNG_COV, /* Longitude */
-                goto_alt,                                          /* Altitude (m) */
+                SYS_ID, COMP_ID, &msg, 0, 1, seq, /* Which waypoint is this */
+                MAV_FRAME_GLOBAL_RELATIVE_ALT,    /* Use altitude relative to the home point */
+                MAV_CMD_NAV_WAYPOINT,             /* Navigate to a point */
+                0,                                /* This waypoint is the current target */
+                1,                                /* Auto continue */
+                0,                                /* Hold time: 0s */
+                acceptable_radius,                /* Accept radius: m */
+                0,                                /* Pass radius: 0m */
+                NAN,                              /* Yaw: NaN for dont care */
+                static_cast<int32_t> (local_goto_position.getLatitude () / LAT_LNG_COV),  /* Latitude */
+                static_cast<int32_t> (local_goto_position.getLongitude () / LAT_LNG_COV), /* Longitude */
+                static_cast<float> (goto_alt),                                            /* Altitude (m) */
                 mission_type);
         }
     }
@@ -364,19 +368,22 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
         {
             /* Load each point of the search, the first 2 mission items are setup, so the seq is offset */
             Point p = points[seq - 2];
+            /* The scaled int32 lat/lon legitimately sit next to the float altitude in this MAVLink message;
+             * clang-tidy's swapped-arguments heuristic cannot tell them apart. */
+            // NOLINTNEXTLINE(bugprone-swapped-arguments)
             mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq,                   /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT,                      /* Use altitude relative to the home point */
-                MAV_CMD_NAV_WAYPOINT,                               /* Navigate to a point */
-                (local_search->getCurrentPointIdx () == (seq - 2)), /* Is this waypoint is the current target? */
-                1,                                                  /* Auto continue */
-                0,                                                  /* Hold time: 0s */
-                acceptable_radius,                                  /* Accept radius: m */
-                0,                                                  /* Pass radius: 0m */
-                NAN,                                                /* Yaw: NaN for dont care */
-                p.getLatitude () / LAT_LNG_COV,                     /* Latitude */
-                p.getLongitude () / LAT_LNG_COV,                    /* Longitude */
-                local_search->getAltitude (),                       /* Altitude (m) */
+                SYS_ID, COMP_ID, &msg, 0, 1, seq,                       /* Which waypoint is this */
+                MAV_FRAME_GLOBAL_RELATIVE_ALT,                          /* Use altitude relative to the home point */
+                MAV_CMD_NAV_WAYPOINT,                                   /* Navigate to a point */
+                (local_search->getCurrentPointIdx () == (seq - 2)),     /* Is this waypoint is the current target? */
+                1,                                                      /* Auto continue */
+                0,                                                      /* Hold time: 0s */
+                acceptable_radius,                                      /* Accept radius: m */
+                0,                                                      /* Pass radius: 0m */
+                NAN,                                                    /* Yaw: NaN for dont care */
+                static_cast<int32_t> (p.getLatitude () / LAT_LNG_COV),  /* Latitude */
+                static_cast<int32_t> (p.getLongitude () / LAT_LNG_COV), /* Longitude */
+                static_cast<float> (local_search->getAltitude ()),      /* Altitude (m) */
                 mission_type);
         }
     }
@@ -474,8 +481,8 @@ void
 mav_connection::requestStream (int sysid, int compid, uint32_t command, uint32_t interval)
 {
     mavlink_message_t msg;
-    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, sysid, compid, MAV_CMD_SET_MESSAGE_INTERVAL, 0, command,
-                                   interval, 0, 0, 0, 0, 1);
+    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, sysid, compid, MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                                   static_cast<float> (command), static_cast<float> (interval), 0, 0, 0, 0, 1);
     this->sendMavLinkMsg (&msg);
 }
 
@@ -523,7 +530,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             int16_t vx = mavlink_msg_global_position_int_get_vx (msg);
             int16_t vy = mavlink_msg_global_position_int_get_vy (msg);
             int16_t vz = mavlink_msg_global_position_int_get_vz (msg);
-            uint16_t vh = sqrt ((vx * vx) + (vy * vy));
+            uint16_t vh = static_cast<uint16_t> (sqrt ((vx * vx) + (vy * vy)));
             {
                 std::lock_guard<std::mutex> lk (this->state_lock);
                 this->last_position = Point (latd, lngd);
@@ -666,13 +673,13 @@ convert_str_to_sa (const std::string &addr, uint16_t port, struct sockaddr_stora
     {
         case AF_INET:
         {
-            auto sa_in = (struct sockaddr_in *)sa;
+            auto *sa_in = reinterpret_cast<struct sockaddr_in *> (sa);
             sa_in->sin_port = htons (port);
         }
         break;
         case AF_INET6:
         {
-            auto sa_in = (struct sockaddr_in6 *)sa;
+            auto *sa_in = reinterpret_cast<struct sockaddr_in6 *> (sa);
             sa_in->sin6_port = htons (port);
         }
         break;
@@ -731,7 +738,7 @@ mav_connection::connect_to_mav ()
 
     this->fd.store (socket (remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP));
 
-    if (connect (this->fd.load (), (struct sockaddr *)&remote,
+    if (connect (this->fd.load (), reinterpret_cast<struct sockaddr *> (&remote),
                  remote.ss_family == AF_INET ? sizeof (struct sockaddr_in) : sizeof (struct sockaddr_in6))
         < 0)
     {
@@ -822,7 +829,7 @@ mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
 void
 mav_connection::attemptReconnect ()
 {
-    constexpr int msecs_in_sec = 1000;
+    constexpr uint64_t msecs_in_sec = 1000;
     if (this->broken)
     {
         this->disconnect_from_mav ();
