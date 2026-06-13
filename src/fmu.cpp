@@ -59,10 +59,10 @@ map_fss_state (FSSCommand cmd) -> FMUState
 auto
 FMUStateMachine::updateState () -> std::optional<FMUState>
 {
-    FMUState new_state;
-
-    /* terminate is the highest-priority command: it overrides low_battery and
-     * comms_failure so the ground station can always halt the aircraft. */
+    /* Priority order: terminate > low battery > comms failure > FSS/SMM command.
+     * Comms failure maps to fmu_state_failsafe, which is the default here, so it
+     * needs no explicit branch (and the default is never an indeterminate value). */
+    FMUState new_state = fmu_state_failsafe;
     if (this->fss_command == fss_cmd_terminate)
     {
         new_state = fmu_state_terminate;
@@ -71,11 +71,7 @@ FMUStateMachine::updateState () -> std::optional<FMUState>
     {
         new_state = fmu_state_low_battery;
     }
-    else if (this->fss_comms_lost || this->mav_comms_lost)
-    {
-        new_state = fmu_state_failsafe;
-    }
-    else
+    else if (!this->fss_comms_lost && !this->mav_comms_lost)
     {
         new_state = map_fss_state (this->fss_command);
         if (new_state == fmu_state_searching)
