@@ -49,6 +49,28 @@ Create a client.json file that refers to your server(s):
 }
 ```
 
+#### Optional FMU configuration
+
+An optional `fmu` block configures asset-specific behaviour. Every key is
+optional and falls back to the default shown below if omitted (or if the
+block is absent entirely):
+
+```
+{
+        "...": "... name / ssl / servers as above ...",
+        "fmu": {
+                "altitude_cap_ft": 400,
+                "camera_fov_deg": 90.0
+        }
+}
+```
+
+| Key | Default | Description |
+|---|---|---|
+| `altitude_cap_m` | `122` | Regulatory ceiling for the derived search altitude, in metres AGL. |
+| `altitude_cap_ft` | – | The same ceiling expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
+| `camera_fov_deg` | `90.0` | Camera total cross-track (across-flight) field of view, in degrees. The flight altitude for a search is derived from its sweep width as `altitude = sweep_width / (2 * tan(fov / 2))`, then clamped to the altitude cap. Must be in the open range (0, 180). |
+
 Then start this client with:
 ```
 cap-fmu --terminate-action=<action> client.json 127.0.0.1 5760
