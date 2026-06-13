@@ -34,9 +34,6 @@ template <class... Ts> overloaded (Ts...) -> overloaded<Ts...>;
 #include "smm/smm-types.hpp"
 #include "smm/smm.hpp"
 
-constexpr int lowbat_threshold = 20;
-constexpr int reconnect_interval = 10;
-
 class App
 {
   public:
@@ -45,7 +42,7 @@ class App
         : fss (std::make_unique<FSS> (config_file)), mav (std::make_unique<MAV> (addr, port, ta)),
           smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.camera_fov_deg)), aircraft{}, event_queue{},
           main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, asset_name (fss->getAssetName ()),
-          logger (t_logger)
+          logger (t_logger), lowbat_threshold (cfg.lowbat_threshold), reconnect_interval_s (cfg.reconnect_interval_s)
     {
     }
 
@@ -208,7 +205,7 @@ class App
         {
             {
                 std::unique_lock<std::mutex> lk (reconnect_lock);
-                reconnect_cv.wait_for (lk, std::chrono::seconds (reconnect_interval),
+                reconnect_cv.wait_for (lk, std::chrono::seconds (reconnect_interval_s),
                                        [this] { return !running.load (); });
             }
             if (!running.load ())
@@ -236,6 +233,8 @@ class App
     std::atomic<bool> running{ true };
     std::string asset_name;
     Logger &logger;
+    int lowbat_threshold;
+    int reconnect_interval_s;
 };
 
 static void
