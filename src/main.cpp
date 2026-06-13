@@ -40,9 +40,10 @@ class App
     App (const char *config_file, const char *addr, int port, terminate_action ta, const FmuConfig &cfg,
          Logger &t_logger)
         : fss (std::make_unique<FSS> (config_file)), mav (std::make_unique<MAV> (addr, port, ta)),
-          smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.camera_fov_deg)), aircraft{}, event_queue{},
-          main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, asset_name (fss->getAssetName ()),
-          logger (t_logger), lowbat_threshold (cfg.lowbat_threshold), reconnect_interval_s (cfg.reconnect_interval_s)
+          smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.altitude_floor_m, cfg.camera_fov_deg)), aircraft{},
+          event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true },
+          asset_name (fss->getAssetName ()), logger (t_logger), lowbat_threshold (cfg.lowbat_threshold),
+          reconnect_interval_s (cfg.reconnect_interval_s)
     {
     }
 

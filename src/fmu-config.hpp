@@ -16,6 +16,10 @@ struct FmuConfig
     /* Regulatory ceiling for derived search altitude, metres AGL
      * (400ft ~= 122m). */
     uint16_t altitude_cap_m{ 122 };
+    /* Minimum search altitude, metres AGL. The derived altitude is never
+     * flown below this, so a tiny/zero sweep width cannot put the aircraft at
+     * ground level. Held <= altitude_cap_m. */
+    uint16_t altitude_floor_m{ 10 };
     /* Camera cross-track (across-flight) total field of view, degrees. Used
      * to derive the flight altitude that yields a desired ground sweep
      * width: width = 2 * altitude * tan(fov / 2). Must be in (0, 180). */
