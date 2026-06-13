@@ -313,9 +313,10 @@ main (int argc, char *argv[]) -> int
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
 
+    const char *port_arg = argv[optind + 2];
     try
     {
-        int port = std::stoi (argv[optind + 2]);
+        int port = std::stoi (port_arg);
         if (port <= 0 || port > 65535)
         {
             throw std::out_of_range ("port out of range");
@@ -326,13 +327,13 @@ main (int argc, char *argv[]) -> int
     }
     catch (const std::invalid_argument &e)
     {
-        std::cerr << "Error: invalid port '" << argv[optind + 2] << "'\n";
+        std::cerr << "Error: invalid port '" << port_arg << "'\n";
         print_usage (argv[0]);
         return 1;
     }
     catch (const std::out_of_range &e)
     {
-        std::cerr << "Error: port '" << argv[optind + 2] << "' is out of range (1-65535)\n";
+        std::cerr << "Error: port '" << port_arg << "' is out of range (1-65535)\n";
         print_usage (argv[0]);
         return 1;
     }
