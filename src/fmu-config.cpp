@@ -15,7 +15,7 @@ constexpr double feet_to_metres = 0.3048;
  * out-of-(uint16_t)range values are rejected with a warning, leaving the
  * existing default in place rather than silently truncating. */
 void
-setAltitudeCap (AssetConfig &cfg, const char *key, const Json::Value &value, double to_metres)
+setAltitudeCap (FmuConfig &cfg, const char *key, const Json::Value &value, double to_metres)
 {
     if (!value.isNumeric ())
     {
@@ -34,9 +34,9 @@ setAltitudeCap (AssetConfig &cfg, const char *key, const Json::Value &value, dou
 } // namespace
 
 auto
-loadAssetConfig (const std::string &config_file) -> AssetConfig
+loadFmuConfig (const std::string &config_file) -> FmuConfig
 {
-    AssetConfig cfg{};
+    FmuConfig cfg{};
 
     std::ifstream f (config_file);
     if (!f.is_open ())
