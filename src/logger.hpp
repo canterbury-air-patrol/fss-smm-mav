@@ -73,7 +73,7 @@ class Logger
 
   private:
     static std::string timestamp ();
-    void rotate (const std::string &base, int max_rotations);
+    static void rotate (const std::string &base, int max_rotations);
 
     std::ofstream file;
     std::mutex lock;
