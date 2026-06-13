@@ -120,7 +120,7 @@ class App
                             smm->connect (settings.getURL (), settings.getUsername (), settings.getPassword (),
                                           asset_name);
                         },
-                        [&] (PositionData pd)
+                        [&] (const PositionData &pd)
                         {
                             fss->reportPosition (pd);
                             smm->reportPosition (pd);
@@ -236,8 +236,7 @@ class App
 static void
 print_usage (const char *progname)
 {
-    std::cerr << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port"
-              << '\n';
+    std::cerr << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port" << '\n';
 }
 
 static auto

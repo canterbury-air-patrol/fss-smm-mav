@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 auto
 FSS::getAssetName () -> std::string
@@ -41,7 +42,7 @@ FSS::registerCommandCB (notify_fss_command_cb cb)
 {
     if (this->ssl_client != nullptr)
     {
-        this->ssl_client->registerCommandCB (cb);
+        this->ssl_client->registerCommandCB (std::move (cb));
     }
 };
 
@@ -50,7 +51,7 @@ FSS::registerCommsStatusCB (notify_fss_comms_cb cb)
 {
     if (this->ssl_client != nullptr)
     {
-        this->ssl_client->registerCommsStatusCB (cb);
+        this->ssl_client->registerCommsStatusCB (std::move (cb));
     }
 };
 
@@ -59,7 +60,7 @@ FSS::registerSMMSettingsCB (notify_smm_settings_cb cb)
 {
     if (this->ssl_client != nullptr)
     {
-        this->ssl_client->registerSMMSettingsCB (cb);
+        this->ssl_client->registerSMMSettingsCB (std::move (cb));
     }
 }
 
@@ -68,7 +69,7 @@ FSS::registerPositionDataCB (notify_position_cb cb)
 {
     if (this->ssl_client != nullptr)
     {
-        this->ssl_client->registerPositionDataCB (cb);
+        this->ssl_client->registerPositionDataCB (std::move (cb));
     }
 }
 
@@ -111,7 +112,7 @@ FSS::reconnectAll ()
     }
 }
 
-FSS::FSS (std::string config_file)
+FSS::FSS (const std::string &config_file)
 {
     this->ssl_client = std::make_shared<fss_client_ssl> (config_file.c_str ());
     this->ssl_client->registerGotoUpdateCB ([this] (Point p) { this->setGoto (p); });
