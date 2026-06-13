@@ -41,7 +41,7 @@ jobs:
           pkg-config \
           catch2 \
           libfss-client-ssl \
-          libsmm-asset
+          libsmm-asset-dev
 
     - name: Build and test
       run: |
