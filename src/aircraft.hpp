@@ -23,7 +23,7 @@ class aircraft_details
     auto
     acceptableUpdate (uint64_t t_new_timestamp) -> bool
     {
-        std::chrono::milliseconds new_ts{ t_new_timestamp };
+        const std::chrono::milliseconds new_ts{ t_new_timestamp };
         if (this->ts + this->ts_1sec_interval <= new_ts)
         {
             this->ts = new_ts;
