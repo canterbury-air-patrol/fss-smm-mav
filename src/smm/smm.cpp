@@ -269,7 +269,7 @@ SMMSearch::accept () -> bool
 {
     /* accept() must only be called on a valid search; guard against misuse so
      * we never commit an empty search to the server. */
-    if (!this->valid)
+    if (!this->isValid ())
     {
         return false;
     }
