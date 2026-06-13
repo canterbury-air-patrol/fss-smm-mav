@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "aircraft.hpp"
 #include "fmu.hpp"
 
 #include <memory>
@@ -319,4 +320,23 @@ TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[stat
 
     sm->FSSNewCommand (fss_cmd_altitude);
     REQUIRE (mav->set_altitude_calls == calls);
+}
+
+TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
+{
+    known_aircraft ka;
+    std::string callsign = "TEST123";
+
+    uint32_t icao1 = ka.getAircraftICAOAddress (callsign);
+    REQUIRE (icao1 >= 0x1000);
+
+    uint32_t icao2 = ka.getAircraftICAOAddress (callsign);
+    REQUIRE (icao1 == icao2);
+
+    PositionData pd;
+    pd = PositionData (0, 0, 0, 0, 0, 0, callsign, 0, 0, 1000, 0, 0, 0);
+    ka.newPositionReport (pd);
+
+    uint32_t icao3 = ka.getAircraftICAOAddress (callsign);
+    REQUIRE (icao1 == icao3);
 }
