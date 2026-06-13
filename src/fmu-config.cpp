@@ -4,9 +4,33 @@
 #include <fstream>
 #include <iostream>
 #include <json/json.h>
+#include <limits>
 
-namespace {
+namespace
+{
 constexpr double feet_to_metres = 0.3048;
+
+/* Validate and store an altitude cap given in `value`, scaled to metres by
+ * `to_metres` (1.0 for metres, feet_to_metres for feet). Non-numeric or
+ * out-of-(uint16_t)range values are rejected with a warning, leaving the
+ * existing default in place rather than silently truncating. */
+void
+setAltitudeCap (AssetConfig &cfg, const char *key, const Json::Value &value, double to_metres)
+{
+    if (!value.isNumeric ())
+    {
+        std::cerr << "Config: " << key << " is not numeric, using default " << cfg.altitude_cap_m << "m\n";
+        return;
+    }
+    double metres = value.asDouble () * to_metres;
+    if (metres < 0.0 || metres > std::numeric_limits<uint16_t>::max ())
+    {
+        std::cerr << "Config: " << key << " (" << value.asDouble () << ") out of range, using default "
+                  << cfg.altitude_cap_m << "m\n";
+        return;
+    }
+    cfg.altitude_cap_m = static_cast<uint16_t> (std::lround (metres));
+}
 } // namespace
 
 auto
@@ -21,54 +45,61 @@ loadAssetConfig (const std::string &config_file) -> AssetConfig
         return cfg;
     }
 
-    /* jsoncpp throws Json::Exception on malformed JSON or wrong-typed
-     * accessors; fall back to defaults rather than aborting the FMU. */
-    try
+    /* Parse explicitly so a malformed file is reported (and ignored) rather
+     * than throwing; each field below is then type-checked individually so a
+     * single bad value falls back to its default instead of discarding the
+     * whole block. */
+    Json::Value root;
+    Json::CharReaderBuilder builder;
+    std::string errs;
+    if (!Json::parseFromStream (builder, f, &root, &errs))
     {
-        Json::Value root;
-        f >> root;
-        const Json::Value &fmu = root["fmu"];
-        if (fmu.isObject ())
-        {
-            /* The cap may be given in metres or feet; feet is the usual unit
-             * for the regulatory ceiling (e.g. 400ft). Both are stored
-             * internally as metres. If both are present, feet wins. */
-            bool have_cap_m = fmu.isMember ("altitude_cap_m");
-            bool have_cap_ft = fmu.isMember ("altitude_cap_ft");
-            if (have_cap_m && have_cap_ft)
-            {
-                std::cerr << "Config: both altitude_cap_m and altitude_cap_ft set, using altitude_cap_ft\n";
-            }
-            if (have_cap_ft)
-            {
-                cfg.altitude_cap_m
-                    = static_cast<uint16_t> (std::lround (fmu["altitude_cap_ft"].asDouble () * feet_to_metres));
-            }
-            else if (have_cap_m)
-            {
-                cfg.altitude_cap_m = static_cast<uint16_t> (fmu["altitude_cap_m"].asUInt ());
-            }
-            if (fmu.isMember ("camera_fov_deg"))
-            {
-                double fov = fmu["camera_fov_deg"].asDouble ();
-                /* A total field of view outside (0, 180) makes the altitude
-                 * derivation degenerate (tan(fov/2) <= 0 or undefined). */
-                if (fov > 0.0 && fov < 180.0)
-                {
-                    cfg.camera_fov_deg = fov;
-                }
-                else
-                {
-                    std::cerr << "Config: camera_fov_deg (" << fov << ") out of range (0,180), using default "
-                              << cfg.camera_fov_deg << "\n";
-                }
-            }
-        }
+        std::cerr << "Config: failed to parse " << config_file << ": " << errs << ", using defaults\n";
+        return cfg;
     }
-    catch (const Json::Exception &e)
+
+    const Json::Value &fmu = root["fmu"];
+    if (!fmu.isObject ())
     {
-        std::cerr << "Config: failed to parse " << config_file << ": " << e.what () << ", using defaults\n";
-        return AssetConfig{};
+        return cfg;
+    }
+
+    /* The cap may be given in metres or feet; feet is the usual unit for the
+     * regulatory ceiling (e.g. 400ft). Both are stored internally as metres.
+     * If both are present, feet wins. */
+    bool have_cap_m = fmu.isMember ("altitude_cap_m");
+    bool have_cap_ft = fmu.isMember ("altitude_cap_ft");
+    if (have_cap_m && have_cap_ft)
+    {
+        std::cerr << "Config: both altitude_cap_m and altitude_cap_ft set, using altitude_cap_ft\n";
+    }
+    if (have_cap_ft)
+    {
+        setAltitudeCap (cfg, "altitude_cap_ft", fmu["altitude_cap_ft"], feet_to_metres);
+    }
+    else if (have_cap_m)
+    {
+        setAltitudeCap (cfg, "altitude_cap_m", fmu["altitude_cap_m"], 1.0);
+    }
+
+    if (fmu.isMember ("camera_fov_deg"))
+    {
+        const Json::Value &fov_value = fmu["camera_fov_deg"];
+        if (!fov_value.isNumeric ())
+        {
+            std::cerr << "Config: camera_fov_deg is not numeric, using default " << cfg.camera_fov_deg << "\n";
+        }
+        /* A total field of view outside (0, 180) makes the altitude derivation
+         * degenerate (tan(fov/2) <= 0 or undefined). */
+        else if (double fov = fov_value.asDouble (); fov > 0.0 && fov < 180.0)
+        {
+            cfg.camera_fov_deg = fov;
+        }
+        else
+        {
+            std::cerr << "Config: camera_fov_deg (" << fov << ") out of range (0,180), using default "
+                      << cfg.camera_fov_deg << "\n";
+        }
     }
 
     return cfg;
