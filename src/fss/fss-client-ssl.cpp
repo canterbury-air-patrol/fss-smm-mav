@@ -13,10 +13,11 @@ fss_client_ssl::handleCommand (const std::shared_ptr<flight_safety_system::trans
        We allow commands that are more than 60 seconds older than the last
        one to handle this case, while still deduplicating near-simultaneous
        messages. */
+    static constexpr uint64_t command_dedup_tolerance_ms = 60000;
     if (last_command != nullptr && msg->getTimeStamp () < last_command->getTimeStamp ())
     {
         uint64_t diff = last_command->getTimeStamp () - msg->getTimeStamp ();
-        if (diff < 60000)
+        if (diff < command_dedup_tolerance_ms)
         {
             return;
         }
