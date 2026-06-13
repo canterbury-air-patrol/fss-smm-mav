@@ -41,6 +41,11 @@ SMM::connect ()
     std::string pass_cstr (this->smm_pass.data (), this->smm_pass.size ());
     this->conn = smm_asset_connect (this->smm_host.c_str (), user_cstr.c_str (), pass_cstr.c_str ());
 
+    /* smm_asset_connect() only validates the host; the library authenticates
+     * lazily on the first request and reports SMM_CONNECTION_NEW until then.
+     * Log in eagerly so the state check below reflects the real outcome. */
+    smm_asset_connection_login (this->conn);
+
     if (smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
     {
         /* Oh dear */
