@@ -1,15 +1,25 @@
 #include "fmu-fss-types.hpp"
 #include "internal.hpp"
+#include <chrono>
 
 void
 fss_client_ssl::handleCommand (const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg)
 {
     /* Don't execute commands older than the last one we handled
        This can happen when there are connections to multiple servers
-       and the client that set the command didn't send it to all of them */
+       and the client that set the command didn't send it to all of them.
+
+       If a server clock resets, we could drop all subsequent commands.
+       We allow commands that are more than 60 seconds older than the last
+       one to handle this case, while still deduplicating near-simultaneous
+       messages. */
     if (last_command != nullptr && msg->getTimeStamp () < last_command->getTimeStamp ())
     {
-        return;
+        uint64_t diff = last_command->getTimeStamp () - msg->getTimeStamp ();
+        if (diff < 60000)
+        {
+            return;
+        }
     }
     last_command = msg;
     /* Convert Each Command into a MavLink Command */
@@ -80,15 +90,16 @@ fss_client_ssl::handleSMMSettings (
 void
 fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
 {
-    static constexpr uint64_t ts_1sec_interval = 1000;
+    static constexpr std::chrono::milliseconds ts_1sec_interval{ 1000 };
     static constexpr uint16_t squawk_vfr = 1200;
-    static uint64_t position_last_sent = 0;
+    static std::chrono::steady_clock::time_point position_last_sent{};
     static constexpr uint32_t valid_fields = 1 | 2 | 4 | 8 | 16 | 32;
     static constexpr uint8_t aircraft_type = 14;
-    uint64_t curr_ts = flight_safety_system::fss_current_timestamp ();
-    bool res = curr_ts > (position_last_sent + ts_1sec_interval);
-    if (res)
+
+    auto now = std::chrono::steady_clock::now ();
+    if ((now - position_last_sent) >= ts_1sec_interval)
     {
+        uint64_t curr_ts = flight_safety_system::fss_current_timestamp ();
         auto msg_pos = std::make_shared<flight_safety_system::transport::fss_message_position_report> (
             lat, lng, alt, heading, hor_vel, ver_vel,
             /* No ICAO Code assigned */
@@ -106,7 +117,7 @@ fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t head
             /* Type is UAV */
             aircraft_type, curr_ts);
         this->sendMsgAll (msg_pos);
-        position_last_sent = curr_ts;
+        position_last_sent = now;
     }
 }
 
