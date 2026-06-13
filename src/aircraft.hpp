@@ -76,6 +76,7 @@ class known_aircraft
     auto
     getAircraftICAOAddress (const std::string &t_call_sign) -> uint32_t
     {
+        std::lock_guard<std::mutex> lk (this->lock);
         auto ad = this->findAircraft (t_call_sign, 0);
         return ad->getICAOAddress ();
     }
