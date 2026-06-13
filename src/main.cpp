@@ -190,6 +190,7 @@ class App
         sigset_t mask;
         sigemptyset (&mask);
         sigaddset (&mask, SIGINT);
+        sigaddset (&mask, SIGTERM);
         int signum = 0;
         sigwait (&mask, &signum);
         running.store (false);
@@ -300,13 +301,14 @@ main (int argc, char *argv[]) -> int
         return 1;
     }
 
-    /* Block SIGINT so it can be handled synchronously by signal_waiter.
+    /* Block SIGINT and SIGTERM so they can be handled synchronously by signal_waiter.
      * This mask is inherited by all threads spawned below, ensuring the
      * signal is delivered to the dedicated waiter rather than interrupting
      * arbitrary threads from a signal-handler context. */
     sigset_t sigint_mask;
     sigemptyset (&sigint_mask);
     sigaddset (&sigint_mask, SIGINT);
+    sigaddset (&sigint_mask, SIGTERM);
     pthread_sigmask (SIG_BLOCK, &sigint_mask, nullptr);
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
