@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "fmu-core-types.hpp"
 #include "fmu.hpp"
 #include "fss/fmu-fss-types.hpp"
 
@@ -67,9 +68,13 @@ fss_cmd_name (FSSCommand cmd)
 class Logger
 {
   public:
-    explicit Logger (std::string_view dir);
+    explicit Logger (std::string_view dir, LogLevel level = LogLevel::info);
 
+    /* Log at info level. */
     void log (std::string_view msg);
+    /* Log at an explicit level; emitted only if it passes the configured
+     * verbosity. */
+    void log (LogLevel msg_level, std::string_view msg);
 
   private:
     static std::string timestamp ();
@@ -77,4 +82,5 @@ class Logger
 
     std::ofstream file;
     std::mutex lock;
+    LogLevel level;
 };

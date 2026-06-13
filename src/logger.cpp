@@ -7,7 +7,7 @@
 #include <iostream>
 #include <sstream>
 
-Logger::Logger (std::string_view dir) : file{}, lock{}
+Logger::Logger (std::string_view dir, LogLevel t_level) : file{}, lock{}, level (t_level)
 {
     std::string log_dir (dir);
     std::string log_path = log_dir + "/fmu.log";
@@ -66,6 +66,19 @@ Logger::timestamp ()
 void
 Logger::log (std::string_view msg)
 {
+    log (LogLevel::info, msg);
+}
+
+void
+Logger::log (LogLevel msg_level, std::string_view msg)
+{
+    /* Higher enum value == more verbose; drop anything above the configured
+     * level. The on-disk line format is unchanged so existing log consumers
+     * keep working regardless of level. */
+    if (msg_level > level)
+    {
+        return;
+    }
     std::lock_guard<std::mutex> lk (lock);
     if (!file.is_open ())
     {
