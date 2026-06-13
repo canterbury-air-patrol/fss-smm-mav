@@ -834,7 +834,7 @@ mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
         if (transfered < 0)
         {
             this->send_lock.unlock ();
-            this->disconnect_from_mav ();
+            this->broken = true;
             return false;
         }
         sent += transfered;
