@@ -87,7 +87,7 @@ class SMMSearch
     auto reachedPoint (int point) -> bool;
     /* True if the search loaded at least one waypoint from the server. */
     auto
-    isValid () -> bool
+    isValid () const -> bool
     {
         return this->valid;
     };
