@@ -151,16 +151,16 @@ SMM::tryAcquireSearch (Point current_pos)
             this->search_retry_ts = current_timestamp_ms () + search_retry_interval_ms;
             return;
         }
-        if (smm_search_accept (new_search))
+        /* Fetch the waypoints (and validate them) before accepting, so an
+         * un-loadable search is never committed to on the server. */
+        auto candidate = std::make_shared<SMMSearch> (new_search);
+        if (candidate->isValid () && candidate->accept ())
         {
-            this->current_search = std::make_shared<SMMSearch> (new_search);
+            this->current_search = candidate;
+            break;
         }
-        else
-        {
-            smm_search_destroy (new_search);
-        }
-        retries++;
-        if (retries >= 3)
+        /* candidate's destructor destroys the search; it was not accepted. */
+        if (++retries >= 3)
         {
             this->mav.setMode (flight_mode_rtl);
             this->search_retry_ts = current_timestamp_ms () + search_retry_interval_ms;
@@ -226,14 +226,25 @@ SMMSearch::SMMSearch (smm_search t_search)
     this->search = t_search;
     smm_waypoints wps = nullptr;
     size_t wps_count = 0;
-    smm_search_get_waypoints (this->search, &wps, &wps_count);
-    for (size_t i = 0; i < wps_count; i++)
+    /* A failed fetch (e.g. transient network error) leaves the search with no
+     * points; only treat it as valid once we have at least one waypoint. */
+    if (smm_search_get_waypoints (this->search, &wps, &wps_count) && wps_count > 0)
     {
-        Point wp (wps[i]->lat, wps[i]->lon);
-        this->addPoint (wp);
+        for (size_t i = 0; i < wps_count; i++)
+        {
+            Point wp (wps[i]->lat, wps[i]->lon);
+            this->addPoint (wp);
+        }
+        this->valid = true;
     }
     smm_waypoints_free (wps, wps_count);
     this->altitude = static_cast<int> (smm_search_sweep_width (search));
+}
+
+auto
+SMMSearch::accept () -> bool
+{
+    return smm_search_accept (this->search);
 }
 
 auto

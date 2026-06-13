@@ -48,6 +48,7 @@ class SMMSearch
     int current_point{ 0 };
     int altitude{ 0 };
     smm_search search{ nullptr };
+    bool valid{ false };
 
   public:
     SMMSearch () = default;
@@ -84,4 +85,12 @@ class SMMSearch
     };
     auto getPointsCount () -> int;
     auto reachedPoint (int point) -> bool;
+    /* True if the search loaded at least one waypoint from the server. */
+    auto
+    isValid () -> bool
+    {
+        return this->valid;
+    };
+    /* Commit to this search on the server; call only on a valid search. */
+    auto accept () -> bool;
 };
