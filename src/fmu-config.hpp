@@ -8,7 +8,7 @@
  * deliberately kept separate from the server-pushed SMMSettings: the SMM
  * server tells us where to connect, but the regulatory ceiling and the
  * camera geometry are properties of the airframe, not the mission. */
-struct AssetConfig
+struct FmuConfig
 {
     /* Regulatory ceiling for derived search altitude, metres AGL
      * (400ft ~= 122m). */
@@ -20,5 +20,5 @@ struct AssetConfig
 };
 
 /* Load the optional "fmu" config block from the given client.json. Missing,
- * malformed, or out-of-range values fall back to the AssetConfig defaults. */
-auto loadAssetConfig (const std::string &config_file) -> AssetConfig;
+ * malformed, or out-of-range values fall back to the FmuConfig defaults. */
+auto loadFmuConfig (const std::string &config_file) -> FmuConfig;
