@@ -56,10 +56,10 @@ map_fss_state (FSSCommand cmd) -> FMUState
     return new_state;
 }
 
-void
-FMUStateMachine::updateState ()
+auto
+FMUStateMachine::updateState () -> std::optional<FMUState>
 {
-    FMUState new_state = fmu_state_failsafe;
+    FMUState new_state;
 
     /* terminate is the highest-priority command: it overrides low_battery and
      * comms_failure so the ground station can always halt the aircraft. */
@@ -87,8 +87,9 @@ FMUStateMachine::updateState ()
     if (new_state != this->current_state)
     {
         this->current_state = new_state;
-        this->actionState (this->current_state);
+        return new_state;
     }
+    return std::nullopt;
 }
 
 void
@@ -146,50 +147,75 @@ FMUStateMachine::actionState (FMUState state)
 void
 FMUStateMachine::FSSNewCommand (FSSCommand cmd)
 {
+    std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->fss_command = cmd;
-        this->updateState ();
+        changed_to = this->updateState ();
+    }
+    if (changed_to)
+    {
+        this->actionState (*changed_to);
     }
 }
 
 void
 FMUStateMachine::SMMNewCommand (SMMCommand cmd)
 {
+    std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->smm_command = cmd;
-        this->updateState ();
+        changed_to = this->updateState ();
+    }
+    if (changed_to)
+    {
+        this->actionState (*changed_to);
     }
 }
 
 void
 FMUStateMachine::setLowBattery ()
 {
+    std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->low_battery = true;
-        this->updateState ();
+        changed_to = this->updateState ();
+    }
+    if (changed_to)
+    {
+        this->actionState (*changed_to);
     }
 }
 
 void
 FMUStateMachine::setCommsFailure (bool failed)
 {
+    std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->fss_comms_lost = failed;
-        this->updateState ();
+        changed_to = this->updateState ();
+    }
+    if (changed_to)
+    {
+        this->actionState (*changed_to);
     }
 }
 
 void
 FMUStateMachine::setMavCommsFailure (bool failed)
 {
+    std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->mav_comms_lost = failed;
-        this->updateState ();
+        changed_to = this->updateState ();
+    }
+    if (changed_to)
+    {
+        this->actionState (*changed_to);
     }
 }
 
