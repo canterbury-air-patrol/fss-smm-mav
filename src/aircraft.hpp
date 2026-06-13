@@ -35,10 +35,12 @@ class aircraft_details
 
 class known_aircraft
 {
-  private:
-    std::mutex lock{};
+  public:
     /* Warning: This is part of an "Unallocated" range of ICAO callsigns */
     static constexpr uint32_t first_icao_address_for_unknown_aircraft = 0x1000;
+
+  private:
+    std::mutex lock{};
     uint32_t lastAllocatedICAO{ first_icao_address_for_unknown_aircraft };
     std::map<std::string, std::shared_ptr<aircraft_details>> aircraft{};
     auto

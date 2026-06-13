@@ -328,7 +328,7 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
     std::string callsign = "TEST123";
 
     uint32_t icao1 = ka.getAircraftICAOAddress (callsign);
-    REQUIRE (icao1 >= 0x1000);
+    REQUIRE (icao1 >= known_aircraft::first_icao_address_for_unknown_aircraft);
 
     uint32_t icao2 = ka.getAircraftICAOAddress (callsign);
     REQUIRE (icao1 == icao2);
