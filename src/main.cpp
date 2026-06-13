@@ -23,6 +23,7 @@ template <class... Ts> struct overloaded : Ts...
 };
 template <class... Ts> overloaded (Ts...) -> overloaded<Ts...>;
 #include "aircraft.hpp"
+#include "fmu-config.hpp"
 #include "event.hpp"
 #include "fmu-types.hpp"
 #include "fmu.hpp"
@@ -39,9 +40,11 @@ constexpr int reconnect_interval = 10;
 class App
 {
   public:
-    App (const char *config_file, const char *addr, int port, terminate_action ta, Logger &t_logger)
+    App (const char *config_file, const char *addr, int port, terminate_action ta, const AssetConfig &cfg,
+         Logger &t_logger)
         : fss (std::make_unique<FSS> (config_file)), mav (std::make_unique<MAV> (addr, port, ta)),
-          smm (std::make_unique<SMM> (*mav)), aircraft{}, event_queue{}, main_lock{}, main_cv{}, reconnect_lock{},
+          smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.camera_fov_deg)), aircraft{}, event_queue{},
+          main_lock{}, main_cv{}, reconnect_lock{},
           reconnect_cv{}, running{ true }, asset_name (fss->getAssetName ()), logger (t_logger)
     {
     }
@@ -322,7 +325,8 @@ main (int argc, char *argv[]) -> int
             throw std::out_of_range ("port out of range");
         }
         Logger logger ("/var/log/cap-fmu");
-        App app (argv[optind], argv[optind + 1], static_cast<uint16_t> (port), ta.value (), logger);
+        AssetConfig cfg = loadAssetConfig (argv[optind]);
+        App app (argv[optind], argv[optind + 1], static_cast<uint16_t> (port), ta.value (), cfg, logger);
         app.run ();
     }
     catch (const std::invalid_argument &e)

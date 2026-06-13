@@ -6,7 +6,8 @@
 #include "util.hpp"
 #include <smm-asset.h>
 
-SMM::SMM (MAV &t_mav) : mav (t_mav)
+SMM::SMM (MAV &t_mav, uint16_t t_altitude_cap, double t_camera_fov_deg)
+    : mav (t_mav), altitude_cap (t_altitude_cap), camera_fov_deg (t_camera_fov_deg)
 {
     //    smm_asset_debugging_set (true);
 }
@@ -184,7 +185,7 @@ SMM::tryAcquireSearch (Point current_pos)
         }
         /* Fetch the waypoints (and validate them) before accepting, so an
          * un-loadable search is never committed to on the server. */
-        auto candidate = std::make_shared<SMMSearch> (new_search);
+        auto candidate = std::make_shared<SMMSearch> (new_search, this->altitude_cap, this->camera_fov_deg);
         if (candidate->isValid () && candidate->accept ())
         {
             this->current_search = candidate;
@@ -252,7 +253,7 @@ SMM::currentSearchPoints () -> int
     return 0;
 }
 
-SMMSearch::SMMSearch (smm_search t_search)
+SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, double camera_fov_deg)
 {
     this->search = t_search;
     smm_waypoints wps = nullptr;
@@ -269,12 +270,21 @@ SMMSearch::SMMSearch (smm_search t_search)
         this->valid = true;
     }
     smm_waypoints_free (wps, wps_count);
-    /* Fly the search at an altitude equal to its sweep (lane) width in metres.
-     * This assumes a downward camera with roughly a 45-degree field of view
-     * either side of the aircraft, so the ground footprint width scales with
-     * altitude. NOTE: this uses the sweep width directly and does not clamp to
-     * any regulatory ceiling (e.g. 400ft / ~122m AGL) - see todo/32. */
-    this->altitude = static_cast<int> (smm_search_sweep_width (search));
+    /* Derive the flight altitude from the search's sweep (lane) width. For a
+     * downward-pointing camera with total cross-track field of view `fov`, the
+     * ground footprint width at altitude h is width = 2 * h * tan(fov / 2), so
+     * h = width / (2 * tan(fov / 2)). camera_fov_deg is validated to (0, 180)
+     * at config load, which keeps tan(fov / 2) strictly positive. */
+    double sweep_width = static_cast<double> (smm_search_sweep_width (search));
+    double half_fov_rad = (camera_fov_deg * M_PI / 180.0) / 2.0;
+    this->altitude = static_cast<int> (sweep_width / (2.0 * std::tan (half_fov_rad)));
+    /* Clamp the derived altitude to the regulatory ceiling. */
+    if (this->altitude > altitude_cap)
+    {
+        std::cout << "SMM: Derived altitude (" << this->altitude << "m) for sweep width " << sweep_width
+                  << "m exceeds altitude cap (" << altitude_cap << "m), clamping altitude\n";
+        this->altitude = altitude_cap;
+    }
 }
 
 auto
