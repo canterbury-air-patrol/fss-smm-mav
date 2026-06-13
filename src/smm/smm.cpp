@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstring>
 #include <iostream>
 
@@ -119,7 +120,8 @@ SMM::reportPosition (PositionData t_pd)
         {
             Point p = t_pd.getP ();
             smm_asset_report_position (this->asset, p.getLatitude (), p.getLongitude (),
-                                       static_cast<int32_t> (t_pd.getAltitude ()), t_pd.getHeading () / 100, 3);
+                                       static_cast<int32_t> (std::lround (t_pd.getAltitude ())),
+                                       t_pd.getHeading () / 100, 3);
             this->position_report_last_ts = curr_ts;
         }
     }
