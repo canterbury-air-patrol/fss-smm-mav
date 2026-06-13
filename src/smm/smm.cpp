@@ -6,8 +6,8 @@
 #include "util.hpp"
 #include <smm-asset.h>
 
-SMM::SMM (MAV &t_mav, uint16_t t_altitude_cap, double t_camera_fov_deg)
-    : mav (t_mav), altitude_cap (t_altitude_cap), camera_fov_deg (t_camera_fov_deg)
+SMM::SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg)
+    : mav (t_mav), altitude_cap (t_altitude_cap), altitude_floor (t_altitude_floor), camera_fov_deg (t_camera_fov_deg)
 {
     //    smm_asset_debugging_set (true);
 }
@@ -185,7 +185,8 @@ SMM::tryAcquireSearch (Point current_pos)
         }
         /* Fetch the waypoints (and validate them) before accepting, so an
          * un-loadable search is never committed to on the server. */
-        auto candidate = std::make_shared<SMMSearch> (new_search, this->altitude_cap, this->camera_fov_deg);
+        auto candidate
+            = std::make_shared<SMMSearch> (new_search, this->altitude_cap, this->altitude_floor, this->camera_fov_deg);
         if (candidate->isValid () && candidate->accept ())
         {
             this->current_search = candidate;
@@ -253,7 +254,7 @@ SMM::currentSearchPoints () -> int
     return 0;
 }
 
-SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, double camera_fov_deg)
+SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altitude_floor, double camera_fov_deg)
 {
     this->search = t_search;
     smm_waypoints wps = nullptr;
@@ -278,12 +279,21 @@ SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, double camera_
     double sweep_width = static_cast<double> (smm_search_sweep_width (search));
     double half_fov_rad = (camera_fov_deg * M_PI / 180.0) / 2.0;
     this->altitude = static_cast<int> (sweep_width / (2.0 * std::tan (half_fov_rad)));
-    /* Clamp the derived altitude to the regulatory ceiling. */
+    /* Clamp the derived altitude into [floor, cap]. The floor guards against a
+     * tiny or zero sweep width putting the search at ground level; the cap is
+     * the regulatory ceiling. altitude_floor <= altitude_cap is guaranteed by
+     * config load, so the two bounds never conflict. */
     if (this->altitude > altitude_cap)
     {
         std::cout << "SMM: Derived altitude (" << this->altitude << "m) for sweep width " << sweep_width
                   << "m exceeds altitude cap (" << altitude_cap << "m), clamping altitude\n";
         this->altitude = altitude_cap;
+    }
+    else if (this->altitude < altitude_floor)
+    {
+        std::cout << "SMM: Derived altitude (" << this->altitude << "m) for sweep width " << sweep_width
+                  << "m below altitude floor (" << altitude_floor << "m), clamping altitude\n";
+        this->altitude = altitude_floor;
     }
 }
 

@@ -52,10 +52,10 @@ class SMMSearch
 
   public:
     SMMSearch () = default;
-    /* altitude_cap: regulatory ceiling (m). camera_fov_deg: camera total
-     * cross-track field of view (deg), used to derive flight altitude from
-     * the search sweep width. */
-    SMMSearch (smm_search, uint16_t altitude_cap, double camera_fov_deg);
+    /* altitude_cap/altitude_floor: regulatory ceiling and minimum (m).
+     * camera_fov_deg: camera total cross-track field of view (deg), used to
+     * derive flight altitude from the search sweep width. */
+    SMMSearch (smm_search, uint16_t altitude_cap, uint16_t altitude_floor, double camera_fov_deg);
     SMMSearch (SMMSearch &) = delete;
     SMMSearch (SMMSearch &&) = delete;
     auto operator= (SMMSearch &) -> SMMSearch & = delete;

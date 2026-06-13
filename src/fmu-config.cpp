@@ -10,26 +10,47 @@ namespace
 {
 constexpr double feet_to_metres = 0.3048;
 
-/* Validate and store an altitude cap given in `value`, scaled to metres by
- * `to_metres` (1.0 for metres, feet_to_metres for feet). Non-numeric or
- * out-of-(uint16_t)range values are rejected with a warning, leaving the
- * existing default in place rather than silently truncating. */
+/* Validate and store an altitude (metres) into `target`, scaled by `to_metres`
+ * (1.0 for metres, feet_to_metres for feet). Non-numeric or out-of-(uint16_t)
+ * range values are rejected with a warning, leaving the existing default in
+ * place rather than silently truncating. */
 void
-setAltitudeCap (FmuConfig &cfg, const char *key, const Json::Value &value, double to_metres)
+setAltitudeMetres (uint16_t &target, const char *key, const Json::Value &value, double to_metres)
 {
     if (!value.isNumeric ())
     {
-        std::cerr << "Config: " << key << " is not numeric, using default " << cfg.altitude_cap_m << "m\n";
+        std::cerr << "Config: " << key << " is not numeric, using default " << target << "m\n";
         return;
     }
     double metres = value.asDouble () * to_metres;
     if (metres < 0.0 || metres > std::numeric_limits<uint16_t>::max ())
     {
-        std::cerr << "Config: " << key << " (" << value.asDouble () << ") out of range, using default "
-                  << cfg.altitude_cap_m << "m\n";
+        std::cerr << "Config: " << key << " (" << value.asDouble () << ") out of range, using default " << target
+                  << "m\n";
         return;
     }
-    cfg.altitude_cap_m = static_cast<uint16_t> (std::lround (metres));
+    target = static_cast<uint16_t> (std::lround (metres));
+}
+
+/* Load an altitude that may be given in metres (`key_m`) or feet (`key_ft`)
+ * into `target`. If both are present, feet wins (with a warning). */
+void
+loadAltitude (uint16_t &target, const Json::Value &fmu, const char *key_m, const char *key_ft)
+{
+    bool have_m = fmu.isMember (key_m);
+    bool have_ft = fmu.isMember (key_ft);
+    if (have_m && have_ft)
+    {
+        std::cerr << "Config: both " << key_m << " and " << key_ft << " set, using " << key_ft << "\n";
+    }
+    if (have_ft)
+    {
+        setAltitudeMetres (target, key_ft, fmu[key_ft], feet_to_metres);
+    }
+    else if (have_m)
+    {
+        setAltitudeMetres (target, key_m, fmu[key_m], 1.0);
+    }
 }
 
 /* Validate and store an integer config value, rejecting non-integral or
@@ -84,22 +105,17 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         return cfg;
     }
 
-    /* The cap may be given in metres or feet; feet is the usual unit for the
-     * regulatory ceiling (e.g. 400ft). Both are stored internally as metres.
-     * If both are present, feet wins. */
-    bool have_cap_m = fmu.isMember ("altitude_cap_m");
-    bool have_cap_ft = fmu.isMember ("altitude_cap_ft");
-    if (have_cap_m && have_cap_ft)
+    /* The cap and floor may each be given in metres or feet; feet is the usual
+     * unit for the regulatory ceiling (e.g. 400ft). Both are stored as metres. */
+    loadAltitude (cfg.altitude_cap_m, fmu, "altitude_cap_m", "altitude_cap_ft");
+    loadAltitude (cfg.altitude_floor_m, fmu, "altitude_floor_m", "altitude_floor_ft");
+    /* The floor must never sit above the cap, or the derived altitude could not
+     * satisfy both bounds. */
+    if (cfg.altitude_floor_m > cfg.altitude_cap_m)
     {
-        std::cerr << "Config: both altitude_cap_m and altitude_cap_ft set, using altitude_cap_ft\n";
-    }
-    if (have_cap_ft)
-    {
-        setAltitudeCap (cfg, "altitude_cap_ft", fmu["altitude_cap_ft"], feet_to_metres);
-    }
-    else if (have_cap_m)
-    {
-        setAltitudeCap (cfg, "altitude_cap_m", fmu["altitude_cap_m"], 1.0);
+        std::cerr << "Config: altitude_floor (" << cfg.altitude_floor_m << "m) exceeds altitude_cap ("
+                  << cfg.altitude_cap_m << "m), clamping floor to cap\n";
+        cfg.altitude_floor_m = cfg.altitude_cap_m;
     }
 
     if (fmu.isMember ("camera_fov_deg"))
