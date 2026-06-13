@@ -48,3 +48,59 @@ jobs:
         autoreconf -fi
         ./configure
         make check
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+
+    steps:
+    - name: Install git
+      run: |
+        apt-get update
+        apt-get install -y git
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Add CAP apt repository
+      run: |
+        apt-get update
+        apt-get install -y lsb-release ca-certificates curl gnupg
+        echo "deb http://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+          > /etc/apt/sources.list.d/cap.list
+        curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
+          | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
+        apt-get update
+
+    - name: Install dependencies
+      run: |
+        apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          catch2 \
+          libfss-client-ssl \
+          libsmm-asset-dev \
+          cppcheck \
+          clang-tidy \
+          bear \
+          python3-venv
+
+    # clang-format output is version-dependent; pin the exact version the tree
+    # is formatted with so the formatting gate is reproducible.
+    - name: Install pinned clang-format
+      run: |
+        python3 -m venv /tmp/clang-format-venv
+        /tmp/clang-format-venv/bin/pip install -q clang-format==22.1.5
+
+    - name: Build with a compile database
+      run: |
+        autoreconf -fi
+        ./configure
+        bear -- make
+
+    - name: Static analysis (clang-format, cppcheck, clang-tidy)
+      run: CLANG_FORMAT=/tmp/clang-format-venv/bin/clang-format ./check-code.sh
