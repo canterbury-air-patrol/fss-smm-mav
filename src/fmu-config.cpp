@@ -131,5 +131,30 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         setRangedInt (cfg.reconnect_interval_s, "reconnect_interval_s", fmu["reconnect_interval_s"], 1, 3600);
     }
 
+    if (fmu.isMember ("log_level"))
+    {
+        const Json::Value &lvl = fmu["log_level"];
+        if (!lvl.isString ())
+        {
+            std::cerr << "Config: log_level is not a string, using default\n";
+        }
+        else if (std::string s = lvl.asString (); s == "error")
+        {
+            cfg.log_level = LogLevel::error;
+        }
+        else if (s == "info")
+        {
+            cfg.log_level = LogLevel::info;
+        }
+        else if (s == "debug")
+        {
+            cfg.log_level = LogLevel::debug;
+        }
+        else
+        {
+            std::cerr << "Config: log_level (" << s << ") unknown (error|info|debug), using default\n";
+        }
+    }
+
     return cfg;
 }

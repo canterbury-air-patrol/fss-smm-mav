@@ -155,3 +155,13 @@ enum class MavCommsStatus
     ok,
     failure,
 };
+
+/* Logging verbosity, ordered least- to most-verbose. A message logged at
+ * level L is emitted only when L <= the configured level, so `error` shows
+ * only errors, `info` adds normal operation, and `debug` shows everything. */
+enum class LogLevel
+{
+    error,
+    info,
+    debug,
+};

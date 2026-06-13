@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <string>
 
+#include "fmu-core-types.hpp"
+
 /* Local, per-asset configuration loaded from the "fmu" block of the asset's
  * client.json.
  *
@@ -22,6 +24,8 @@ struct FmuConfig
     int lowbat_threshold{ 20 };
     /* Interval between FSS/MAV reconnection attempts, seconds. */
     int reconnect_interval_s{ 10 };
+    /* Logging verbosity: error, info (default), or debug. */
+    LogLevel log_level{ LogLevel::info };
 };
 
 /* Load the optional "fmu" config block from the given client.json. Missing,

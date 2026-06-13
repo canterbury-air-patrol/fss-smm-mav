@@ -323,8 +323,8 @@ main (int argc, char *argv[]) -> int
         {
             throw std::out_of_range ("port out of range");
         }
-        Logger logger ("/var/log/cap-fmu");
         FmuConfig cfg = loadFmuConfig (argv[optind]);
+        Logger logger ("/var/log/cap-fmu", cfg.log_level);
         App app (argv[optind], argv[optind + 1], static_cast<uint16_t> (port), ta.value (), cfg, logger);
         app.run ();
     }
