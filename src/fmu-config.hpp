@@ -2,12 +2,13 @@
 #include <cstdint>
 #include <string>
 
-/* Local, per-asset configuration loaded from the asset's client.json.
+/* Local, per-asset configuration loaded from the "fmu" block of the asset's
+ * client.json.
  *
- * These describe physical/regulatory properties of *this* aircraft and are
- * deliberately kept separate from the server-pushed SMMSettings: the SMM
- * server tells us where to connect, but the regulatory ceiling and the
- * camera geometry are properties of the airframe, not the mission. */
+ * Covers both airframe properties (altitude cap, camera geometry) and
+ * operational tuning (battery threshold, reconnect interval). Kept separate
+ * from the server-pushed SMMSettings: the SMM server tells us where to
+ * connect, but these belong to the asset, not the mission. */
 struct FmuConfig
 {
     /* Regulatory ceiling for derived search altitude, metres AGL
@@ -17,6 +18,10 @@ struct FmuConfig
      * to derive the flight altitude that yields a desired ground sweep
      * width: width = 2 * altitude * tan(fov / 2). Must be in (0, 180). */
     double camera_fov_deg{ 90.0 };
+    /* Battery percentage at or below which a low-battery RTL is triggered. */
+    int lowbat_threshold{ 20 };
+    /* Interval between FSS/MAV reconnection attempts, seconds. */
+    int reconnect_interval_s{ 10 };
 };
 
 /* Load the optional "fmu" config block from the given client.json. Missing,
