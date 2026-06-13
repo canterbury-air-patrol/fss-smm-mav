@@ -163,6 +163,19 @@ SMM::tryAcquireSearch (Point current_pos)
             return;
         }
 
+        /* Another caller may have populated current_search while the lock was
+         * released; if so, discard the one we just fetched rather than
+         * overwriting (and leaking) the committed search. That caller has
+         * already loaded it and reset the retry timer, so just exit. */
+        if (this->current_search != nullptr)
+        {
+            if (new_search != nullptr)
+            {
+                smm_search_destroy (new_search);
+            }
+            return;
+        }
+
         if (new_search == nullptr)
         {
             this->mav.setMode (flight_mode_rtl);
