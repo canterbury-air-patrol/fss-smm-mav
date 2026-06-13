@@ -238,6 +238,11 @@ SMMSearch::SMMSearch (smm_search t_search)
         this->valid = true;
     }
     smm_waypoints_free (wps, wps_count);
+    /* Fly the search at an altitude equal to its sweep (lane) width in metres.
+     * This assumes a downward camera with roughly a 45-degree field of view
+     * either side of the aircraft, so the ground footprint width scales with
+     * altitude. NOTE: this uses the sweep width directly and does not clamp to
+     * any regulatory ceiling (e.g. 400ft / ~122m AGL) - see todo/32. */
     this->altitude = static_cast<int> (smm_search_sweep_width (search));
 }
 
