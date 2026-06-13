@@ -76,6 +76,7 @@ void
 MAV::setAltitude (uint16_t alt)
 {
     this->target_altitude = alt;
+    this->connection->commandAltitude (alt);
 }
 
 void

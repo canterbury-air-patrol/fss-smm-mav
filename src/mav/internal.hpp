@@ -149,7 +149,7 @@ class mav_connection
     void commandGoto (Point p);
     void commandHold ();
     void commandAuto ();
-    void commandAltitute ();
+    void commandAltitude (uint16_t alt);
     void commandDisARM ();
     void commandForceDisARM ();
     void commandManual ();
