@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <mutex>
+#include <optional>
 
 #include "fss/fmu-fss-types.hpp"
 #include "fss/ifss.hpp"
@@ -25,7 +26,7 @@ enum FMUState
 class FMUStateMachine
 {
   private:
-    void updateState ();
+    auto updateState () -> std::optional<FMUState>;
     void actionState (FMUState state);
     FMUState current_state{ fmu_state_manual };
     FSSCommand fss_command{ fss_cmd_unknown };
