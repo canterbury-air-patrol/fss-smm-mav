@@ -1,5 +1,6 @@
 #pragma once
 #include "fmu-types.hpp"
+#include <chrono>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -8,9 +9,9 @@
 class aircraft_details
 {
   private:
-    uint64_t ts{ 0 };
+    std::chrono::milliseconds ts{ 0 };
     uint32_t icao_address;
-    static constexpr uint64_t ts_1sec_interval = 1000;
+    static constexpr std::chrono::milliseconds ts_1sec_interval{ 1000 };
 
   public:
     explicit aircraft_details (uint32_t t_icao_address) : icao_address (t_icao_address) {};
@@ -22,9 +23,10 @@ class aircraft_details
     auto
     acceptableUpdate (uint64_t t_new_timestamp) -> bool
     {
-        if (this->ts + this->ts_1sec_interval <= t_new_timestamp)
+        std::chrono::milliseconds new_ts{ t_new_timestamp };
+        if (this->ts + this->ts_1sec_interval <= new_ts)
         {
-            this->ts = t_new_timestamp;
+            this->ts = new_ts;
             return true;
         }
         return false;
