@@ -119,9 +119,13 @@ SMM::reportPosition (PositionData t_pd)
         if (this->position_report_last_ts + 1000 <= curr_ts)
         {
             Point p = t_pd.getP ();
-            smm_asset_report_position (this->asset, p.getLatitude (), p.getLongitude (),
-                                       static_cast<int32_t> (std::lround (t_pd.getAltitude ())),
-                                       t_pd.getHeading () / 100, 3);
+            /* std::lround on a non-finite double is undefined; a real altitude
+             * in metres is always well within int32_t range, so a finiteness
+             * guard (reporting 0 otherwise) is enough. */
+            double alt_m = t_pd.getAltitude ();
+            int32_t alt = std::isfinite (alt_m) ? static_cast<int32_t> (std::lround (alt_m)) : 0;
+            smm_asset_report_position (this->asset, p.getLatitude (), p.getLongitude (), alt, t_pd.getHeading () / 100,
+                                       3);
             this->position_report_last_ts = curr_ts;
         }
     }
