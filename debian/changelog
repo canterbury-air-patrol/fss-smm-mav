@@ -1,5 +1,16 @@
-cap-fmu (0.12.0) unstable; urgency=medium
+cap-fmu (1.0.0) unstable; urgency=medium
 
-  * Current version
+  * First stable release.
+  * Configurable FMU behaviour via the optional "fmu" block in client.json
+    (altitude cap/floor in metres or feet, camera field of view, low-battery
+    threshold, reconnect interval, and log level).
+  * Search altitude derived from the search sweep width and camera field of
+    view, clamped to the configured [floor, cap] range.
+  * Required --terminate-action argument (none, disarm, or terminate) selects
+    the airframe-appropriate flight-termination behaviour.
+  * Debounced low-battery RTL latch: the latch only engages after several
+    consecutive low readings, so a single spurious sample cannot ground the
+    mission.
+  * Failsafe RTL on loss of FSS or autopilot (MAVLink heartbeat) comms.
 
- -- unknown <sjp@canterburyairpatrol.org>  Sun, 19 Jan 2025 00:00:00 +0000
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sun, 14 Jun 2026 12:12:52 +1200
