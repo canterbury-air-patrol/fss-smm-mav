@@ -178,15 +178,15 @@ FMUStateMachine::setLowBattery (bool low)
         std::lock_guard<std::mutex> lk (this->lock);
         if (low)
         {
-            /* Count consecutive low readings, saturating at the threshold so a
-             * long flight cannot overflow the counter. The latch only engages
-             * once we have seen more than low_battery_latch_threshold in a row,
-             * which rejects a single spurious sample. */
-            if (this->low_battery_count <= low_battery_latch_threshold)
+            /* Count consecutive low readings, saturating at the latch count so a
+             * long flight cannot overflow the counter. The latch engages once
+             * low_battery_latch_count readings have arrived in a row, which
+             * rejects a single spurious sample. */
+            if (this->low_battery_count < low_battery_latch_count)
             {
                 this->low_battery_count++;
             }
-            if (this->low_battery_count > low_battery_latch_threshold && !this->low_battery)
+            if (this->low_battery_count >= low_battery_latch_count && !this->low_battery)
             {
                 this->low_battery = true;
                 changed_to = this->updateState ();
