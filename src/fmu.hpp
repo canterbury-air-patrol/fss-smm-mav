@@ -31,6 +31,12 @@ class FMUStateMachine
     FMUState current_state{ fmu_state_manual };
     FSSCommand fss_command{ fss_cmd_unknown };
     SMMCommand smm_command{ smm_cmd_none };
+    /* Number of consecutive low-battery readings required before the latch
+     * engages. A single noisy/spurious sample must not ground the mission, so
+     * the latch only trips after this many in a row; one healthy reading in
+     * between resets the count. */
+    static constexpr int low_battery_latch_threshold = 3;
+    int low_battery_count{ 0 };
     bool low_battery{ false };
     bool fss_comms_lost{ false };
     bool mav_comms_lost{ false };
@@ -46,7 +52,7 @@ class FMUStateMachine
     void setStateChangeCB (std::function<void (FMUState)> cb);
     void FSSNewCommand (FSSCommand cmd);
     void SMMNewCommand (SMMCommand cmd);
-    void setLowBattery ();
+    void setLowBattery (bool low);
     void setCommsFailure (bool failed);
     void setMavCommsFailure (bool failed);
 };

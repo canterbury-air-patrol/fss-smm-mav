@@ -123,11 +123,23 @@ make_sm () -> SM
     return { mav, smm, fss, sm };
 }
 
+/* The state machine debounces low-battery readings: the RTL latch only engages
+ * after more than low_battery_latch_threshold (3) consecutive low samples.
+ * Feed it enough to trip the latch for tests that assume a latched low battery. */
+static void
+latch_low_battery (const std::shared_ptr<FMUStateMachine> &sm)
+{
+    for (int i = 0; i < 4; i++)
+    {
+        sm->setLowBattery (true);
+    }
+}
+
 TEST_CASE ("low battery latches RTL regardless of subsequent FSS commands", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();
 
-    sm->setLowBattery ();
+    latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
 
     sm->FSSNewCommand (fss_cmd_hold);
@@ -181,7 +193,7 @@ TEST_CASE ("terminate overrides low battery", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();
 
-    sm->setLowBattery ();
+    latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
     REQUIRE (!mav->terminated);
 
@@ -211,7 +223,7 @@ TEST_CASE ("low battery outranks comms failure", "[state_machine]")
     sm->setCommsFailure (true);
     REQUIRE (mav->last_mode == flight_mode_rtl);
 
-    sm->setLowBattery ();
+    latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
 
     sm->setCommsFailure (false);
@@ -228,7 +240,7 @@ TEST_CASE ("manual blocked when low battery is set", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();
 
-    sm->setLowBattery ();
+    latch_low_battery (sm);
     sm->FSSNewCommand (fss_cmd_manual);
 
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -260,7 +272,7 @@ TEST_CASE ("disarm blocked when low battery is set", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();
 
-    sm->setLowBattery ();
+    latch_low_battery (sm);
     sm->FSSNewCommand (fss_cmd_disarm);
 
     REQUIRE (!mav->disarmed);
@@ -320,6 +332,61 @@ TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[stat
 
     sm->FSSNewCommand (fss_cmd_altitude);
     REQUIRE (mav->set_altitude_calls == calls);
+}
+
+/* Design decision: the low-battery RTL latch is debounced. A single noisy or
+ * spurious low reading must not ground the mission; the latch only engages
+ * after more than low_battery_latch_threshold consecutive low samples. */
+TEST_CASE ("low battery does not latch before the debounce threshold", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    /* Three consecutive low readings is not enough to latch. */
+    sm->setLowBattery (true);
+    sm->setLowBattery (true);
+    sm->setLowBattery (true);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    /* The fourth trips the latch. */
+    sm->setLowBattery (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+
+    sm->setLowBattery (true);
+    sm->setLowBattery (true);
+    sm->setLowBattery (true);
+    /* A healthy reading clears the run, so the count restarts from zero. */
+    sm->setLowBattery (false);
+    sm->setLowBattery (true);
+    sm->setLowBattery (true);
+    sm->setLowBattery (true);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    sm->setLowBattery (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+/* Once the latch has engaged, a later optimistic reading must NOT release it:
+ * recovery from a critically low battery requires a restart. */
+TEST_CASE ("low battery latch is not cleared by a healthy reading", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    latch_low_battery (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    sm->setLowBattery (false);
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")

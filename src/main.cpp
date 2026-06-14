@@ -136,11 +136,16 @@ class App
                         [&] (BatteryData bd)
                         {
                             auto remaining = bd.getRemaining ();
-                            if (remaining >= 0 && remaining < lowbat_threshold)
+                            /* A remaining of -1 means "unknown"; only a real reading
+                             * below the threshold counts as low. The state machine
+                             * debounces these, so feed it every reading (low or not)
+                             * to keep its consecutive-low counter accurate. */
+                            bool low = remaining >= 0 && remaining < lowbat_threshold;
+                            if (low)
                             {
                                 logger.log ("BATTERY low " + std::to_string (remaining) + "%");
-                                state_machine.setLowBattery ();
                             }
+                            state_machine.setLowBattery (low);
                             fss->reportBatteryStatus (bd);
                         },
                         [&] (OtherAircraftReport oar)
