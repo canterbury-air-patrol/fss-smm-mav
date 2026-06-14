@@ -2,11 +2,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "aircraft.hpp"
+#include "fmu-config.hpp"
 #include "fmu.hpp"
 #include "smm/search-altitude.hpp"
 
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <string>
 #include <tuple>
+#include <unistd.h>
 
 class MockMAV : public IMAV
 {
@@ -595,4 +600,105 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
 
     uint32_t icao3 = ka.getAircraftICAOAddress (callsign);
     REQUIRE (icao1 == icao3);
+}
+
+/* loadFmuConfig reads a file path, so write the JSON to a unique temp file,
+ * load it, and remove the file. mkstemp keeps it race-free without the linker
+ * warning std::tmpnam draws. */
+namespace
+{
+auto
+load_config (const std::string &contents) -> FmuConfig
+{
+    char tmpl[] = "/tmp/cap-fmu-config-test-XXXXXX";
+    int fd = mkstemp (tmpl);
+    REQUIRE (fd >= 0);
+    ssize_t written = write (fd, contents.data (), contents.size ());
+    REQUIRE (written == static_cast<ssize_t> (contents.size ()));
+    close (fd);
+    FmuConfig cfg = loadFmuConfig (tmpl);
+    std::remove (tmpl);
+    return cfg;
+}
+} // namespace
+
+TEST_CASE ("loadFmuConfig returns defaults when the fmu block is absent", "[config]")
+{
+    FmuConfig cfg = load_config (R"({ "name": "test" })");
+    REQUIRE (cfg.altitude_cap_m == 122);
+    REQUIRE (cfg.altitude_floor_m == 10);
+    REQUIRE (cfg.camera_fov_deg == Catch::Approx (90.0));
+    REQUIRE (cfg.lowbat_threshold == 20);
+    REQUIRE (cfg.reconnect_interval_s == 10);
+    REQUIRE (cfg.log_level == LogLevel::info);
+}
+
+TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
+{
+    FmuConfig cfg = load_config (R"({
+        "fmu": {
+            "altitude_cap_m": 100,
+            "altitude_floor_m": 20,
+            "camera_fov_deg": 60.0,
+            "lowbat_threshold": 25,
+            "reconnect_interval_s": 30,
+            "log_level": "debug"
+        }
+    })");
+    REQUIRE (cfg.altitude_cap_m == 100);
+    REQUIRE (cfg.altitude_floor_m == 20);
+    REQUIRE (cfg.camera_fov_deg == Catch::Approx (60.0));
+    REQUIRE (cfg.lowbat_threshold == 25);
+    REQUIRE (cfg.reconnect_interval_s == 30);
+    REQUIRE (cfg.log_level == LogLevel::debug);
+}
+
+TEST_CASE ("loadFmuConfig converts feet to metres and prefers feet over metres", "[config]")
+{
+    /* 400 ft -> lround(400 * 0.3048) == 122 m. */
+    FmuConfig ft = load_config (R"({ "fmu": { "altitude_cap_ft": 400 } })");
+    REQUIRE (ft.altitude_cap_m == 122);
+
+    /* When both _m and _ft are given, feet wins. */
+    FmuConfig both = load_config (R"({ "fmu": { "altitude_cap_m": 80, "altitude_cap_ft": 400 } })");
+    REQUIRE (both.altitude_cap_m == 122);
+}
+
+TEST_CASE ("loadFmuConfig clamps an altitude floor above the cap down to the cap", "[config]")
+{
+    FmuConfig cfg = load_config (R"({ "fmu": { "altitude_cap_m": 50, "altitude_floor_m": 80 } })");
+    REQUIRE (cfg.altitude_cap_m == 50);
+    REQUIRE (cfg.altitude_floor_m == 50);
+}
+
+TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[config]")
+{
+    /* FoV outside (0, 180), battery outside [0, 100], interval outside
+     * [1, 3600], and an unknown log level each fall back to their default. */
+    FmuConfig cfg = load_config (R"({
+        "fmu": {
+            "camera_fov_deg": 200.0,
+            "lowbat_threshold": 150,
+            "reconnect_interval_s": 0,
+            "log_level": "verbose"
+        }
+    })");
+    REQUIRE (cfg.camera_fov_deg == Catch::Approx (90.0));
+    REQUIRE (cfg.lowbat_threshold == 20);
+    REQUIRE (cfg.reconnect_interval_s == 10);
+    REQUIRE (cfg.log_level == LogLevel::info);
+}
+
+TEST_CASE ("loadFmuConfig falls back to defaults on malformed JSON", "[config]")
+{
+    FmuConfig cfg = load_config ("{ this is not valid json ");
+    REQUIRE (cfg.altitude_cap_m == 122);
+    REQUIRE (cfg.lowbat_threshold == 20);
+}
+
+TEST_CASE ("loadFmuConfig falls back to defaults when the file is missing", "[config]")
+{
+    FmuConfig cfg = loadFmuConfig ("/nonexistent/cap-fmu-no-such-config.json");
+    REQUIRE (cfg.altitude_cap_m == 122);
+    REQUIRE (cfg.log_level == LogLevel::info);
 }
