@@ -171,13 +171,35 @@ FMUStateMachine::SMMNewCommand (SMMCommand cmd)
 }
 
 void
-FMUStateMachine::setLowBattery ()
+FMUStateMachine::setLowBattery (bool low)
 {
     std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
-        this->low_battery = true;
-        changed_to = this->updateState ();
+        if (low)
+        {
+            /* Count consecutive low readings, saturating at the threshold so a
+             * long flight cannot overflow the counter. The latch only engages
+             * once we have seen more than low_battery_latch_threshold in a row,
+             * which rejects a single spurious sample. */
+            if (this->low_battery_count <= low_battery_latch_threshold)
+            {
+                this->low_battery_count++;
+            }
+            if (this->low_battery_count > low_battery_latch_threshold && !this->low_battery)
+            {
+                this->low_battery = true;
+                changed_to = this->updateState ();
+            }
+        }
+        else
+        {
+            /* A healthy reading resets the run of low samples. The latch itself
+             * is deliberately *not* cleared: once a critically low battery has
+             * grounded the aircraft, a later optimistic reading must not release
+             * it — recovery requires a restart. */
+            this->low_battery_count = 0;
+        }
     }
     if (changed_to)
     {

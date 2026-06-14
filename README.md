@@ -76,7 +76,7 @@ block is absent entirely):
 | `altitude_floor_m` | `10` | Minimum search altitude, in metres AGL. The derived altitude is never flown below this, so a tiny or zero sweep width cannot put the aircraft at ground level. Clamped to be no greater than the altitude cap. |
 | `altitude_floor_ft` | – | The floor expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
 | `camera_fov_deg` | `90.0` | Camera total cross-track (across-flight) field of view, in degrees. The flight altitude for a search is derived from its sweep width as `altitude = sweep_width / (2 * tan(fov / 2))`, then clamped to the [floor, cap] range. Must be in the open range (0, 180). |
-| `lowbat_threshold` | `20` | Battery percentage at or below which a low-battery RTL is triggered. Range 0–100. |
+| `lowbat_threshold` | `20` | Battery percentage below which a low-battery RTL is triggered. Range 0–100. The trigger is debounced: the RTL latch only engages after more than three *consecutive* readings below the threshold, so a single noisy/spurious sample cannot ground the mission. Once latched, the RTL is held until the FMU is restarted — a later higher reading does not release it. |
 | `reconnect_interval_s` | `10` | Seconds between FSS/MAV reconnection attempts. Range 1–3600. |
 | `log_level` | `info` | Logging verbosity: `error`, `info`, or `debug`. |
 
