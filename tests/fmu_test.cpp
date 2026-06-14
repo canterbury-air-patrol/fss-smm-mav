@@ -416,6 +416,89 @@ TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[st
     REQUIRE (mav->set_mode_calls == 1);
 }
 
+TEST_CASE ("mav comms failure triggers failsafe RTL", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    sm->setMavCommsFailure (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("mav comms failure clears and restores prior FSS command", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    sm->setMavCommsFailure (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    sm->setMavCommsFailure (false);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+}
+
+TEST_CASE ("terminate overrides mav comms failure", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->setMavCommsFailure (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    REQUIRE (!mav->terminated);
+
+    sm->FSSNewCommand (fss_cmd_terminate);
+    REQUIRE (mav->terminated);
+}
+
+TEST_CASE ("mav comms failure does not displace an active terminate", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_terminate);
+    REQUIRE (mav->terminated);
+    int mode_calls = mav->set_mode_calls;
+
+    /* A subsequent comms failure must not pull the aircraft out of terminate
+     * into RTL — terminate is the highest priority. */
+    sm->setMavCommsFailure (true);
+    REQUIRE (mav->set_mode_calls == mode_calls);
+}
+
+TEST_CASE ("disarm command is actioned when no emergency", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_disarm);
+    REQUIRE (mav->disarmed);
+}
+
+TEST_CASE ("state_change_cb fires on every state transition", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    int transitions = 0;
+    FMUState last_seen = fmu_state_manual;
+    sm->setStateChangeCB (
+        [&] (FMUState s)
+        {
+            transitions++;
+            last_seen = s;
+        });
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    sm->FSSNewCommand (fss_cmd_goto);
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (transitions == 3);
+    REQUIRE (last_seen == fmu_state_hold);
+
+    /* A repeated command is not a transition, so the callback must not fire. */
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (transitions == 3);
+}
+
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
 {
     known_aircraft ka;
