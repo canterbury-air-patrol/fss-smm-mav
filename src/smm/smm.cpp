@@ -2,6 +2,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "search-altitude.hpp"
 #include "smm.hpp"
 #include "util.hpp"
 #include <smm-asset.h>
@@ -271,33 +272,22 @@ SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altit
         this->valid = true;
     }
     smm_waypoints_free (wps, wps_count);
-    /* Derive the flight altitude from the search's sweep (lane) width. For a
-     * downward-pointing camera with total cross-track field of view `fov`, the
-     * ground footprint width at altitude h is width = 2 * h * tan(fov / 2), so
-     * h = width / (2 * tan(fov / 2)). camera_fov_deg is validated to (0, 180)
-     * at config load, which keeps tan(fov / 2) strictly positive. */
-    /* std::numbers::pi is C++20; this project is C++17, so use a local constant
-     * rather than the non-standard M_PI macro from transitive includes. */
-    constexpr double pi = 3.14159265358979323846;
+    /* Derive the flight altitude from the search's sweep (lane) width and the
+     * camera geometry, then clamp into [floor, cap]. The pure helpers live in
+     * search-altitude.hpp so the formula and clamp are unit tested directly;
+     * here we keep the warning logging (stderr, to leave stdout clean). */
     double sweep_width = static_cast<double> (smm_search_sweep_width (search));
-    double half_fov_rad = (camera_fov_deg * pi / 180.0) / 2.0;
-    this->altitude = static_cast<int> (sweep_width / (2.0 * std::tan (half_fov_rad)));
-    /* Clamp the derived altitude into [floor, cap]. The floor guards against a
-     * tiny or zero sweep width putting the search at ground level; the cap is
-     * the regulatory ceiling. altitude_floor <= altitude_cap is guaranteed by
-     * config load, so the two bounds never conflict. Warnings go to stderr to
-     * keep stdout clean. */
-    if (this->altitude > altitude_cap)
+    double raw_altitude = raw_search_altitude (sweep_width, camera_fov_deg);
+    this->altitude = clamp_search_altitude (raw_altitude, altitude_floor, altitude_cap);
+    if (raw_altitude > altitude_cap)
     {
-        std::cerr << "SMM: Derived altitude (" << this->altitude << "m) for sweep width " << sweep_width
+        std::cerr << "SMM: Derived altitude (" << raw_altitude << "m) for sweep width " << sweep_width
                   << "m exceeds altitude cap (" << altitude_cap << "m), clamping altitude\n";
-        this->altitude = altitude_cap;
     }
-    else if (this->altitude < altitude_floor)
+    else if (raw_altitude < altitude_floor)
     {
-        std::cerr << "SMM: Derived altitude (" << this->altitude << "m) for sweep width " << sweep_width
+        std::cerr << "SMM: Derived altitude (" << raw_altitude << "m) for sweep width " << sweep_width
                   << "m below altitude floor (" << altitude_floor << "m), clamping altitude\n";
-        this->altitude = altitude_floor;
     }
 }
 

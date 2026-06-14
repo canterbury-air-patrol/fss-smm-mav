@@ -1,7 +1,9 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "aircraft.hpp"
 #include "fmu.hpp"
+#include "smm/search-altitude.hpp"
 
 #include <memory>
 #include <tuple>
@@ -523,6 +525,57 @@ TEST_CASE ("state_change_cb fires once per state change, not on no-op transition
     /* A repeated command is not a transition, so the callback must not fire. */
     sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (transitions == 3);
+}
+
+TEST_CASE ("raw_search_altitude derives height from sweep width and FoV", "[altitude]")
+{
+    /* At a 90deg total FoV, tan(45deg) == 1, so altitude == sweep_width / 2. */
+    REQUIRE (raw_search_altitude (200.0, 90.0) == Catch::Approx (100.0));
+    REQUIRE (raw_search_altitude (100.0, 90.0) == Catch::Approx (50.0));
+
+    /* A narrower FoV needs more altitude for the same sweep width. */
+    REQUIRE (raw_search_altitude (100.0, 60.0) > raw_search_altitude (100.0, 90.0));
+    /* h = width / (2 * tan(30deg)) = 100 / (2 * 0.57735) ~= 86.60 */
+    REQUIRE (raw_search_altitude (100.0, 60.0) == Catch::Approx (86.6025).margin (0.01));
+
+    /* Zero sweep width derives zero altitude (the floor clamp handles this). */
+    REQUIRE (raw_search_altitude (0.0, 90.0) == Catch::Approx (0.0));
+}
+
+TEST_CASE ("clamp_search_altitude holds the derived altitude within [floor, cap]", "[altitude]")
+{
+    /* Within range passes through (truncated to whole metres). */
+    REQUIRE (clamp_search_altitude (100.0, 10, 122) == 100);
+    REQUIRE (clamp_search_altitude (100.9, 10, 122) == 100);
+
+    /* Above the cap clamps to the regulatory ceiling. */
+    REQUIRE (clamp_search_altitude (500.0, 10, 122) == 122);
+
+    /* Below the floor clamps up: a tiny or zero sweep width cannot put the
+     * search at ground level. */
+    REQUIRE (clamp_search_altitude (5.0, 10, 122) == 10);
+    REQUIRE (clamp_search_altitude (0.0, 10, 122) == 10);
+
+    /* Boundaries are inclusive. */
+    REQUIRE (clamp_search_altitude (122.0, 10, 122) == 122);
+    REQUIRE (clamp_search_altitude (10.0, 10, 122) == 10);
+
+    /* When floor == cap the altitude is pinned to that single value. */
+    REQUIRE (clamp_search_altitude (50.0, 122, 122) == 122);
+    REQUIRE (clamp_search_altitude (200.0, 122, 122) == 122);
+}
+
+TEST_CASE ("search altitude derivation and clamp compose for realistic searches", "[altitude]")
+{
+    constexpr uint16_t floor = 10;
+    constexpr uint16_t cap = 122;
+
+    /* 200 m sweep at 90deg -> 100 m, within range. */
+    REQUIRE (clamp_search_altitude (raw_search_altitude (200.0, 90.0), floor, cap) == 100);
+    /* A very wide sweep would exceed the regulatory ceiling -> clamped to cap. */
+    REQUIRE (clamp_search_altitude (raw_search_altitude (1000.0, 90.0), floor, cap) == cap);
+    /* A tiny sweep would sit at ground level -> clamped up to the floor. */
+    REQUIRE (clamp_search_altitude (raw_search_altitude (2.0, 90.0), floor, cap) == floor);
 }
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
