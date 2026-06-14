@@ -1,3 +1,7 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -249,6 +253,20 @@ print_usage (const char *progname)
     std::cerr << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port" << '\n';
 }
 
+static void
+print_help (const char *progname)
+{
+    std::cout << "Usage: " << progname << " --terminate-action=<action> client.json addr port\n\n"
+              << "Canterbury Air Patrol Flight Management Unit.\n\n"
+              << "Options:\n"
+              << "  --terminate-action=none|disarm|terminate  Flight-termination action (required)\n"
+              << "  --version                                 Print version and exit\n"
+              << "  --help                                    Print this help and exit\n\n"
+              << "Arguments:\n"
+              << "  client.json   FSS client configuration file\n"
+              << "  addr port     MAVLink endpoint (e.g. 127.0.0.1 5760)\n";
+}
+
 static auto
 parse_terminate_action (std::string_view val) -> std::optional<terminate_action>
 {
@@ -270,8 +288,10 @@ parse_terminate_action (std::string_view val) -> std::optional<terminate_action>
 auto
 main (int argc, char *argv[]) -> int
 {
-    static const struct option long_options[]
-        = { { "terminate-action", required_argument, nullptr, 't' }, { nullptr, 0, nullptr, 0 } };
+    static const struct option long_options[] = { { "terminate-action", required_argument, nullptr, 't' },
+                                                  { "version", no_argument, nullptr, 'v' },
+                                                  { "help", no_argument, nullptr, 'h' },
+                                                  { nullptr, 0, nullptr, 0 } };
 
     std::optional<terminate_action> ta;
 
@@ -279,20 +299,26 @@ main (int argc, char *argv[]) -> int
     int option_index = 0;
     while ((opt = getopt_long (argc, argv, "", long_options, &option_index)) != -1)
     {
-        if (opt == 't')
+        switch (opt)
         {
-            ta = parse_terminate_action (optarg);
-            if (!ta)
-            {
-                std::cerr << "Error: unknown --terminate-action value '" << optarg
-                          << "' (must be none, disarm, or terminate)" << '\n';
+            case 't':
+                ta = parse_terminate_action (optarg);
+                if (!ta)
+                {
+                    std::cerr << "Error: unknown --terminate-action value '" << optarg
+                              << "' (must be none, disarm, or terminate)" << '\n';
+                    return 1;
+                }
+                break;
+            case 'v':
+                std::cout << PACKAGE_STRING << '\n';
+                return 0;
+            case 'h':
+                print_help (argv[0]);
+                return 0;
+            default:
+                print_usage (argv[0]);
                 return 1;
-            }
-        }
-        else
-        {
-            print_usage (argv[0]);
-            return 1;
         }
     }
 
