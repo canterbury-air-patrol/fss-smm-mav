@@ -427,6 +427,32 @@ TEST_CASE ("mav comms failure triggers failsafe RTL", "[state_machine]")
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
+/* The failsafe must be idempotent: once a comms failure has driven the RTL,
+ * further missed heartbeats (repeated setMavCommsFailure(true)) must not
+ * re-action it. Asserts the internal FMUState via the state-change callback,
+ * not just the mav side effect. */
+TEST_CASE ("repeated mav comms failures do not re-action the failsafe", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    FMUState last_state = fmu_state_manual;
+    sm->setStateChangeCB ([&] (FMUState s) { last_state = s; });
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (last_state == fmu_state_hold);
+
+    sm->setMavCommsFailure (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    REQUIRE (last_state == fmu_state_failsafe);
+    int mode_calls = mav->set_mode_calls;
+
+    /* Subsequent missed heartbeats while already failed change nothing. */
+    sm->setMavCommsFailure (true);
+    sm->setMavCommsFailure (true);
+    REQUIRE (mav->set_mode_calls == mode_calls);
+    REQUIRE (last_state == fmu_state_failsafe);
+}
+
 TEST_CASE ("mav comms failure clears and restores prior FSS command", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();
@@ -475,7 +501,7 @@ TEST_CASE ("disarm command is actioned when no emergency", "[state_machine]")
     REQUIRE (mav->disarmed);
 }
 
-TEST_CASE ("state_change_cb fires on every state transition", "[state_machine]")
+TEST_CASE ("state_change_cb fires once per state change, not on no-op transitions", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();
 
