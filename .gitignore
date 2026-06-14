@@ -18,6 +18,15 @@ m4/
 missing
 stamp-h1
 
+# Editor / autotools backup files (config.guess~, config.sub~, configure~, ...)
+*~
+
+# Test harness (automake) artefacts
+test-driver
+tests/fmu_test
+*.trs
+*.log
+
 # Static-analysis artefacts (see check-code.sh)
 compile_commands.json
 clang-tidy.log
