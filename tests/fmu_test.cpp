@@ -124,12 +124,12 @@ make_sm () -> SM
 }
 
 /* The state machine debounces low-battery readings: the RTL latch only engages
- * after more than low_battery_latch_threshold (3) consecutive low samples.
- * Feed it enough to trip the latch for tests that assume a latched low battery. */
+ * after low_battery_latch_count consecutive low samples. Drive exactly that many
+ * so tests that assume a latched low battery stay correct if the count changes. */
 static void
 latch_low_battery (const std::shared_ptr<FMUStateMachine> &sm)
 {
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < FMUStateMachine::low_battery_latch_count; i++)
     {
         sm->setLowBattery (true);
     }
@@ -336,21 +336,22 @@ TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[stat
 
 /* Design decision: the low-battery RTL latch is debounced. A single noisy or
  * spurious low reading must not ground the mission; the latch only engages
- * after more than low_battery_latch_threshold consecutive low samples. */
-TEST_CASE ("low battery does not latch before the debounce threshold", "[state_machine]")
+ * after low_battery_latch_count consecutive low samples. */
+TEST_CASE ("low battery does not latch before the debounce count", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (mav->last_mode == flight_mode_hold);
 
-    /* Three consecutive low readings is not enough to latch. */
-    sm->setLowBattery (true);
-    sm->setLowBattery (true);
-    sm->setLowBattery (true);
+    /* One short of the count is not enough to latch. */
+    for (int i = 0; i < FMUStateMachine::low_battery_latch_count - 1; i++)
+    {
+        sm->setLowBattery (true);
+    }
     REQUIRE (mav->last_mode == flight_mode_hold);
 
-    /* The fourth trips the latch. */
+    /* The final consecutive reading trips the latch. */
     sm->setLowBattery (true);
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
@@ -361,14 +362,17 @@ TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_
 
     sm->FSSNewCommand (fss_cmd_hold);
 
-    sm->setLowBattery (true);
-    sm->setLowBattery (true);
-    sm->setLowBattery (true);
-    /* A healthy reading clears the run, so the count restarts from zero. */
+    /* Almost enough to latch... */
+    for (int i = 0; i < FMUStateMachine::low_battery_latch_count - 1; i++)
+    {
+        sm->setLowBattery (true);
+    }
+    /* ...but a healthy reading clears the run, so the count restarts from zero. */
     sm->setLowBattery (false);
-    sm->setLowBattery (true);
-    sm->setLowBattery (true);
-    sm->setLowBattery (true);
+    for (int i = 0; i < FMUStateMachine::low_battery_latch_count - 1; i++)
+    {
+        sm->setLowBattery (true);
+    }
     REQUIRE (mav->last_mode == flight_mode_hold);
 
     sm->setLowBattery (true);
@@ -387,6 +391,29 @@ TEST_CASE ("low battery latch is not cleared by a healthy reading", "[state_mach
     sm->setLowBattery (false);
     sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+/* The consecutive-low counter saturates at low_battery_latch_count so a long
+ * flight with a sustained low battery cannot overflow it. The latch must engage
+ * exactly once and stay engaged no matter how many more low readings arrive. */
+TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    /* Far more readings than the latch count, to exercise counter saturation. */
+    for (int i = 0; i < 1000; i++)
+    {
+        sm->setLowBattery (true);
+    }
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    /* The machine started in manual, so the single RTL transition is the only
+     * setMode call; saturated readings past the latch point do not re-action. */
+    REQUIRE (mav->set_mode_calls == 1);
+
+    /* Still latched: a subsequent FSS command cannot release it. */
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    REQUIRE (mav->set_mode_calls == 1);
 }
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
