@@ -6,12 +6,14 @@
 #include "fmu.hpp"
 #include "smm/search-altitude.hpp"
 
-#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <tuple>
 #include <unistd.h>
+#include <vector>
 
 class MockMAV : public IMAV
 {
@@ -615,35 +617,68 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
     REQUIRE (icao1 == icao3);
 }
 
-/* loadFmuConfig reads a file path, so write the JSON to a unique temp file,
- * load it, and remove the file. mkstemp keeps it race-free without the linker
- * warning std::tmpnam draws. */
+/* loadFmuConfig reads a file path, so the tests write JSON to a temp file. This
+ * RAII wrapper writes it on construction and unlinks on destruction, so a failed
+ * REQUIRE mid-test cannot leave a stray file behind. The directory comes from
+ * std::filesystem rather than a hard-coded /tmp; mkstemp keeps the name unique
+ * without the linker warning std::tmpnam draws. */
 namespace
 {
+class TempConfigFile
+{
+  public:
+    explicit TempConfigFile (const std::string &contents) : path{}
+    {
+        std::string tmpl = (std::filesystem::temp_directory_path () / "cap-fmu-config-test-XXXXXX").string ();
+        std::vector<char> buf (tmpl.begin (), tmpl.end ());
+        buf.push_back ('\0');
+        int fd = mkstemp (buf.data ());
+        REQUIRE (fd >= 0);
+        path = buf.data ();
+        ssize_t written = write (fd, contents.data (), contents.size ());
+        close (fd);
+        REQUIRE (written == static_cast<ssize_t> (contents.size ()));
+    }
+    TempConfigFile (const TempConfigFile &) = delete;
+    TempConfigFile (TempConfigFile &&) = delete;
+    auto operator= (const TempConfigFile &) -> TempConfigFile & = delete;
+    auto operator= (TempConfigFile &&) -> TempConfigFile & = delete;
+    ~TempConfigFile ()
+    {
+        std::error_code ec;
+        std::filesystem::remove (path, ec);
+    }
+    auto
+    str () const -> const std::string &
+    {
+        return path;
+    }
+
+  private:
+    std::string path;
+};
+
 auto
 load_config (const std::string &contents) -> FmuConfig
 {
-    char tmpl[] = "/tmp/cap-fmu-config-test-XXXXXX";
-    int fd = mkstemp (tmpl);
-    REQUIRE (fd >= 0);
-    ssize_t written = write (fd, contents.data (), contents.size ());
-    REQUIRE (written == static_cast<ssize_t> (contents.size ()));
-    close (fd);
-    FmuConfig cfg = loadFmuConfig (tmpl);
-    std::remove (tmpl);
-    return cfg;
+    TempConfigFile tf (contents);
+    return loadFmuConfig (tf.str ());
 }
+
+/* A default-constructed config, shared by the tests that assert values fell
+ * back to their defaults. */
+const FmuConfig def{};
 } // namespace
 
 TEST_CASE ("loadFmuConfig returns defaults when the fmu block is absent", "[config]")
 {
     FmuConfig cfg = load_config (R"({ "name": "test" })");
-    REQUIRE (cfg.altitude_cap_m == 122);
-    REQUIRE (cfg.altitude_floor_m == 10);
-    REQUIRE (cfg.camera_fov_deg == Catch::Approx (90.0));
-    REQUIRE (cfg.lowbat_threshold == 20);
-    REQUIRE (cfg.reconnect_interval_s == 10);
-    REQUIRE (cfg.log_level == LogLevel::info);
+    REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
+    REQUIRE (cfg.altitude_floor_m == def.altitude_floor_m);
+    REQUIRE (cfg.camera_fov_deg == Catch::Approx (def.camera_fov_deg));
+    REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
+    REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
+    REQUIRE (cfg.log_level == def.log_level);
 }
 
 TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
@@ -696,22 +731,22 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
             "log_level": "verbose"
         }
     })");
-    REQUIRE (cfg.camera_fov_deg == Catch::Approx (90.0));
-    REQUIRE (cfg.lowbat_threshold == 20);
-    REQUIRE (cfg.reconnect_interval_s == 10);
-    REQUIRE (cfg.log_level == LogLevel::info);
+    REQUIRE (cfg.camera_fov_deg == Catch::Approx (def.camera_fov_deg));
+    REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
+    REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
+    REQUIRE (cfg.log_level == def.log_level);
 }
 
 TEST_CASE ("loadFmuConfig falls back to defaults on malformed JSON", "[config]")
 {
     FmuConfig cfg = load_config ("{ this is not valid json ");
-    REQUIRE (cfg.altitude_cap_m == 122);
-    REQUIRE (cfg.lowbat_threshold == 20);
+    REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
+    REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
 }
 
 TEST_CASE ("loadFmuConfig falls back to defaults when the file is missing", "[config]")
 {
     FmuConfig cfg = loadFmuConfig ("/nonexistent/cap-fmu-no-such-config.json");
-    REQUIRE (cfg.altitude_cap_m == 122);
-    REQUIRE (cfg.log_level == LogLevel::info);
+    REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
+    REQUIRE (cfg.log_level == def.log_level);
 }
