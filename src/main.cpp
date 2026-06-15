@@ -2,6 +2,12 @@
 #include "config.h"
 #endif
 
+/* Fallback so a build without the autotools-generated config.h still compiles
+ * (PACKAGE_STRING is used by --version). */
+#ifndef PACKAGE_STRING
+#define PACKAGE_STRING "cap-fmu"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -248,16 +254,16 @@ class App
 };
 
 static void
-print_usage (const char *progname)
+print_usage (std::ostream &os, const char *progname)
 {
-    std::cerr << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port" << '\n';
+    os << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port\n";
 }
 
 static void
 print_help (const char *progname)
 {
-    std::cout << "Usage: " << progname << " --terminate-action=<action> client.json addr port\n\n"
-              << "Canterbury Air Patrol Flight Management Unit.\n\n"
+    print_usage (std::cout, progname);
+    std::cout << "\nCanterbury Air Patrol Flight Management Unit.\n\n"
               << "Options:\n"
               << "  --terminate-action=none|disarm|terminate  Flight-termination action (required)\n"
               << "  --version                                 Print version and exit\n"
@@ -317,7 +323,7 @@ main (int argc, char *argv[]) -> int
                 print_help (argv[0]);
                 return 0;
             default:
-                print_usage (argv[0]);
+                print_usage (std::cerr, argv[0]);
                 return 1;
         }
     }
@@ -325,13 +331,13 @@ main (int argc, char *argv[]) -> int
     if (!ta)
     {
         std::cerr << "Error: --terminate-action is required (none, disarm, or terminate)" << '\n';
-        print_usage (argv[0]);
+        print_usage (std::cerr, argv[0]);
         return 1;
     }
 
     if (argc - optind != 3)
     {
-        print_usage (argv[0]);
+        print_usage (std::cerr, argv[0]);
         return 1;
     }
 
@@ -363,13 +369,13 @@ main (int argc, char *argv[]) -> int
     catch (const std::invalid_argument &e)
     {
         std::cerr << "Error: invalid port '" << port_arg << "'\n";
-        print_usage (argv[0]);
+        print_usage (std::cerr, argv[0]);
         return 1;
     }
     catch (const std::out_of_range &e)
     {
         std::cerr << "Error: port '" << port_arg << "' is out of range (1-65535)\n";
-        print_usage (argv[0]);
+        print_usage (std::cerr, argv[0]);
         return 1;
     }
     catch (const std::exception &e)
