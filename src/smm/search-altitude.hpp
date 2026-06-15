@@ -15,6 +15,14 @@
 inline auto
 raw_search_altitude (double sweep_width, double camera_fov_deg) -> double
 {
+    /* Guard the precondition here rather than trusting every future caller: a
+     * FoV outside (0, 180) makes tan(fov / 2) non-positive or undefined, which
+     * would yield a negative or infinite height. Return 0 so the downstream
+     * [floor, cap] clamp pins the altitude to the safe floor instead. */
+    if (!(camera_fov_deg > 0.0 && camera_fov_deg < 180.0))
+    {
+        return 0.0;
+    }
     /* std::numbers::pi is C++20; this project is C++17, so use a local constant
      * rather than the non-standard M_PI macro from transitive includes. */
     constexpr double pi = 3.14159265358979323846;
@@ -37,5 +45,8 @@ clamp_search_altitude (double altitude, uint16_t altitude_floor, uint16_t altitu
     {
         return altitude_floor;
     }
+    /* Within range: truncate to whole metres (toward zero). This is intentional,
+     * not rounding — sub-metre precision is irrelevant for a sweep-derived
+     * altitude and truncating is the conservative choice. */
     return static_cast<uint16_t> (altitude);
 }
