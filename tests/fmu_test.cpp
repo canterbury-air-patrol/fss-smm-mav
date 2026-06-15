@@ -547,6 +547,19 @@ TEST_CASE ("raw_search_altitude derives height from sweep width and FoV", "[alti
     REQUIRE (raw_search_altitude (0.0, 90.0) == Catch::Approx (0.0));
 }
 
+TEST_CASE ("raw_search_altitude returns 0 for an out-of-range FoV", "[altitude]")
+{
+    /* A FoV outside (0, 180) cannot yield a valid height; the helper returns 0
+     * so the floor clamp takes over rather than producing a garbage value. */
+    REQUIRE (raw_search_altitude (100.0, 0.0) == Catch::Approx (0.0));
+    REQUIRE (raw_search_altitude (100.0, 180.0) == Catch::Approx (0.0));
+    REQUIRE (raw_search_altitude (100.0, 200.0) == Catch::Approx (0.0));
+    REQUIRE (raw_search_altitude (100.0, -10.0) == Catch::Approx (0.0));
+
+    /* The floor clamp then pins it to the safe minimum. */
+    REQUIRE (clamp_search_altitude (raw_search_altitude (100.0, 0.0), 10, 122) == 10);
+}
+
 TEST_CASE ("clamp_search_altitude holds the derived altitude within [floor, cap]", "[altitude]")
 {
     /* Within range passes through (truncated to whole metres). */
