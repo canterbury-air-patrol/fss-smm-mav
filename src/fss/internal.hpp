@@ -17,7 +17,16 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     notify_altitude_update_cb altitude_cb{};
     notify_smm_settings_cb smm_settings_cb{};
     notify_position_cb position_data_cb{};
-    void report_command (FSSCommand cmd);
+    void report_command (FSSCommand cmd, const fss_command_ack_responder &ack);
+    /* Send a command acknowledgement on the originating connection, gated on
+     * that connection having negotiated FSS_FEATURE_COMMAND_ACK. acked_id is the
+     * received command's header id (echoed back); raw_command is the
+     * fss_asset_command being acked. A no-op when the feature is not negotiated
+     * or the connection has gone away. */
+    void sendCommandAck (flight_safety_system::client_ssl::fss_server *origin, uint64_t acked_id,
+                         flight_safety_system::transport::fss_asset_command raw_command,
+                         flight_safety_system::transport::fss_command_ack_outcome outcome,
+                         flight_safety_system::transport::fss_command_ack_reason reason);
     void report_goto_update (Point);
     void report_altitude_update (uint32_t);
     void report_comms_status (FSSCommsStatus);
@@ -36,8 +45,8 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     fss_client_ssl (fss_client_ssl &&) = delete;
     auto operator= (fss_client_ssl &) -> fss_client_ssl & = delete;
     auto operator= (fss_client_ssl &&) -> fss_client_ssl & = delete;
-    void
-    handleCommand (const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg) override;
+    void handleCommandFrom (const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg,
+                            flight_safety_system::client_ssl::fss_server *origin) override;
     void handlePositionReport (
         const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg) override;
     void

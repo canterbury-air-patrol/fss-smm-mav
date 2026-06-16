@@ -1,9 +1,42 @@
+#include "command-ack.hpp"
 #include "fmu-fss-types.hpp"
 #include "internal.hpp"
 #include <chrono>
 
 void
-fss_client_ssl::handleCommand (const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg)
+fss_client_ssl::sendCommandAck (flight_safety_system::client_ssl::fss_server *origin, uint64_t acked_id,
+                                flight_safety_system::transport::fss_asset_command raw_command,
+                                flight_safety_system::transport::fss_command_ack_outcome outcome,
+                                flight_safety_system::transport::fss_command_ack_reason reason)
+{
+    if (origin == nullptr)
+    {
+        return;
+    }
+    /* The command id and the negotiated feature flags are both per-connection,
+     * so the ack must be read from and sent back on the originating connection
+     * only — never broadcast. */
+    auto conn = origin->getConnection ();
+    if (conn == nullptr)
+    {
+        /* Connection torn down between receiving the command and acking it. */
+        return;
+    }
+    if ((conn->getNegotiatedFeatureFlags () & flight_safety_system::transport::FSS_FEATURE_COMMAND_ACK) == 0)
+    {
+        /* Peer did not negotiate command-ack support: stay silent, preserving
+         * legacy behaviour. */
+        return;
+    }
+    auto ack = std::make_shared<flight_safety_system::transport::fss_message_command_ack> (
+        acked_id, raw_command, outcome, reason, flight_safety_system::fss_current_timestamp ());
+    origin->sendMsg (ack);
+}
+
+void
+fss_client_ssl::handleCommandFrom (
+    const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg,
+    flight_safety_system::client_ssl::fss_server *origin)
 {
     /* Don't execute commands older than the last one we handled
        This can happen when there are connections to multiple servers
@@ -23,37 +56,60 @@ fss_client_ssl::handleCommand (const std::shared_ptr<flight_safety_system::trans
         }
     }
     last_command = msg;
+
+    /* The ack is keyed by this command's header id and must return on the
+     * connection it arrived on; capture both so the resolution (which the state
+     * machine reaches asynchronously) can be acked. */
+    uint64_t acked_id = msg->getId ();
+    flight_safety_system::transport::fss_asset_command raw_command = msg->getCommand ();
+
+    /* Phase 1: confirm receipt immediately, before the command is actioned. */
+    this->sendCommandAck (origin, acked_id, raw_command, flight_safety_system::transport::command_ack_received,
+                          flight_safety_system::transport::supersede_none);
+
+    /* Phase 2: once the state machine resolves the command, ack the outcome on
+     * the same connection. */
+    fss_command_ack_responder ack = [this, origin, acked_id, raw_command] (const FSSCommandResolution &res)
+    {
+        this->sendCommandAck (origin, acked_id, raw_command, fss_command_ack_outcome_for (res),
+                              fss_command_ack_reason_for (res));
+    };
+
     /* Convert Each Command into a MavLink Command */
-    switch (msg->getCommand ())
+    switch (raw_command)
     {
         case flight_safety_system::transport::asset_command_rtl:
-            this->report_command (fss_cmd_rtl);
+            this->report_command (fss_cmd_rtl, ack);
             break;
         case flight_safety_system::transport::asset_command_disarm:
-            this->report_command (fss_cmd_disarm);
+            this->report_command (fss_cmd_disarm, ack);
             break;
         case flight_safety_system::transport::asset_command_goto:
             this->report_goto_update (Point (msg->getLatitude (), msg->getLongitude ()));
-            this->report_command (fss_cmd_goto);
+            this->report_command (fss_cmd_goto, ack);
             break;
         case flight_safety_system::transport::asset_command_altitude:
             this->report_altitude_update (msg->getAltitude ());
-            this->report_command (fss_cmd_altitude);
+            this->report_command (fss_cmd_altitude, ack);
             break;
         case flight_safety_system::transport::asset_command_hold:
-            this->report_command (fss_cmd_hold);
+            this->report_command (fss_cmd_hold, ack);
             break;
         case flight_safety_system::transport::asset_command_resume:
-            this->report_command (fss_cmd_continue);
+            this->report_command (fss_cmd_continue, ack);
             break;
         case flight_safety_system::transport::asset_command_terminate:
-            this->report_command (fss_cmd_terminate);
+            this->report_command (fss_cmd_terminate, ack);
             break;
         case flight_safety_system::transport::asset_command_manual:
-            this->report_command (fss_cmd_manual);
+            this->report_command (fss_cmd_manual, ack);
             break;
         case flight_safety_system::transport::asset_command_unknown:
         default:
+            /* Unactionable command: reject it rather than leaving the operator
+             * without any acknowledgement. */
+            this->sendCommandAck (origin, acked_id, raw_command, flight_safety_system::transport::command_ack_rejected,
+                                  flight_safety_system::transport::supersede_none);
             break;
     }
 }
@@ -146,11 +202,11 @@ fss_client_ssl::sendBatteryStatus (int8_t remaining, int32_t consumed, double vo
 }
 
 void
-fss_client_ssl::report_command (FSSCommand cmd)
+fss_client_ssl::report_command (FSSCommand cmd, const fss_command_ack_responder &ack)
 {
     if (this->command_cb)
     {
-        this->command_cb (cmd);
+        this->command_cb (cmd, ack);
     }
 }
 

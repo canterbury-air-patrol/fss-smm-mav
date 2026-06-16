@@ -65,7 +65,8 @@ class App
                                         { logger.log (std::string ("STATE ") + fmu_state_name (s)); });
         logger.log ("START " + asset_name);
 
-        fss->registerCommandCB ([this] (FSSCommand command) { enqueue_event (std::make_shared<event> (command)); });
+        fss->registerCommandCB ([this] (FSSCommand command, const fss_command_ack_responder &ack)
+                                { enqueue_event (std::make_shared<event> (FSSCommandEvent{ command, ack })); });
         fss->registerCommsStatusCB ([this] (FSSCommsStatus status)
                                     { enqueue_event (std::make_shared<event> (status)); });
         fss->registerSMMSettingsCB ([this] (const SMMSettings &settings)
@@ -115,10 +116,17 @@ class App
                 lk.unlock ();
                 std::visit (
                     overloaded{
-                        [&] (FSSCommand cmd)
+                        [&] (const FSSCommandEvent &ce)
                         {
-                            logger.log (std::string ("CMD fss ") + fss_cmd_name (cmd));
-                            state_machine.FSSNewCommand (cmd);
+                            logger.log (std::string ("CMD fss ") + fss_cmd_name (ce.command));
+                            FSSCommandResolution res = state_machine.FSSNewCommand (ce.command);
+                            /* Acknowledge the resolved outcome back to FSS (no-op
+                             * unless the originating connection negotiated the
+                             * command-ack feature). */
+                            if (ce.ack)
+                            {
+                                ce.ack (res);
+                            }
                         },
                         [&] (FSSCommsStatus status)
                         {
