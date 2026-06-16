@@ -88,6 +88,29 @@ FMUStateMachine::updateState () -> std::optional<FMUState>
     return std::nullopt;
 }
 
+auto
+FMUStateMachine::resolveFSSCommand (FMUState desired, const std::optional<FMUState> &changed) -> FSSCommandResolution
+{
+    FSSCommandResolution res;
+    res.transitioned = changed.has_value ();
+    if (this->current_state == desired)
+    {
+        /* The aircraft is in the state the command asked for, whether this
+         * command moved it there or it was already there. */
+        res.outcome = fss_command_actioned;
+    }
+    else
+    {
+        /* updateState() selected a different state than the command alone maps
+         * to, which only happens when a higher-priority latch (terminate, low
+         * battery, or comms failsafe) is engaged. current_state is that latch's
+         * state. */
+        res.outcome = fss_command_superseded;
+        res.superseding_state = this->current_state;
+    }
+    return res;
+}
+
 void
 FMUStateMachine::actionState (FMUState state)
 {
@@ -140,19 +163,29 @@ FMUStateMachine::actionState (FMUState state)
     }
 }
 
-void
-FMUStateMachine::FSSNewCommand (FSSCommand cmd)
+auto
+FMUStateMachine::FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution
 {
     std::optional<FMUState> changed_to;
+    FSSCommandResolution resolution;
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->fss_command = cmd;
+        /* What the command alone maps to, ignoring the priority latches; the
+         * same computation updateState() does in its comms-okay branch. */
+        FMUState desired = map_fss_state (cmd);
+        if (desired == fmu_state_searching)
+        {
+            desired = map_smm_state (this->smm_command);
+        }
         changed_to = this->updateState ();
+        resolution = this->resolveFSSCommand (desired, changed_to);
     }
     if (changed_to)
     {
         this->actionState (*changed_to);
     }
+    return resolution;
 }
 
 void

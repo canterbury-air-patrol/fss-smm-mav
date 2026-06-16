@@ -23,10 +23,40 @@ enum FMUState
     fmu_state_terminate,
 };
 
+/* How an FSS command resolved once the priority logic ran. This is what the
+ * command acknowledgement sent back to FSS reports:
+ *   - actioned:   the aircraft is now in the commanded state, whether the
+ *                 command caused a transition or it was already there.
+ *   - superseded: a higher-priority latch blocked the command
+ *                 (terminate > low battery > comms failsafe); superseding_state
+ *                 names that latch's state. */
+enum FSSCommandOutcome
+{
+    fss_command_actioned,
+    fss_command_superseded,
+};
+
+struct FSSCommandResolution
+{
+    FSSCommandOutcome outcome{ fss_command_actioned };
+    /* Only meaningful when outcome == fss_command_superseded: the
+     * higher-priority state that blocked the command. */
+    FMUState superseding_state{ fmu_state_manual };
+    /* True when the command actually moved the aircraft to a new state (as
+     * opposed to confirming a state it was already in). Lets a caller treat a
+     * benign no-op distinctly from a real transition if it needs to. */
+    bool transitioned{ false };
+};
+
 class FMUStateMachine
 {
   private:
     auto updateState () -> std::optional<FMUState>;
+    /* Classify how the most recent FSS command resolved against the priority
+     * logic. desired is the state the command alone maps to (ignoring latches);
+     * changed is what updateState() actually selected (nullopt when no
+     * transition occurred). Must be called with this->lock held. */
+    auto resolveFSSCommand (FMUState desired, const std::optional<FMUState> &changed) -> FSSCommandResolution;
     void actionState (FMUState state);
     FMUState current_state{ fmu_state_manual };
     FSSCommand fss_command{ fss_cmd_unknown };
@@ -51,7 +81,9 @@ class FMUStateMachine
     FMUStateMachine (IMAV &t_mav, ISMM &t_smm, IFSS &t_fss);
 
     void setStateChangeCB (std::function<void (FMUState)> cb);
-    void FSSNewCommand (FSSCommand cmd);
+    /* Apply an FSS command and report how it resolved (actioned vs superseded
+     * by a higher-priority latch), so the caller can acknowledge it to FSS. */
+    auto FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution;
     void SMMNewCommand (SMMCommand cmd);
     /* Report the latest battery reading's low/not-low state. Called for *every*
      * reading (not only low ones) so the consecutive-low run can be tracked:

@@ -534,6 +534,72 @@ TEST_CASE ("state_change_cb fires once per state change, not on no-op transition
     REQUIRE (transitions == 3);
 }
 
+/* The resolution returned by FSSNewCommand drives the command acknowledgement
+ * sent back to FSS: a command that takes effect is actioned, one blocked by a
+ * higher-priority latch is superseded (and names the blocking state). */
+TEST_CASE ("FSS command that transitions resolves as actioned", "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (res.outcome == fss_command_actioned);
+    REQUIRE (res.transitioned);
+}
+
+TEST_CASE ("FSS command already in the target state resolves as actioned no-op", "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (res.outcome == fss_command_actioned);
+    /* The aircraft is in the commanded state, but this command did not move it. */
+    REQUIRE (!res.transitioned);
+}
+
+TEST_CASE ("FSS command superseded by low battery names the latch", "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    latch_low_battery (sm);
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (res.outcome == fss_command_superseded);
+    REQUIRE (res.superseding_state == fmu_state_low_battery);
+}
+
+TEST_CASE ("FSS command superseded by comms failsafe names the latch", "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->setCommsFailure (true);
+    auto res = sm->FSSNewCommand (fss_cmd_goto);
+    REQUIRE (res.outcome == fss_command_superseded);
+    REQUIRE (res.superseding_state == fmu_state_failsafe);
+}
+
+/* terminate is an FSS command occupying the same input slot as every other FSS
+ * command, so a later FSS command replaces it rather than being superseded by
+ * it. (The terminate priority in updateState() guards against the *concurrent*
+ * latches — low battery and comms failure — not against a newer FSS command.) */
+TEST_CASE ("FSS command after terminate replaces it and resolves as actioned", "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_terminate);
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (res.outcome == fss_command_actioned);
+    REQUIRE (res.transitioned);
+}
+
+TEST_CASE ("terminate command itself resolves as actioned", "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    auto res = sm->FSSNewCommand (fss_cmd_terminate);
+    REQUIRE (res.outcome == fss_command_actioned);
+    REQUIRE (res.transitioned);
+}
+
 TEST_CASE ("raw_search_altitude derives height from sweep width and FoV", "[altitude]")
 {
     /* At a 90deg total FoV, tan(45deg) == 1, so altitude == sweep_width / 2. */
