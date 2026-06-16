@@ -4,6 +4,7 @@
 #include "aircraft.hpp"
 #include "fmu-config.hpp"
 #include "fmu.hpp"
+#include "fss/command-ack.hpp"
 #include "smm/search-altitude.hpp"
 
 #include <cstdlib>
@@ -598,6 +599,51 @@ TEST_CASE ("terminate command itself resolves as actioned", "[state_machine][com
     auto res = sm->FSSNewCommand (fss_cmd_terminate);
     REQUIRE (res.outcome == fss_command_actioned);
     REQUIRE (res.transitioned);
+}
+
+/* The resolution maps onto the transport-domain ack fields FSS receives: a real
+ * transition is actioned, an already-in-state command is noop (not a phantom
+ * transition), and a superseded command carries the dedicated latch reason that
+ * keeps low-battery and comms-loss RTL distinguishable. */
+namespace fsst = flight_safety_system::transport;
+
+TEST_CASE ("ack mapping: a transitioning command is actioned with no reason", "[command_ack][mapping]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (fss_command_ack_outcome_for (res) == fsst::command_ack_actioned);
+    REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_none);
+}
+
+TEST_CASE ("ack mapping: an already-in-state command is noop", "[command_ack][mapping]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (fss_command_ack_outcome_for (res) == fsst::command_ack_noop);
+    REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_none);
+}
+
+TEST_CASE ("ack mapping: low-battery supersede carries the low-battery reason", "[command_ack][mapping]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    latch_low_battery (sm);
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (fss_command_ack_outcome_for (res) == fsst::command_ack_superseded);
+    REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_low_battery);
+}
+
+TEST_CASE ("ack mapping: comms-loss supersede carries the comms-loss reason", "[command_ack][mapping]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->setCommsFailure (true);
+    auto res = sm->FSSNewCommand (fss_cmd_goto);
+    REQUIRE (fss_command_ack_outcome_for (res) == fsst::command_ack_superseded);
+    REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_comms_loss);
 }
 
 TEST_CASE ("raw_search_altitude derives height from sweep width and FoV", "[altitude]")
