@@ -4,19 +4,17 @@
 #include <chrono>
 
 void
-fss_client_ssl::sendCommandAck (flight_safety_system::client_ssl::fss_server *origin, uint64_t acked_id,
-                                flight_safety_system::transport::fss_asset_command raw_command,
+fss_client_ssl::sendCommandAck (const std::shared_ptr<flight_safety_system::transport::fss_connection> &conn,
+                                uint64_t acked_id, flight_safety_system::transport::fss_asset_command raw_command,
                                 flight_safety_system::transport::fss_command_ack_outcome outcome,
                                 flight_safety_system::transport::fss_command_ack_reason reason)
 {
-    if (origin == nullptr)
-    {
-        return;
-    }
     /* The command id and the negotiated feature flags are both per-connection,
      * so the ack must be read from and sent back on the originating connection
-     * only — never broadcast. */
-    auto conn = origin->getConnection ();
+     * only — never broadcast. The caller resolves the originating fss_server to
+     * its connection while that server is known live (on the recv thread); the
+     * phase-2 responder then carries only the connection across the async
+     * boundary, so a torn-down server cannot dangle here. */
     if (conn == nullptr)
     {
         /* Connection torn down between receiving the command and acking it. */
@@ -30,7 +28,7 @@ fss_client_ssl::sendCommandAck (flight_safety_system::client_ssl::fss_server *or
     }
     auto ack = std::make_shared<flight_safety_system::transport::fss_message_command_ack> (
         acked_id, raw_command, outcome, reason, flight_safety_system::fss_current_timestamp ());
-    origin->sendMsg (ack);
+    conn->sendMsg (ack);
 }
 
 void
@@ -63,15 +61,25 @@ fss_client_ssl::handleCommandFrom (
     uint64_t acked_id = msg->getId ();
     flight_safety_system::transport::fss_asset_command raw_command = msg->getCommand ();
 
+    /* Resolve the originating server to its connection here, on the recv thread,
+     * while `origin` is guaranteed live. The phase-2 responder is invoked later
+     * from the event-loop thread, by which point the fss_server may have been
+     * destroyed (comms-loss teardown, updateServers); carrying the raw origin
+     * across that boundary would dangle. We carry the connection instead — a
+     * weak_ptr, so the responder never resurrects a torn-down connection and
+     * stays silent if it has gone away. */
+    std::shared_ptr<flight_safety_system::transport::fss_connection> conn = origin->getConnection ();
+
     /* Phase 1: confirm receipt immediately, before the command is actioned. */
-    this->sendCommandAck (origin, acked_id, raw_command, flight_safety_system::transport::command_ack_received,
+    this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_received,
                           flight_safety_system::transport::supersede_none);
 
     /* Phase 2: once the state machine resolves the command, ack the outcome on
      * the same connection. */
-    fss_command_ack_responder ack = [this, origin, acked_id, raw_command] (const FSSCommandResolution &res)
+    std::weak_ptr<flight_safety_system::transport::fss_connection> weak_conn = conn;
+    fss_command_ack_responder ack = [this, weak_conn, acked_id, raw_command] (const FSSCommandResolution &res)
     {
-        this->sendCommandAck (origin, acked_id, raw_command, fss_command_ack_outcome_for (res),
+        this->sendCommandAck (weak_conn.lock (), acked_id, raw_command, fss_command_ack_outcome_for (res),
                               fss_command_ack_reason_for (res));
     };
 
@@ -108,7 +116,7 @@ fss_client_ssl::handleCommandFrom (
         default:
             /* Unactionable command: reject it rather than leaving the operator
              * without any acknowledgement. */
-            this->sendCommandAck (origin, acked_id, raw_command, flight_safety_system::transport::command_ack_rejected,
+            this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_rejected,
                                   flight_safety_system::transport::supersede_none);
             break;
     }
