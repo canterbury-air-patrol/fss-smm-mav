@@ -14,6 +14,14 @@ class FMUStateMachine
 {
   private:
     auto updateState () -> std::optional<FMUState>;
+    /* The state the current FSS/SMM commands alone map to, ignoring the
+     * priority latches (terminate, low battery, comms failsafe). This is the
+     * "desired" state: what the operator asked for. updateState() uses it for
+     * the comms-okay branch and FSSNewCommand() uses it to classify a command
+     * as actioned vs superseded — both must agree, so the mapping (including
+     * the searching -> SMM-command special case) lives here once. Must be
+     * called with this->lock held. */
+    auto commandedState () const -> FMUState;
     /* Classify how the most recent FSS command resolved against the priority
      * logic. desired is the state the command alone maps to (ignoring latches);
      * changed is what updateState() actually selected (nullopt when no
