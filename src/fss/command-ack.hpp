@@ -30,6 +30,15 @@ fss_command_ack_outcome_for (const FSSCommandResolution &res)
     return flight_safety_system::transport::command_ack_noop;
 }
 
+/* The ack for a stale command — an older, different command from a slow server
+ * that a newer operator command has already replaced. It never reaches the state
+ * machine (so there is no FSSCommandResolution to map), but it must still be
+ * acked rather than dropped: superseded, with the dedicated newer-command reason
+ * that distinguishes it from the autonomous safety latches. handleCommandFrom and
+ * its test share these so the pairing cannot drift. */
+inline constexpr auto stale_command_ack_outcome = flight_safety_system::transport::command_ack_superseded;
+inline constexpr auto stale_command_ack_reason = flight_safety_system::transport::supersede_newer_command;
+
 /* Map the superseding latch to the dedicated ack reason. low-battery RTL and
  * comms-loss failsafe both fly an RTL but must stay distinguishable, so the
  * reason is a dedicated enum rather than a command value. Only the autonomous

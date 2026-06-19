@@ -132,11 +132,10 @@ fss_client_ssl::handleCommandFrom (
         case CommandAckGroup<pending_command_ack>::Disposition::stale_superseded:
             /* A genuinely older, different command from a slower server: the newer
              * command is already in effect, so do NOT actuate this one. Ack it as
-             * superseded (by the newer operator command — supersede_none, since the
-             * named reasons are reserved for the autonomous safety latches) rather
-             * than returning silently and leaving the operator a false 'no ack'. */
-            this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_superseded,
-                                  flight_safety_system::transport::supersede_none);
+             * superseded with the dedicated newer-command reason (a later operator
+             * command replaced it — distinct from the autonomous safety latches)
+             * rather than returning silently and leaving a false 'no ack'. */
+            this->sendCommandAck (conn, acked_id, raw_command, stale_command_ack_outcome, stale_command_ack_reason);
             return;
         case CommandAckGroup<pending_command_ack>::Disposition::actuate:
             break;
