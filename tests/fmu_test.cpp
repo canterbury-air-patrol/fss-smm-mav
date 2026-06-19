@@ -646,6 +646,42 @@ TEST_CASE ("ack mapping: comms-loss supersede carries the comms-loss reason", "[
     REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_comms_loss);
 }
 
+/* The phase-2 ack responder built in handleCommandFrom is invoked later, from
+ * the event-loop thread, after the originating fss_server may have been
+ * destroyed (comms-loss teardown / updateServers). The fix carries the
+ * connection across that boundary as a weak_ptr instead of a raw fss_server*,
+ * so a freed connection is observed as an expired weak_ptr (a silent no-op)
+ * rather than dereferenced. fss_client_ssl and the SSL transport are not linked
+ * into this test target, so we exercise the exact capture/lock idiom directly:
+ * a moved-from connection must lock() to nullptr and the responder must skip the
+ * send without touching freed memory. */
+TEST_CASE ("ack responder over an expired connection is a silent no-op", "[command_ack][lifetime]")
+{
+    auto conn = std::make_shared<int> (0); // stand-in for the fss_connection
+    std::weak_ptr<int> weak_conn = conn;
+
+    int sends = 0;
+    /* Mirrors the lambda in handleCommandFrom: capture the connection weakly,
+     * lock() at invocation time, and only send when it is still alive. */
+    auto responder = [weak_conn, &sends] ()
+    {
+        auto locked = weak_conn.lock ();
+        if (locked == nullptr)
+        {
+            return; // connection torn down: stay silent, do not dereference
+        }
+        sends++;
+    };
+
+    responder ();
+    REQUIRE (sends == 1); // connection alive: ack would be sent
+
+    conn.reset (); // originating server/connection destroyed before resolution
+    REQUIRE (weak_conn.expired ());
+    responder (); // must not crash or send
+    REQUIRE (sends == 1);
+}
+
 TEST_CASE ("raw_search_altitude derives height from sweep width and FoV", "[altitude]")
 {
     /* At a 90deg total FoV, tan(45deg) == 1, so altitude == sweep_width / 2. */

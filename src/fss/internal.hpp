@@ -22,9 +22,13 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
      * that connection having negotiated FSS_FEATURE_COMMAND_ACK. acked_id is the
      * received command's header id (echoed back); raw_command is the
      * fss_asset_command being acked. A no-op when the feature is not negotiated
-     * or the connection has gone away. */
-    void sendCommandAck (flight_safety_system::client_ssl::fss_server *origin, uint64_t acked_id,
-                         flight_safety_system::transport::fss_asset_command raw_command,
+     * or the connection has gone away (conn == nullptr). The caller passes the
+     * connection (not the fss_server) because the phase-2 ack is resolved
+     * asynchronously, after the originating server may have been destroyed; the
+     * connection is captured as a weak_ptr at command-receipt time so no raw
+     * fss_server is held across that boundary. */
+    void sendCommandAck (const std::shared_ptr<flight_safety_system::transport::fss_connection> &conn,
+                         uint64_t acked_id, flight_safety_system::transport::fss_asset_command raw_command,
                          flight_safety_system::transport::fss_command_ack_outcome outcome,
                          flight_safety_system::transport::fss_command_ack_reason reason);
     void report_goto_update (Point);
