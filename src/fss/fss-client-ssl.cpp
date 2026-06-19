@@ -32,94 +32,154 @@ fss_client_ssl::sendCommandAck (const std::shared_ptr<flight_safety_system::tran
 }
 
 void
+fss_client_ssl::ackPending (const pending_command_ack &target, const FSSCommandResolution &res)
+{
+    this->sendCommandAck (target.conn.lock (), target.acked_id, target.raw_command, fss_command_ack_outcome_for (res),
+                          fss_command_ack_reason_for (res));
+}
+
+void
 fss_client_ssl::handleCommandFrom (
     const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg,
     flight_safety_system::client_ssl::fss_server *origin)
 {
-    /* Don't execute commands older than the last one we handled
-       This can happen when there are connections to multiple servers
-       and the client that set the command didn't send it to all of them.
-
-       If a server clock resets, we could drop all subsequent commands.
-       We allow commands that are more than 60 seconds older than the last
-       one to handle this case, while still deduplicating near-simultaneous
-       messages. */
-    static constexpr uint64_t command_dedup_tolerance_ms = 60000;
-    if (last_command != nullptr && msg->getTimeStamp () < last_command->getTimeStamp ())
-    {
-        uint64_t diff = last_command->getTimeStamp () - msg->getTimeStamp ();
-        if (diff < command_dedup_tolerance_ms)
-        {
-            return;
-        }
-    }
-    last_command = msg;
-
-    /* The ack is keyed by this command's header id and must return on the
-     * connection it arrived on; capture both so the resolution (which the state
-     * machine reaches asynchronously) can be acked. */
+    /* The ack is keyed by this copy's own header id and must return on the
+     * connection it arrived on. */
     uint64_t acked_id = msg->getId ();
+    uint64_t ts = msg->getTimeStamp ();
     flight_safety_system::transport::fss_asset_command raw_command = msg->getCommand ();
 
     /* Resolve the originating server to its connection here, on the recv thread,
-     * while `origin` is guaranteed live. The phase-2 responder is invoked later
-     * from the event-loop thread, by which point the fss_server may have been
-     * destroyed (comms-loss teardown, updateServers); carrying the raw origin
-     * across that boundary would dangle. We carry the connection instead — a
-     * weak_ptr, so the responder never resurrects a torn-down connection and
-     * stays silent if it has gone away. */
+     * while `origin` is guaranteed live. The terminal ack is sent later, from the
+     * event-loop thread, by which point the fss_server may have been destroyed
+     * (comms-loss teardown, updateServers); carrying the raw origin across that
+     * boundary would dangle. We carry the connection instead — a weak_ptr, so the
+     * ack never resurrects a torn-down connection and stays silent if it has gone
+     * away. */
     std::shared_ptr<flight_safety_system::transport::fss_connection> conn = origin->getConnection ();
+    pending_command_ack this_copy{ conn, acked_id, raw_command };
 
-    /* Phase 1: confirm receipt immediately, before the command is actioned. */
+    /* Phase 1: confirm receipt immediately, before the command is actioned. Every
+     * copy gets its own received ack on its own connection. */
     this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_received,
                           flight_safety_system::transport::supersede_none);
 
-    /* Phase 2: once the state machine resolves the command, ack the outcome on
-     * the same connection. */
-    std::weak_ptr<flight_safety_system::transport::fss_connection> weak_conn = conn;
-    fss_command_ack_responder ack = [this, weak_conn, acked_id, raw_command] (const FSSCommandResolution &res)
-    {
-        this->sendCommandAck (weak_conn.lock (), acked_id, raw_command, fss_command_ack_outcome_for (res),
-                              fss_command_ack_reason_for (res));
-    };
-
-    /* Convert Each Command into a MavLink Command */
+    /* Map the wire command to the FMU command up front. An unactionable command
+     * (unknown/unrecognised) never reaches the state machine, so it forms no
+     * command group: reject it synchronously and return rather than opening a
+     * group whose terminal ack would never be fired. */
+    bool actionable = true;
+    FSSCommand fss_command = fss_cmd_unknown;
     switch (raw_command)
     {
         case flight_safety_system::transport::asset_command_rtl:
-            this->report_command (fss_cmd_rtl, ack);
+            fss_command = fss_cmd_rtl;
             break;
         case flight_safety_system::transport::asset_command_disarm:
-            this->report_command (fss_cmd_disarm, ack);
+            fss_command = fss_cmd_disarm;
             break;
         case flight_safety_system::transport::asset_command_goto:
-            this->report_goto_update (Point (msg->getLatitude (), msg->getLongitude ()));
-            this->report_command (fss_cmd_goto, ack);
+            fss_command = fss_cmd_goto;
             break;
         case flight_safety_system::transport::asset_command_altitude:
-            this->report_altitude_update (msg->getAltitude ());
-            this->report_command (fss_cmd_altitude, ack);
+            fss_command = fss_cmd_altitude;
             break;
         case flight_safety_system::transport::asset_command_hold:
-            this->report_command (fss_cmd_hold, ack);
+            fss_command = fss_cmd_hold;
             break;
         case flight_safety_system::transport::asset_command_resume:
-            this->report_command (fss_cmd_continue, ack);
+            fss_command = fss_cmd_continue;
             break;
         case flight_safety_system::transport::asset_command_terminate:
-            this->report_command (fss_cmd_terminate, ack);
+            fss_command = fss_cmd_terminate;
             break;
         case flight_safety_system::transport::asset_command_manual:
-            this->report_command (fss_cmd_manual, ack);
+            fss_command = fss_cmd_manual;
             break;
         case flight_safety_system::transport::asset_command_unknown:
         default:
-            /* Unactionable command: reject it rather than leaving the operator
-             * without any acknowledgement. */
-            this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_rejected,
-                                  flight_safety_system::transport::supersede_none);
+            actionable = false;
             break;
     }
+    if (!actionable)
+    {
+        this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_rejected,
+                              flight_safety_system::transport::supersede_none);
+        return;
+    }
+
+    /* The FMU is connected to all FSS servers and the web frontend pushes the same
+     * command to each, so this logical command arrives once per connection. The
+     * group decides whether to action it (new command), queue/replay its ack
+     * (redundant delivery), or reject it as stale. */
+    auto delivery = this->command_group.onDelivery (static_cast<int> (raw_command), ts, this_copy);
+
+    switch (delivery.disposition)
+    {
+        case CommandAckGroup<pending_command_ack>::Disposition::pending:
+            /* Redundant delivery, outcome not yet known: it was queued and will be
+             * acked when the resolution lands. Nothing more to do. */
+            return;
+        case CommandAckGroup<pending_command_ack>::Disposition::already_resolved:
+            /* Redundant delivery whose outcome is already cached: ack it now.
+             * already_resolved always carries the resolution, but guard the access
+             * so a future change can't turn it into a silent unchecked deref. */
+            if (delivery.resolution.has_value ())
+            {
+                this->ackPending (this_copy, *delivery.resolution);
+            }
+            return;
+        case CommandAckGroup<pending_command_ack>::Disposition::stale_superseded:
+            /* A genuinely older, different command from a slower server: the newer
+             * command is already in effect, so do NOT actuate this one. Ack it as
+             * superseded (by the newer operator command — supersede_none, since the
+             * named reasons are reserved for the autonomous safety latches) rather
+             * than returning silently and leaving the operator a false 'no ack'. */
+            this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_superseded,
+                                  flight_safety_system::transport::supersede_none);
+            return;
+        case CommandAckGroup<pending_command_ack>::Disposition::actuate:
+            break;
+    }
+
+    /* A new logical command: ack any copies of a now-displaced older command as
+     * superseded (their resolution never arrived before this one). */
+    {
+        FSSCommandResolution superseded_res;
+        superseded_res.outcome = fss_command_superseded;
+        for (const auto &target : delivery.superseded)
+        {
+            this->ackPending (target, superseded_res);
+        }
+    }
+
+    /* Phase 2: once the state machine resolves the command, ack the resolved
+     * outcome to every copy in the group on its own connection (the group caches
+     * it for any copy that arrives after resolution). The responder carries the
+     * epoch of the group it opened; resolve() drops it if a newer command has
+     * since superseded the group (those copies were already acked above). */
+    uint64_t my_epoch = delivery.epoch;
+    fss_command_ack_responder ack = [this, my_epoch] (const FSSCommandResolution &res)
+    {
+        /* Send acks outside any lock: sendMsg touches the wire and a recv thread
+         * may be waiting to add a late duplicate. */
+        for (const auto &target : this->command_group.resolve (my_epoch, res))
+        {
+            this->ackPending (target, res);
+        }
+    };
+
+    /* goto and altitude carry a payload (target position / altitude) that must be
+     * reported before the command is actioned. */
+    if (raw_command == flight_safety_system::transport::asset_command_goto)
+    {
+        this->report_goto_update (Point (msg->getLatitude (), msg->getLongitude ()));
+    }
+    else if (raw_command == flight_safety_system::transport::asset_command_altitude)
+    {
+        this->report_altitude_update (msg->getAltitude ());
+    }
+    this->report_command (fss_command, ack);
 }
 
 void

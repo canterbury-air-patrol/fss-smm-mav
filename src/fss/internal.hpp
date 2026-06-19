@@ -3,7 +3,11 @@
 
 #include "../fmu-types.hpp"
 #include "../smm/smm-types.hpp"
+#include "command-ack-group.hpp"
 #include "fmu-fss-types.hpp"
+
+#include <cstdint>
+#include <memory>
 
 using notify_goto_update_cb = std::function<void (Point)>;
 using notify_altitude_update_cb = std::function<void (uint32_t)>;
@@ -36,8 +40,33 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     void report_comms_status (FSSCommsStatus);
     void report_smm_settings (const SMMSettings &);
     void report_position_data (const PositionData &);
-    std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> last_command{};
     std::chrono::steady_clock::time_point position_last_sent{};
+
+    /* One per-server copy of a logical command that is awaiting (or replaying) the
+     * terminal ack. acked_id is that copy's own header id; the connection is held
+     * weakly so a torn-down server is a silent no-op (see e010c24). raw_command is
+     * echoed back in the ack. These are the ack targets the CommandAckGroup below
+     * groups and hands back for the FMU to ack. */
+    struct pending_command_ack
+    {
+        std::weak_ptr<flight_safety_system::transport::fss_connection> conn{};
+        uint64_t acked_id{ 0 };
+        flight_safety_system::transport::fss_asset_command raw_command{
+            flight_safety_system::transport::asset_command_unknown
+        };
+    };
+
+    /* Groups the redundant per-server deliveries of one logical command so they
+     * all get the same terminal ack (see command-ack-group.hpp). Tolerance is the
+     * same 60 s window the legacy dedup used. */
+    static constexpr uint64_t command_dedup_tolerance_ms = 60000;
+    CommandAckGroup<pending_command_ack> command_group{ command_dedup_tolerance_ms };
+
+    /* Ack a single command copy with the terminal outcome of `res`, on its own
+     * connection and with its own acked_id. Used to drain a group's pending list
+     * when the resolution lands and to replay the cached resolution to a
+     * late-arriving duplicate. */
+    void ackPending (const pending_command_ack &target, const FSSCommandResolution &res);
 
   protected:
     void connectionStatusChange (flight_safety_system::client_ssl::connection_status status) override;
