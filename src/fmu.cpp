@@ -57,6 +57,20 @@ map_fss_state (FSSCommand cmd) -> FMUState
 }
 
 auto
+FMUStateMachine::commandedState () const -> FMUState
+{
+    /* fss_cmd_continue and an unknown command map to searching, which then
+     * defers to the SMM command (search vs RTL). Every other FSS command maps
+     * directly. */
+    FMUState desired = map_fss_state (this->fss_command);
+    if (desired == fmu_state_searching)
+    {
+        desired = map_smm_state (this->smm_command);
+    }
+    return desired;
+}
+
+auto
 FMUStateMachine::updateState () -> std::optional<FMUState>
 {
     /* Priority order: terminate > low battery > comms failure > FSS/SMM command.
@@ -73,11 +87,7 @@ FMUStateMachine::updateState () -> std::optional<FMUState>
     }
     else if (!this->fss_comms_lost && !this->mav_comms_lost)
     {
-        new_state = map_fss_state (this->fss_command);
-        if (new_state == fmu_state_searching)
-        {
-            new_state = map_smm_state (this->smm_command);
-        }
+        new_state = this->commandedState ();
     }
 
     if (new_state != this->current_state)
@@ -171,13 +181,9 @@ FMUStateMachine::FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->fss_command = cmd;
-        /* What the command alone maps to, ignoring the priority latches; the
-         * same computation updateState() does in its comms-okay branch. */
-        FMUState desired = map_fss_state (cmd);
-        if (desired == fmu_state_searching)
-        {
-            desired = map_smm_state (this->smm_command);
-        }
+        /* What the command alone maps to, ignoring the priority latches; shared
+         * with updateState()'s comms-okay branch so the two cannot diverge. */
+        FMUState desired = this->commandedState ();
         changed_to = this->updateState ();
         resolution = this->resolveFSSCommand (desired, changed_to);
     }
