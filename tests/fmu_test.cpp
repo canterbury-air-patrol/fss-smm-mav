@@ -759,6 +759,15 @@ TEST_CASE ("an older different command within the window is acked superseded, no
      * acked (superseded) rather than dropped silently. */
     auto stale = group.onDelivery (cmd_rtl, 9000, 2);
     REQUIRE (stale.disposition == CommandAckGroup<int>::Disposition::stale_superseded);
+
+    /* handleCommandFrom acks that stale delivery with the dedicated newer-command
+     * reason (a later operator command replaced it), not supersede_none and not a
+     * safety-latch reason. These shared constants are exactly what it sends. */
+    REQUIRE (stale_command_ack_outcome == fsst::command_ack_superseded);
+    REQUIRE (stale_command_ack_reason == fsst::supersede_newer_command);
+    REQUIRE (stale_command_ack_reason != fsst::supersede_none);
+    REQUIRE (stale_command_ack_reason != fsst::supersede_low_battery);
+    REQUIRE (stale_command_ack_reason != fsst::supersede_comms_loss);
 }
 
 TEST_CASE ("a new command supersedes an unresolved group and its copies are handed back", "[command_ack][group]")
