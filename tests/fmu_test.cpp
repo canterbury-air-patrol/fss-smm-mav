@@ -4,6 +4,7 @@
 #include "aircraft.hpp"
 #include "fmu-config.hpp"
 #include "fmu.hpp"
+#include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
 #include "smm/search-altitude.hpp"
 
@@ -680,6 +681,116 @@ TEST_CASE ("ack responder over an expired connection is a silent no-op", "[comma
     REQUIRE (weak_conn.expired ());
     responder (); // must not crash or send
     REQUIRE (sends == 1);
+}
+
+/* CommandAckGroup groups the redundant per-server deliveries of one logical
+ * command so every copy is acked with the same terminal outcome (the FMU is
+ * connected to all FSS servers and the web frontend pushes the command to each).
+ * These tests use a lightweight integer target standing in for the per-copy ack
+ * target (weak_ptr<fss_connection> + acked_id) so the bookkeeping is exercised
+ * without the SSL transport. The command-identity value is an arbitrary int. */
+namespace
+{
+constexpr uint64_t group_tolerance_ms = 60000;
+
+auto
+actioned () -> FSSCommandResolution
+{
+    FSSCommandResolution res;
+    res.outcome = fss_command_actioned;
+    res.transitioned = true;
+    return res;
+}
+} // namespace
+
+TEST_CASE ("same command on two connections actions once, both acked the same", "[command_ack][group]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_hold = 5;
+
+    /* First server's copy: a new command, so the FMU actuates it once. */
+    auto first = group.onDelivery (cmd_hold, 1000, /*copy=*/1);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+    REQUIRE (first.superseded.empty ());
+
+    /* Second server's copy of the SAME command (equal timestamp): must NOT
+     * actuate again, just join the group pending the outcome. */
+    auto second = group.onDelivery (cmd_hold, 1000, /*copy=*/2);
+    REQUIRE (second.disposition == CommandAckGroup<int>::Disposition::pending);
+
+    /* The state machine resolves once; both copies are returned to be acked with
+     * that single outcome — neither is left unacked. */
+    auto to_ack = group.resolve (first.epoch, actioned ());
+    REQUIRE (to_ack.size () == 2);
+    REQUIRE (to_ack[0] == 1);
+    REQUIRE (to_ack[1] == 2);
+}
+
+TEST_CASE ("a duplicate arriving after resolution is acked immediately from the cache", "[command_ack][group]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_goto = 3;
+
+    auto first = group.onDelivery (cmd_goto, 1000, 1);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+
+    auto resolved = group.resolve (first.epoch, actioned ());
+    REQUIRE (resolved.size () == 1);
+
+    /* A slow server delivers its copy only after the command already resolved:
+     * the cached outcome is replayed to it straight away, not left pending. */
+    auto late = group.onDelivery (cmd_goto, 1000, 2);
+    REQUIRE (late.disposition == CommandAckGroup<int>::Disposition::already_resolved);
+    REQUIRE (late.resolution.has_value ());
+    REQUIRE (late.resolution->outcome == fss_command_actioned);
+}
+
+TEST_CASE ("an older different command within the window is acked superseded, not actuated", "[command_ack][group]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_hold = 5;
+    constexpr int cmd_rtl = 1;
+
+    auto current = group.onDelivery (cmd_hold, 10000, 1);
+    REQUIRE (current.disposition == CommandAckGroup<int>::Disposition::actuate);
+
+    /* A different, strictly-older command from a slow server (within tolerance):
+     * the newer command already won, so do NOT actuate — but it must still be
+     * acked (superseded) rather than dropped silently. */
+    auto stale = group.onDelivery (cmd_rtl, 9000, 2);
+    REQUIRE (stale.disposition == CommandAckGroup<int>::Disposition::stale_superseded);
+}
+
+TEST_CASE ("a new command supersedes an unresolved group and its copies are handed back", "[command_ack][group]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_hold = 5;
+    constexpr int cmd_rtl = 1;
+
+    /* Two copies of the first command arrive but it never resolves... */
+    auto first = group.onDelivery (cmd_hold, 1000, 1);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+    auto first_dup = group.onDelivery (cmd_hold, 1000, 2);
+    REQUIRE (first_dup.disposition == CommandAckGroup<int>::Disposition::pending);
+
+    /* ...before a genuinely new command arrives. The new command actuates and
+     * hands back the old group's still-pending copies so the caller acks them as
+     * superseded; none is left unacked. */
+    auto second = group.onDelivery (cmd_rtl, 2000, 3);
+    REQUIRE (second.disposition == CommandAckGroup<int>::Disposition::actuate);
+    REQUIRE (second.superseded.size () == 2);
+    REQUIRE (second.superseded[0] == 1);
+    REQUIRE (second.superseded[1] == 2);
+
+    /* The first command's late resolution is dropped (its epoch is stale): those
+     * copies were already acked as superseded, so it must not double-ack them. */
+    auto stale_resolution = group.resolve (first.epoch, actioned ());
+    REQUIRE (stale_resolution.empty ());
+
+    /* The new command resolves normally for its own copy. */
+    auto live_resolution = group.resolve (second.epoch, actioned ());
+    REQUIRE (live_resolution.size () == 1);
+    REQUIRE (live_resolution[0] == 3);
 }
 
 TEST_CASE ("raw_search_altitude derives height from sweep width and FoV", "[altitude]")
