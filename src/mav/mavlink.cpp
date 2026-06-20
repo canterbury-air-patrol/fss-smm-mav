@@ -797,6 +797,23 @@ mav_connection::disconnect_from_mav ()
 mav_connection::mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m)
     : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_goto_altitude_m)
 {
+}
+
+void
+mav_connection::start ()
+{
+    /* Idempotent: a second call must not overwrite the (joinable) heartbeat
+     * thread handle — which would std::terminate — nor open a second recv
+     * connection that leaks the first. Only the first call does any work. */
+    bool expected = false;
+    if (!this->started.compare_exchange_strong (expected, true))
+    {
+        return;
+    }
+    /* Deferred so the recv and heartbeat threads — which invoke the registered
+     * callbacks — do not exist until the owner has finished registering them.
+     * Starting them in the constructor would race a recv/heartbeat thread's
+     * read of a callback against the main thread still assigning it. */
     this->connect_to_mav ();
     this->heartbeat_thread = std::thread ([this] { this->heartbeat_loop (); });
 }

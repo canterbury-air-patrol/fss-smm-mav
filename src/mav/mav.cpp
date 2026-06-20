@@ -61,6 +61,12 @@ MAV::terminate ()
 }
 
 void
+MAV::start ()
+{
+    this->connection->start ();
+}
+
+void
 MAV::attemptReconnect ()
 {
     this->connection->attemptReconnect ();

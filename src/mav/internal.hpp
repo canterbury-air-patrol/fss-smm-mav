@@ -103,6 +103,7 @@ class mav_connection
     std::thread heartbeat_thread{};
     std::atomic<bool> broken{ false };
     std::atomic<bool> stopping{ false };
+    std::atomic<bool> started{ false };
     std::mutex heartbeat_mutex{};
     std::condition_variable heartbeat_cv{};
     std::atomic<uint64_t> last_heartbeat_ts{ 0 };
@@ -148,6 +149,10 @@ class mav_connection
     mav_connection (mav_connection &&) = delete;
     auto operator= (mav_connection &) -> mav_connection & = delete;
     auto operator= (mav_connection &&) -> mav_connection & = delete;
+    /* Open the connection and start the recv/heartbeat threads. Must be called
+     * once, after the callbacks have been registered, to avoid racing those
+     * threads against callback registration. */
+    void start ();
     void attemptReconnect ();
     void processMessages ();
     void commandRTL ();

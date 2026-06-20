@@ -43,6 +43,9 @@ class MAV : public IMAV
     {
         return this->armed;
     };
+    /* Open the MAV connection and start its background threads. Call once,
+     * after registering callbacks, so those threads cannot race registration. */
+    void start ();
     void attemptReconnect ();
     void setMode (flight_mode fm) override;
     void disarm () override;
