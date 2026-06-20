@@ -118,6 +118,24 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         cfg.altitude_floor_m = cfg.altitude_cap_m;
     }
 
+    /* The goto altitude may be given in metres or feet, like the cap/floor.
+     * Clamp it into [floor, cap] afterwards: a goto must not be flown above the
+     * regulatory ceiling, nor below the floor (and the cap/floor have already
+     * been resolved and made consistent above). */
+    loadAltitude (cfg.goto_altitude_m, fmu, "goto_altitude_m", "goto_altitude_ft");
+    if (cfg.goto_altitude_m > cfg.altitude_cap_m)
+    {
+        std::cerr << "Config: goto_altitude (" << cfg.goto_altitude_m << "m) exceeds altitude_cap ("
+                  << cfg.altitude_cap_m << "m), clamping to cap\n";
+        cfg.goto_altitude_m = cfg.altitude_cap_m;
+    }
+    else if (cfg.goto_altitude_m < cfg.altitude_floor_m)
+    {
+        std::cerr << "Config: goto_altitude (" << cfg.goto_altitude_m << "m) below altitude_floor ("
+                  << cfg.altitude_floor_m << "m), clamping to floor\n";
+        cfg.goto_altitude_m = cfg.altitude_floor_m;
+    }
+
     if (fmu.isMember ("camera_fov_deg"))
     {
         const Json::Value &fov_value = fmu["camera_fov_deg"];

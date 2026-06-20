@@ -742,6 +742,7 @@ TEST_CASE ("loadFmuConfig returns defaults when the fmu block is absent", "[conf
     FmuConfig cfg = load_config (R"({ "name": "test" })");
     REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
     REQUIRE (cfg.altitude_floor_m == def.altitude_floor_m);
+    REQUIRE (cfg.goto_altitude_m == def.goto_altitude_m);
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (def.camera_fov_deg));
     REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
     REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
@@ -754,6 +755,7 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
         "fmu": {
             "altitude_cap_m": 100,
             "altitude_floor_m": 20,
+            "goto_altitude_m": 60,
             "camera_fov_deg": 60.0,
             "lowbat_threshold": 25,
             "reconnect_interval_s": 30,
@@ -762,10 +764,27 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
     })");
     REQUIRE (cfg.altitude_cap_m == 100);
     REQUIRE (cfg.altitude_floor_m == 20);
+    REQUIRE (cfg.goto_altitude_m == 60);
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (60.0));
     REQUIRE (cfg.lowbat_threshold == 25);
     REQUIRE (cfg.reconnect_interval_s == 30);
     REQUIRE (cfg.log_level == LogLevel::debug);
+}
+
+TEST_CASE ("loadFmuConfig clamps the goto altitude into [floor, cap]", "[config]")
+{
+    /* Above the cap clamps down to the cap. */
+    FmuConfig high = load_config (R"({ "fmu": { "altitude_cap_m": 100, "goto_altitude_m": 250 } })");
+    REQUIRE (high.goto_altitude_m == 100);
+
+    /* Below the floor clamps up to the floor. */
+    FmuConfig low = load_config (R"({ "fmu": { "altitude_floor_m": 40, "goto_altitude_m": 10 } })");
+    REQUIRE (low.goto_altitude_m == 40);
+
+    /* Feet are converted like the other altitudes: 200 ft -> 61 m, within the
+     * default [10, 122] range, so it is kept as-is. */
+    FmuConfig ft = load_config (R"({ "fmu": { "goto_altitude_ft": 200 } })");
+    REQUIRE (ft.goto_altitude_m == 61);
 }
 
 TEST_CASE ("loadFmuConfig converts feet to metres and prefers feet over metres", "[config]")
