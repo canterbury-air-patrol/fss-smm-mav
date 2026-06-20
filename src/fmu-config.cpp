@@ -194,5 +194,22 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         }
     }
 
+    if (fmu.isMember ("log_dir"))
+    {
+        const Json::Value &dir = fmu["log_dir"];
+        if (!dir.isString ())
+        {
+            std::cerr << "Config: log_dir is not a string, using default " << cfg.log_dir << "\n";
+        }
+        else if (std::string s = dir.asString (); s.empty ())
+        {
+            std::cerr << "Config: log_dir is empty, using default " << cfg.log_dir << "\n";
+        }
+        else
+        {
+            cfg.log_dir = s;
+        }
+    }
+
     return cfg;
 }
