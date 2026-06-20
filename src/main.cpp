@@ -91,6 +91,12 @@ class App
         mav->registerMavCommsStatusCB ([this] (MavCommsStatus status)
                                        { enqueue_event (std::make_shared<event> (status)); });
 
+        /* All callbacks are now registered; only now open the MAV connection and
+         * start its recv/heartbeat threads, so those threads cannot race the
+         * registration above. (FSS connects lazily via the reconnector below,
+         * which likewise starts after registration.) */
+        mav->start ();
+
         std::thread sig_thread ([this] { signal_waiter (); });
         std::thread reconnector ([this] { fss_reconnector (); });
 
