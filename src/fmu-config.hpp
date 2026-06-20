@@ -20,6 +20,12 @@ struct FmuConfig
      * flown below this, so a tiny/zero sweep width cannot put the aircraft at
      * ground level. Held <= altitude_cap_m. */
     uint16_t altitude_floor_m{ 10 };
+    /* Altitude an FSS "goto" is flown at, metres AGL (relative to home). A goto
+     * command carries only a target position, not an altitude, so the FMU
+     * supplies one here. Held <= altitude_cap_m (and >= altitude_floor_m) so a
+     * goto can never be commanded above the regulatory ceiling or into the
+     * ground. */
+    uint16_t goto_altitude_m{ 50 };
     /* Camera cross-track (across-flight) total field of view, degrees. Used
      * to derive the flight altitude that yields a desired ground sweep
      * width: width = 2 * altitude * tan(fov / 2). Must be in (0, 180). */

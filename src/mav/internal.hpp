@@ -121,6 +121,11 @@ class mav_connection
     bool search_loaded{ false };
     Point goto_position{};
     bool goto_active{ false };
+    /* Altitude (metres AGL, relative to home) a goto waypoint is flown at;
+     * supplied from config, already clamped to [floor, cap]. Set once at
+     * construction and only read on the recv thread when building the goto
+     * mission item, so it needs no locking. */
+    uint16_t goto_altitude_m;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
     void setFlightMode (uint8_t fmode);
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
@@ -137,7 +142,7 @@ class mav_connection
     void heartbeat_loop ();
 
   public:
-    mav_connection (std::string t_addr, uint16_t t_port);
+    mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m);
     ~mav_connection ();
     mav_connection (mav_connection &) = delete;
     mav_connection (mav_connection &&) = delete;

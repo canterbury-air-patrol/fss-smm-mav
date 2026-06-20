@@ -299,7 +299,6 @@ void
 mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
 {
     constexpr int acceptable_radius = 5;
-    constexpr int goto_alt = 50;
     mavlink_message_t msg;
     bool local_goto_active;
     Point local_goto_position;
@@ -340,7 +339,7 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
                 NAN,                              /* Yaw: NaN for dont care */
                 static_cast<int32_t> (local_goto_position.getLatitude () / LAT_LNG_COV),  /* Latitude */
                 static_cast<int32_t> (local_goto_position.getLongitude () / LAT_LNG_COV), /* Longitude */
-                static_cast<float> (goto_alt),                                            /* Altitude (m) */
+                static_cast<float> (this->goto_altitude_m),                               /* Altitude (m AGL) */
                 mission_type);
         }
     }
@@ -795,7 +794,8 @@ mav_connection::disconnect_from_mav ()
     }
 }
 
-mav_connection::mav_connection (std::string t_addr, uint16_t t_port) : addr (std::move (t_addr)), port (t_port)
+mav_connection::mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m)
+    : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_goto_altitude_m)
 {
     this->connect_to_mav ();
     this->heartbeat_thread = std::thread ([this] { this->heartbeat_loop (); });
