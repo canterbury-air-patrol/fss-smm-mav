@@ -1,4 +1,4 @@
-# fss-smm-mav
+# cap-fmu
 
 This is the Flight Management Unit that [Canterbury Air Patrol](https://canterburyairpatrol.org/) uses to integrate [ArduPilot](https://www.ardupilot.org) with [Flight Safety System](https://github.com/canterbury-air-patrol/flight-safety-system/) and [Search Management Map](https://github.com/canterbury-air-patrol/search-management-map/)
 
