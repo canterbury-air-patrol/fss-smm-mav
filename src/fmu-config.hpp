@@ -36,6 +36,11 @@ struct FmuConfig
     int reconnect_interval_s{ 10 };
     /* Logging verbosity: error, info (default), or debug. */
     LogLevel log_level{ LogLevel::info };
+    /* Directory the rotating fmu.log is written to. Defaults to the system
+     * location, but the FMU normally runs as a non-root user, so it is
+     * configurable to a path that user can write (the directory is created if
+     * missing; logging is skipped with a warning if it cannot be). */
+    std::string log_dir{ "/var/log/cap-fmu" };
 };
 
 /* Load the optional "fmu" config block from the given client.json. Missing,

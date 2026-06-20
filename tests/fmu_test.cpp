@@ -747,6 +747,7 @@ TEST_CASE ("loadFmuConfig returns defaults when the fmu block is absent", "[conf
     REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
     REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
     REQUIRE (cfg.log_level == def.log_level);
+    REQUIRE (cfg.log_dir == def.log_dir);
 }
 
 TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
@@ -769,6 +770,19 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
     REQUIRE (cfg.lowbat_threshold == 25);
     REQUIRE (cfg.reconnect_interval_s == 30);
     REQUIRE (cfg.log_level == LogLevel::debug);
+}
+
+TEST_CASE ("loadFmuConfig reads a custom log_dir and rejects bad ones", "[config]")
+{
+    FmuConfig cfg = load_config (R"({ "fmu": { "log_dir": "/tmp/cap-fmu-logs" } })");
+    REQUIRE (cfg.log_dir == "/tmp/cap-fmu-logs");
+
+    /* An empty or non-string log_dir keeps the default. */
+    const FmuConfig def{};
+    FmuConfig empty = load_config (R"({ "fmu": { "log_dir": "" } })");
+    REQUIRE (empty.log_dir == def.log_dir);
+    FmuConfig wrong_type = load_config (R"({ "fmu": { "log_dir": 42 } })");
+    REQUIRE (wrong_type.log_dir == def.log_dir);
 }
 
 TEST_CASE ("loadFmuConfig clamps the goto altitude into [floor, cap]", "[config]")
