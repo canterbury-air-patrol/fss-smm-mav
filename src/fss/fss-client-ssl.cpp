@@ -142,14 +142,15 @@ fss_client_ssl::handleCommandFrom (
     }
 
     /* A new logical command: ack any copies of a now-displaced older command as
-     * superseded (their resolution never arrived before this one). */
+     * superseded (their resolution never arrived before this one). This is the
+     * same situation as the stale_superseded path above — an older command
+     * replaced by a newer operator command — so it shares the same outcome and
+     * newer-command reason; the only difference is arrival timing, which must not
+     * change the operator-facing label. */
+    for (const auto &target : delivery.superseded)
     {
-        FSSCommandResolution superseded_res;
-        superseded_res.outcome = fss_command_superseded;
-        for (const auto &target : delivery.superseded)
-        {
-            this->ackPending (target, superseded_res);
-        }
+        this->sendCommandAck (target.conn.lock (), target.acked_id, target.raw_command, stale_command_ack_outcome,
+                              stale_command_ack_reason);
     }
 
     /* Phase 2: once the state machine resolves the command, ack the resolved
