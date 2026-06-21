@@ -791,6 +791,15 @@ TEST_CASE ("a new command supersedes an unresolved group and its copies are hand
     REQUIRE (second.superseded[0] == 1);
     REQUIRE (second.superseded[1] == 2);
 
+    /* This is the same situation as the stale_superseded path — an older command
+     * replaced by a newer operator command — differing only in arrival timing.
+     * handleCommandFrom must therefore ack these displaced copies with the SAME
+     * shared outcome+reason it uses there, so the operator-facing label is
+     * 'superseded by newer command' regardless of timing, never supersede_none. */
+    REQUIRE (stale_command_ack_outcome == fsst::command_ack_superseded);
+    REQUIRE (stale_command_ack_reason == fsst::supersede_newer_command);
+    REQUIRE (stale_command_ack_reason != fsst::supersede_none);
+
     /* The first command's late resolution is dropped (its epoch is stale): those
      * copies were already acked as superseded, so it must not double-ack them. */
     auto stale_resolution = group.resolve (first.epoch, actioned ());
