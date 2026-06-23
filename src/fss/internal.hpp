@@ -68,6 +68,12 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
      * late-arriving duplicate. */
     void ackPending (const pending_command_ack &target, const FSSCommandResolution &res);
 
+    /* Ack a single command copy as superseded by a newer command — the stale /
+     * displaced-older-command outcome. Both the stale-on-arrival path and the
+     * displaced-by-a-newer-command path share this so the operator-facing label
+     * cannot drift between them (only the arrival timing differs). */
+    void ackStale (const pending_command_ack &target);
+
   protected:
     void connectionStatusChange (flight_safety_system::client_ssl::connection_status status) override;
 
