@@ -1,5 +1,6 @@
 #include "internal.hpp"
 #include "mav.hpp"
+#include "mission-plan.hpp"
 #include "smm/search-altitude.hpp"
 #include "util.hpp"
 
@@ -10,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include <cerrno>
 #include <netdb.h>
@@ -325,10 +327,20 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
         local_goto_position = this->goto_position;
         local_search = this->search;
     }
-    if (local_goto_active)
+    /* In search mode with no search loaded there is nothing to send. */
+    if (!local_goto_active && local_search == nullptr)
     {
-        if (seq >= 2)
-        {
+        return;
+    }
+
+    /* getPoints() is a copy; in goto mode there is no search, so use an empty
+     * list (its size is irrelevant to the goto layout anyway). */
+    auto points = local_search != nullptr ? local_search->getPoints () : std::vector<Point>{};
+    MissionItem item = mission_item_for (seq, points.size (), local_goto_active);
+
+    switch (item.kind)
+    {
+        case MissionItemKind::rtl:
             mavlink_msg_mission_item_int_pack (
                 SYS_ID, COMP_ID, &msg, 0, 1, seq, /* Which waypoint is this */
                 MAV_FRAME_GLOBAL_RELATIVE_ALT,    /* Use altitude relative to the home point */
@@ -337,9 +349,8 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
                 0,                                /* Auto continue: No */
                 0, 0, 0, 0, 0, 0, 0,              /* Parameters ignored */
                 mission_type);
-        }
-        else
-        {
+            break;
+        case MissionItemKind::goto_point:
             /* The scaled int32 lat/lon legitimately sit next to the float altitude in this MAVLink message;
              * clang-tidy's swapped-arguments heuristic cannot tell them apart. */
             // NOLINTNEXTLINE(bugprone-swapped-arguments)
@@ -357,23 +368,13 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
                 static_cast<int32_t> (local_goto_position.getLongitude () / LAT_LNG_COV), /* Longitude */
                 static_cast<float> (this->goto_altitude_m),                               /* Altitude (m AGL) */
                 mission_type);
-        }
-    }
-    else
-    {
-        if (local_search == nullptr)
-        {
-            return;
-        }
-        /* Find the point */
-        auto points = local_search->getPoints ();
-        if (seq == 0 || seq == 1)
-        {
+            break;
+        case MissionItemKind::takeoff:
             /* Most versions of ArduPilot ignore the zeroth mission command, so we need to send the first one twice */
             mavlink_msg_mission_item_int_pack (
                 SYS_ID, COMP_ID, &msg, 0, 1, seq,                       /* Which waypoint is this */
                 MAV_FRAME_GLOBAL_RELATIVE_ALT,                          /* Use altitude relative to the home point */
-                MAV_CMD_NAV_TAKEOFF,                                    /* Return home */
+                MAV_CMD_NAV_TAKEOFF,                                    /* Take off and climb */
                 (seq == 1 && local_search->getCurrentPointIdx () == 0), /* Are we at the beginning of the search */
                 1,                                                      /* Auto continue: No */
                 5,                                                      /* Pitch/climb angle (plane only) */
@@ -384,40 +385,29 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
                 0,                                                      /* Longitude */
                 local_search->getAltitude (),                           /* Altitude */
                 mission_type);
-        }
-        else if (seq > (points.size () + 1))
-        {
-            /* Make sure the mission defaults to ending with sending the asset home */
-            mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq, /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT,    /* Use altitude relative to the home point */
-                MAV_CMD_NAV_RETURN_TO_LAUNCH,     /* Return home */
-                0,                                /* Not the current point */
-                0,                                /* Auto continue: No */
-                0, 0, 0, 0, 0, 0, 0,              /* Parameters ignored */
-                mission_type);
-        }
-        else
+            break;
+        case MissionItemKind::search_point:
         {
             /* Load each point of the search, the first 2 mission items are setup, so the seq is offset */
-            Point p = points[seq - 2];
+            Point p = points[item.point_index];
             /* The scaled int32 lat/lon legitimately sit next to the float altitude in this MAVLink message;
              * clang-tidy's swapped-arguments heuristic cannot tell them apart. */
             // NOLINTNEXTLINE(bugprone-swapped-arguments)
             mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq,                       /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT,                          /* Use altitude relative to the home point */
-                MAV_CMD_NAV_WAYPOINT,                                   /* Navigate to a point */
-                (local_search->getCurrentPointIdx () == (seq - 2)),     /* Is this waypoint is the current target? */
-                1,                                                      /* Auto continue */
-                0,                                                      /* Hold time: 0s */
-                acceptable_radius,                                      /* Accept radius: m */
-                0,                                                      /* Pass radius: 0m */
+                SYS_ID, COMP_ID, &msg, 0, 1, seq, /* Which waypoint is this */
+                MAV_FRAME_GLOBAL_RELATIVE_ALT,    /* Use altitude relative to the home point */
+                MAV_CMD_NAV_WAYPOINT,             /* Navigate to a point */
+                (local_search->getCurrentPointIdx () == static_cast<int> (item.point_index)), /* The current target? */
+                1,                                                                            /* Auto continue */
+                0,                                                                            /* Hold time: 0s */
+                acceptable_radius,                                                            /* Accept radius: m */
+                0,                                                                            /* Pass radius: 0m */
                 NAN,                                                    /* Yaw: NaN for dont care */
                 static_cast<int32_t> (p.getLatitude () / LAT_LNG_COV),  /* Latitude */
                 static_cast<int32_t> (p.getLongitude () / LAT_LNG_COV), /* Longitude */
                 static_cast<float> (local_search->getAltitude ()),      /* Altitude (m) */
                 mission_type);
+            break;
         }
     }
     this->sendMavLinkMsg (&msg);
