@@ -2,7 +2,7 @@
 
 #include <fss-transport.hpp>
 
-#include "../fmu.hpp"
+#include "../fmu-state-types.hpp"
 
 /* Translation between the FMU-domain command resolution (FSSCommandResolution,
  * produced by FMUStateMachine) and the transport-domain command-ack fields the
