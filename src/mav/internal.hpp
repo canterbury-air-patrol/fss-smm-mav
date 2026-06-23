@@ -25,21 +25,22 @@ class mav_comp
     };
 };
 
-/* Single-writer invariant: mav_sys/mav_systems members are mutated only on the
- * recv thread (via processMavLinkMsg). Main-thread reads of getAutoPilotType()
- * in commandRTL/Hold/Manual/Auto rely on this — if mutation ever moves off the
- * recv thread, add synchronisation here. */
+/* The autopilot_type/flight_mode/setup scalars are written on the recv thread
+ * (via processMavLinkMsg) and read on the event-loop thread (getAutoPilotType()
+ * in commandRTL/Hold/Manual/Auto), so they are atomic to make that cross-thread
+ * access well-defined. The components list is only ever touched on the recv
+ * thread (findComponent from processMavLinkMsg), so it needs no lock. */
 class mav_sys
 {
   private:
     uint8_t sysid;
     std::list<std::shared_ptr<mav_comp>> components{};
-    uint8_t autopilot_type;
-    uint8_t flight_mode;
-    bool setup{ false };
+    std::atomic<uint8_t> autopilot_type{ 0 };
+    std::atomic<uint8_t> flight_mode{ 0 };
+    std::atomic<bool> setup{ false };
 
   public:
-    explicit mav_sys (uint8_t t_sysid) : sysid (t_sysid), autopilot_type (0), flight_mode (0) {};
+    explicit mav_sys (uint8_t t_sysid) : sysid (t_sysid) {};
     ~mav_sys () = default;
     auto
     getSysId () -> uint8_t
@@ -49,45 +50,55 @@ class mav_sys
     auto
     getAutoPilotType () -> uint8_t
     {
-        return this->autopilot_type;
+        return this->autopilot_type.load ();
     };
     auto
     getFlightMode () -> uint8_t
     {
-        return this->flight_mode;
+        return this->flight_mode.load ();
     };
     void
     setAutoPilotMode (uint8_t type)
     {
-        this->autopilot_type = type;
+        this->autopilot_type.store (type);
     };
     void
     setFlightMode (uint8_t mode)
     {
-        this->flight_mode = mode;
+        this->flight_mode.store (mode);
     };
     auto findComponent (uint8_t compid) -> std::shared_ptr<mav_comp>;
     auto
     isSetup () -> bool
     {
-        return this->setup;
+        return this->setup.load ();
     };
     void
     setupComplete ()
     {
-        this->setup = true;
+        this->setup.store (true);
     };
 };
 
+/* The systems list is grown on the recv thread (findSystem find-or-create from
+ * processMavLinkMsg) and read from the event-loop command paths, so all access
+ * to the list is serialised by `lock`. Command paths use findExistingSystem(),
+ * which never mutates the list, so dispatching a command cannot race a
+ * concurrent recv-thread insertion. */
 class mav_systems
 {
   private:
     std::list<std::shared_ptr<mav_sys>> systems{};
+    std::mutex lock{};
 
   public:
     mav_systems () = default;
     ~mav_systems () = default;
+    /* Find the system for t_sysid, creating it if absent. Recv-thread only. */
     auto findSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>;
+    /* Return the system for t_sysid if it already exists, else nullptr. Never
+     * mutates the list, so it is safe to call from the command paths. */
+    auto findExistingSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>;
 };
 
 class mav_connection

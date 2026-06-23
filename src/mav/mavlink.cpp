@@ -80,7 +80,6 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, uint32_
 void
 mav_connection::setFlightMode (uint8_t fmode)
 {
-    auto sys = this->systems.findSystem (TARGET_SYS_ID);
     mavlink_message_t msg;
     mavlink_msg_set_mode_pack (SYS_ID, COMP_ID, &msg, 1,
                                MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | MAV_MODE_FLAG_AUTO_ENABLED
@@ -94,9 +93,9 @@ void
 mav_connection::commandRTL ()
 {
     /* Map type to RTL mode */
-    auto sys = this->systems.findSystem (TARGET_SYS_ID);
+    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
     uint8_t fmode = 0;
-    switch (sys->getAutoPilotType ())
+    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
             fmode = PLANE_MODE_RTL;
@@ -156,9 +155,9 @@ void
 mav_connection::commandManual ()
 {
     /* Map type to RTL mode */
-    auto sys = this->systems.findSystem (TARGET_SYS_ID);
+    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
     uint8_t fmode = 0;
-    switch (sys->getAutoPilotType ())
+    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
             fmode = PLANE_MODE_FLY_BY_WIRE_B;
@@ -190,9 +189,9 @@ void
 mav_connection::commandHold ()
 {
     /* Map type to LOITER/HOLD mode */
-    auto sys = this->systems.findSystem (TARGET_SYS_ID);
+    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
     uint8_t fmode = 0;
-    switch (sys->getAutoPilotType ())
+    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
             fmode = PLANE_MODE_LOITER;
@@ -224,9 +223,9 @@ void
 mav_connection::commandAuto ()
 {
     /* Map type to AUTO mode */
-    auto sys = this->systems.findSystem (TARGET_SYS_ID);
+    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
     uint8_t fmode = 0;
-    switch (sys->getAutoPilotType ())
+    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
             fmode = PLANE_MODE_AUTO;
