@@ -6,6 +6,7 @@
 #include "fmu.hpp"
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
+#include "mav/mission-plan.hpp"
 #include "smm/search-altitude.hpp"
 
 #include <cstdlib>
@@ -901,6 +902,50 @@ TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor,
 
     /* Exactly at the cap in feet: 400 ft == 121.92 m, within (122) -> 121. */
     REQUIRE (clamp_command_altitude (400, floor, cap) == 121);
+}
+
+TEST_CASE ("mission_item_for lays out a goto mission", "[mission]")
+{
+    /* num_points is irrelevant in goto mode. */
+    constexpr std::size_t any_points = 7;
+
+    /* seq 0 and 1 are the goto target waypoint (sent twice). */
+    REQUIRE (mission_item_for (0, any_points, true).kind == MissionItemKind::goto_point);
+    REQUIRE (mission_item_for (1, any_points, true).kind == MissionItemKind::goto_point);
+    /* Everything past it returns home. */
+    REQUIRE (mission_item_for (2, any_points, true).kind == MissionItemKind::rtl);
+    REQUIRE (mission_item_for (99, any_points, true).kind == MissionItemKind::rtl);
+}
+
+TEST_CASE ("mission_item_for lays out a search mission with the two-item offset", "[mission]")
+{
+    /* A 3-point search: setup items at seq 0/1, points at seq 2,3,4, RTL after. */
+    constexpr std::size_t num_points = 3;
+
+    REQUIRE (mission_item_for (0, num_points, false).kind == MissionItemKind::takeoff);
+    REQUIRE (mission_item_for (1, num_points, false).kind == MissionItemKind::takeoff);
+
+    /* seq 2..4 map to point indices 0..2 (the seq - 2 offset). */
+    auto first = mission_item_for (2, num_points, false);
+    REQUIRE (first.kind == MissionItemKind::search_point);
+    REQUIRE (first.point_index == 0);
+
+    auto last = mission_item_for (4, num_points, false);
+    REQUIRE (last.kind == MissionItemKind::search_point);
+    REQUIRE (last.point_index == num_points - 1);
+
+    /* seq num_points + 1 (== 4) is still the last point; the first seq beyond it
+     * terminates the mission with an RTL. */
+    REQUIRE (mission_item_for (5, num_points, false).kind == MissionItemKind::rtl);
+    REQUIRE (mission_item_for (100, num_points, false).kind == MissionItemKind::rtl);
+}
+
+TEST_CASE ("mission_item_for handles an empty search (no points)", "[mission]")
+{
+    /* With zero points, only the two takeoff items exist; seq 2 onward is RTL. */
+    REQUIRE (mission_item_for (0, 0, false).kind == MissionItemKind::takeoff);
+    REQUIRE (mission_item_for (1, 0, false).kind == MissionItemKind::takeoff);
+    REQUIRE (mission_item_for (2, 0, false).kind == MissionItemKind::rtl);
 }
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
