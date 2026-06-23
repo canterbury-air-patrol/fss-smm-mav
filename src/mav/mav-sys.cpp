@@ -18,6 +18,7 @@ mav_sys::findComponent (uint8_t t_compid) -> std::shared_ptr<mav_comp>
 auto
 mav_systems::findSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>
 {
+    std::lock_guard<std::mutex> lk (this->lock);
     for (auto iter : this->systems)
     {
         if ((iter)->getSysId () == t_sysid)
@@ -28,4 +29,18 @@ mav_systems::findSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>
     auto new_sys = std::make_shared<mav_sys> (t_sysid);
     this->systems.push_back (new_sys);
     return new_sys;
+}
+
+auto
+mav_systems::findExistingSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>
+{
+    std::lock_guard<std::mutex> lk (this->lock);
+    for (auto iter : this->systems)
+    {
+        if ((iter)->getSysId () == t_sysid)
+        {
+            return (iter);
+        }
+    }
+    return nullptr;
 }
