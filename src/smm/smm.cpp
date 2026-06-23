@@ -2,6 +2,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "search-acquire.hpp"
 #include "search-altitude.hpp"
 #include "smm.hpp"
 #include "util.hpp"
@@ -143,9 +144,20 @@ void
 SMM::tryAcquireSearch (Point current_pos)
 {
     uint64_t curr_ts = current_timestamp_ms ();
-    if (this->search_retry_ts > curr_ts)
+    switch (search_acquire_action (this->asset != nullptr, this->search_retry_ts, curr_ts))
     {
-        return;
+        case SearchAcquireAction::backoff:
+            return;
+        case SearchAcquireAction::disconnected_rtl:
+            /* SMM disconnected or asset discovery failed while a search is still
+             * active. smm_asset_get_search() must never run with a null asset, so
+             * fall back to a safe RTL and back off; search_active stays set, so the
+             * search is retried once the asset is rediscovered after reconnect. */
+            this->mav.setMode (flight_mode_rtl);
+            this->search_retry_ts = curr_ts + search_retry_interval_ms;
+            return;
+        case SearchAcquireAction::fetch:
+            break;
     }
     int retries = 0;
     while (this->current_search == nullptr)
@@ -209,16 +221,14 @@ void
 SMM::search (Point current_pos)
 {
     std::lock_guard<std::mutex> lk (this->search_lock);
-    if (this->asset == nullptr)
-    {
-        this->mav.setMode (flight_mode_rtl);
-        return;
-    }
     this->search_active = true;
     if (this->current_search != nullptr)
     {
         return;
     }
+    /* tryAcquireSearch() guards the null-asset case itself (RTL + back off, then
+     * retry after reconnect), so the disconnected path no longer needs a special
+     * case here and both entry points share one rule. */
     this->tryAcquireSearch (current_pos);
 }
 
