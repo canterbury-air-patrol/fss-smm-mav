@@ -6,7 +6,7 @@
 #include <string_view>
 
 #include "fmu-core-types.hpp"
-#include "fmu.hpp"
+#include "fmu-state-types.hpp"
 #include "fss/fmu-fss-types.hpp"
 
 inline const char *
