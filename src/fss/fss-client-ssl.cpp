@@ -39,6 +39,13 @@ fss_client_ssl::ackPending (const pending_command_ack &target, const FSSCommandR
 }
 
 void
+fss_client_ssl::ackStale (const pending_command_ack &target)
+{
+    this->sendCommandAck (target.conn.lock (), target.acked_id, target.raw_command, stale_command_ack_outcome,
+                          stale_command_ack_reason);
+}
+
+void
 fss_client_ssl::handleCommandFrom (
     const std::shared_ptr<flight_safety_system::transport::fss_message_asset_command> &msg,
     flight_safety_system::client_ssl::fss_server *origin)
@@ -135,7 +142,7 @@ fss_client_ssl::handleCommandFrom (
              * superseded with the dedicated newer-command reason (a later operator
              * command replaced it — distinct from the autonomous safety latches)
              * rather than returning silently and leaving a false 'no ack'. */
-            this->sendCommandAck (conn, acked_id, raw_command, stale_command_ack_outcome, stale_command_ack_reason);
+            this->ackStale (this_copy);
             return;
         case CommandAckGroup<pending_command_ack>::Disposition::actuate:
             break;
@@ -149,8 +156,7 @@ fss_client_ssl::handleCommandFrom (
      * change the operator-facing label. */
     for (const auto &target : delivery.superseded)
     {
-        this->sendCommandAck (target.conn.lock (), target.acked_id, target.raw_command, stale_command_ack_outcome,
-                              stale_command_ack_reason);
+        this->ackStale (target);
     }
 
     /* Phase 2: once the state machine resolves the command, ack the resolved
