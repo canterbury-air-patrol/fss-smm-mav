@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include <cerrno>
@@ -79,15 +80,21 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, uint32_
 }
 
 void
-mav_connection::setSearchExitMode (uint8_t fmode, const char *command)
+mav_connection::warnUnresolvedMode (const char *command)
 {
-    if (fmode == 0)
+    std::cerr << "WARN: " << command
+              << " command received before the autopilot type is known (no heartbeat yet); ignoring\n";
+}
+
+void
+mav_connection::setSearchExitMode (std::optional<uint8_t> fmode, const char *command)
+{
+    if (!fmode.has_value ())
     {
-        std::cerr << "WARN: " << command
-                  << " command received before the autopilot type is known (no heartbeat yet); ignoring\n";
+        warnUnresolvedMode (command);
         return;
     }
-    this->setFlightMode (fmode);
+    this->setFlightMode (*fmode);
     std::lock_guard<std::mutex> lk{ this->state_lock };
     this->search_loaded = false;
 }
@@ -109,7 +116,7 @@ mav_connection::commandRTL ()
 {
     /* Map type to RTL mode */
     auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    uint8_t fmode = 0;
+    std::optional<uint8_t> fmode;
     switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
@@ -127,7 +134,7 @@ mav_connection::commandRTL ()
             fmode = ROVER_MODE_RTL;
             break;
         default:
-            fmode = 0;
+            /* Autopilot type not yet known: leave fmode unresolved. */
             break;
     }
     this->setSearchExitMode (fmode, "RTL");
@@ -166,7 +173,7 @@ mav_connection::commandManual ()
 {
     /* Map type to RTL mode */
     auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    uint8_t fmode = 0;
+    std::optional<uint8_t> fmode;
     switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
@@ -178,13 +185,15 @@ mav_connection::commandManual ()
         case MAV_TYPE_HEXAROTOR:
         case MAV_TYPE_OCTOROTOR:
         case MAV_TYPE_TRICOPTER:
+            /* COPTER_MODE_STABILIZE is 0 — a valid mode, hence the optional. */
             fmode = COPTER_MODE_STABILIZE;
             break;
         case MAV_TYPE_GROUND_ROVER:
+            /* ROVER_MODE_MANUAL is also 0. */
             fmode = ROVER_MODE_MANUAL;
             break;
         default:
-            fmode = 0;
+            /* Autopilot type not yet known: leave fmode unresolved. */
             break;
     }
     this->setSearchExitMode (fmode, "manual");
@@ -195,7 +204,7 @@ mav_connection::commandHold ()
 {
     /* Map type to LOITER/HOLD mode */
     auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    uint8_t fmode = 0;
+    std::optional<uint8_t> fmode;
     switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
@@ -213,7 +222,7 @@ mav_connection::commandHold ()
             fmode = ROVER_MODE_HOLD;
             break;
         default:
-            fmode = 0;
+            /* Autopilot type not yet known: leave fmode unresolved. */
             break;
     }
     this->setSearchExitMode (fmode, "hold");
@@ -224,7 +233,7 @@ mav_connection::commandAuto ()
 {
     /* Map type to AUTO mode */
     auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    uint8_t fmode = 0;
+    std::optional<uint8_t> fmode;
     switch (sys != nullptr ? sys->getAutoPilotType () : 0)
     {
         case MAV_TYPE_FIXED_WING:
@@ -242,16 +251,18 @@ mav_connection::commandAuto ()
             fmode = ROVER_MODE_AUTO;
             break;
         default:
-            fmode = 0;
+            /* Autopilot type not yet known: leave fmode unresolved. */
             break;
     }
-    if (fmode != 0)
+    /* Auto must not clear search_loaded (it enters the loaded search), so it
+     * does not use setSearchExitMode — but it shares the same warning wording. */
+    if (fmode.has_value ())
     {
-        this->setFlightMode (fmode);
+        this->setFlightMode (*fmode);
     }
     else
     {
-        std::cerr << "WARN: auto command received before the autopilot type is known (no heartbeat yet); ignoring\n";
+        warnUnresolvedMode ("auto");
     }
 }
 
