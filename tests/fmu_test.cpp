@@ -875,6 +875,34 @@ TEST_CASE ("search altitude derivation and clamp compose for realistic searches"
     REQUIRE (clamp_search_altitude (raw_search_altitude (2.0, 90.0), floor, cap) == floor);
 }
 
+TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor, cap]", "[altitude]")
+{
+    /* Defaults from the README: 122 m cap, 10 m floor. */
+    constexpr uint16_t floor = 10;
+    constexpr uint16_t cap = 122;
+
+    /* 165 ft == 50.29 m, comfortably within range -> truncated to whole metres. */
+    REQUIRE (clamp_command_altitude (165, floor, cap) == 50);
+    /* 33 ft == 10.06 m, just above the floor -> kept (truncated to 10). */
+    REQUIRE (clamp_command_altitude (33, floor, cap) == 10);
+
+    /* An altitude command above the regulatory ceiling is pinned to the cap:
+     * 500 ft == 152.4 m > 122 m. This is the safety gap the clamp closes -- a
+     * direct operator altitude command must not exceed the ceiling that the
+     * search and goto altitudes already honour. */
+    REQUIRE (clamp_command_altitude (500, floor, cap) == cap);
+    /* 1500 ft == 457 m, far above the cap. */
+    REQUIRE (clamp_command_altitude (1500, floor, cap) == cap);
+
+    /* A command below the floor is pinned up to it: 10 ft == 3.05 m < 10 m. */
+    REQUIRE (clamp_command_altitude (10, floor, cap) == floor);
+    /* Zero feet -> floor, never ground level. */
+    REQUIRE (clamp_command_altitude (0, floor, cap) == floor);
+
+    /* Exactly at the cap in feet: 400 ft == 121.92 m, within (122) -> 121. */
+    REQUIRE (clamp_command_altitude (400, floor, cap) == 121);
+}
+
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
 {
     known_aircraft ka;

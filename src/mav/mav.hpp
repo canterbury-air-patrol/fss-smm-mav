@@ -27,7 +27,8 @@ class MAV : public IMAV
     terminate_action action;
 
   public:
-    MAV (std::string t_addr, uint16_t t_port, terminate_action ta, uint16_t t_goto_altitude_m);
+    MAV (std::string t_addr, uint16_t t_port, terminate_action ta, uint16_t t_goto_altitude_m,
+         uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m);
     MAV (MAV &) = delete;
     MAV (MAV &&) = delete;
     auto operator= (MAV &) -> MAV & = delete;
