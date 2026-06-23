@@ -7,6 +7,7 @@
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
 #include "mav/mission-plan.hpp"
+#include "smm/search-acquire.hpp"
 #include "smm/search-altitude.hpp"
 
 #include <cstdlib>
@@ -977,6 +978,25 @@ TEST_CASE ("mission_count_for and mission_item_for agree on the RTL terminator",
                      != MissionItemKind::rtl);
         }
     }
+}
+
+TEST_CASE ("search_acquire_action never fetches without an asset", "[smm][acquire]")
+{
+    constexpr uint64_t now = 1000;
+
+    /* While the retry timer is in the future, back off regardless of asset
+     * state (the timer check comes first). */
+    REQUIRE (search_acquire_action (true, now + 1, now) == SearchAcquireAction::backoff);
+    REQUIRE (search_acquire_action (false, now + 1, now) == SearchAcquireAction::backoff);
+
+    /* Timer elapsed but no asset (disconnected / discovery failed): RTL and
+     * retry later, never call into the SMM C library. */
+    REQUIRE (search_acquire_action (false, now, now) == SearchAcquireAction::disconnected_rtl);
+    REQUIRE (search_acquire_action (false, 0, now) == SearchAcquireAction::disconnected_rtl);
+
+    /* Timer elapsed and asset present: safe to fetch. */
+    REQUIRE (search_acquire_action (true, now, now) == SearchAcquireAction::fetch);
+    REQUIRE (search_acquire_action (true, 0, now) == SearchAcquireAction::fetch);
 }
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
