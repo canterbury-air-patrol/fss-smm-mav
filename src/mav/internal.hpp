@@ -145,6 +145,12 @@ class mav_connection
     uint16_t altitude_cap_m;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
     void setFlightMode (uint8_t fmode);
+    /* Switch to a resolved flight mode that drops out of an active search (RTL,
+     * hold, manual): set the mode and clear the loaded-search flag. fmode == 0
+     * means the airframe-specific mode could not be resolved — the autopilot
+     * type is not yet known (no heartbeat) — so warn and do nothing rather than
+     * silently dropping the command. `command` names the command for the log. */
+    void setSearchExitMode (uint8_t fmode, const char *command);
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     void connect_to_mav ();
     void disconnect_from_mav ();

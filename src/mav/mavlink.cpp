@@ -79,6 +79,20 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, uint32_
 }
 
 void
+mav_connection::setSearchExitMode (uint8_t fmode, const char *command)
+{
+    if (fmode == 0)
+    {
+        std::cerr << "WARN: " << command
+                  << " command received before the autopilot type is known (no heartbeat yet); ignoring\n";
+        return;
+    }
+    this->setFlightMode (fmode);
+    std::lock_guard<std::mutex> lk{ this->state_lock };
+    this->search_loaded = false;
+}
+
+void
 mav_connection::setFlightMode (uint8_t fmode)
 {
     mavlink_message_t msg;
@@ -116,12 +130,7 @@ mav_connection::commandRTL ()
             fmode = 0;
             break;
     }
-    if (fmode != 0)
-    {
-        this->setFlightMode (fmode);
-        std::lock_guard<std::mutex> lk{ this->state_lock };
-        this->search_loaded = false;
-    }
+    this->setSearchExitMode (fmode, "RTL");
 }
 
 void
@@ -178,12 +187,7 @@ mav_connection::commandManual ()
             fmode = 0;
             break;
     }
-    if (fmode != 0)
-    {
-        this->setFlightMode (fmode);
-        std::lock_guard<std::mutex> lk{ this->state_lock };
-        this->search_loaded = false;
-    }
+    this->setSearchExitMode (fmode, "manual");
 }
 
 void
@@ -212,12 +216,7 @@ mav_connection::commandHold ()
             fmode = 0;
             break;
     }
-    if (fmode != 0)
-    {
-        this->setFlightMode (fmode);
-        std::lock_guard<std::mutex> lk{ this->state_lock };
-        this->search_loaded = false;
-    }
+    this->setSearchExitMode (fmode, "hold");
 }
 
 void
@@ -249,6 +248,10 @@ mav_connection::commandAuto ()
     if (fmode != 0)
     {
         this->setFlightMode (fmode);
+    }
+    else
+    {
+        std::cerr << "WARN: auto command received before the autopilot type is known (no heartbeat yet); ignoring\n";
     }
 }
 
