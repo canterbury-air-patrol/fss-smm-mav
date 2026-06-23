@@ -66,3 +66,20 @@ mission_item_for (uint16_t seq, std::size_t num_points, MissionPlanMode mode) ->
     }
     return { MissionItemKind::search_point, static_cast<std::size_t> (seq) - 2 };
 }
+
+/* Number of mission items to advertise in MISSION_COUNT for a given mode. The
+ * autopilot then requests sequence numbers 0 .. count-1, so the count must be
+ * one past the RTL terminator's sequence for send_waypoint()/mission_item_for()
+ * to ever be asked for it. By construction mission_item_for(count - 1, ...) is
+ * the rtl item; tests assert that invariant. */
+inline auto
+mission_count_for (std::size_t num_points, MissionPlanMode mode) -> std::size_t
+{
+    if (mode == MissionPlanMode::go_to)
+    {
+        /* seq 0/1 goto waypoint + seq 2 RTL terminator. */
+        return 3;
+    }
+    /* seq 0/1 setup/takeoff + the N search waypoints + one RTL terminator. */
+    return num_points + 3;
+}

@@ -164,7 +164,8 @@ mav_connection::commandGoto (Point p)
         this->goto_position = p;
         this->goto_active = true;
         this->search_loaded = false;
-        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1, 3, MAV_MISSION_TYPE_MISSION, 0);
+        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1, mission_count_for (0, MissionPlanMode::go_to),
+                                        MAV_MISSION_TYPE_MISSION, 0);
     }
     this->sendMavLinkMsg (&msg);
 }
@@ -469,14 +470,18 @@ mav_connection::loadSearch ()
     /* Enter RTL while loading the search */
     this->commandRTL ();
     /* Load the existing search into the FC, and jump to the current target point */
-    /* Tell the FC how many points there are (+2 slots for setup, +1 for RTL) */
+    /* Tell the FC how many items there are: 2 setup slots, the N search points,
+     * and one RTL terminator (mission_count_for). The count must include the RTL
+     * slot, otherwise the FC never requests it and the search has no return-home
+     * item at the end. */
     mavlink_message_t msg;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->goto_active = false;
         this->search_loaded = false;
         this->search_loading = true;
-        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1, this->search->getPoints ().size () + 2,
+        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1,
+                                        mission_count_for (this->search->getPoints ().size (), MissionPlanMode::search),
                                         MAV_MISSION_TYPE_MISSION, 0);
     }
     this->sendMavLinkMsg (&msg);

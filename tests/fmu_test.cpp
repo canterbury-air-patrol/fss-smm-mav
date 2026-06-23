@@ -948,6 +948,37 @@ TEST_CASE ("mission_item_for handles an empty search (no points)", "[mission]")
     REQUIRE (mission_item_for (2, 0, MissionPlanMode::search).kind == MissionItemKind::rtl);
 }
 
+TEST_CASE ("mission_count_for advertises the RTL terminator slot", "[mission]")
+{
+    /* A goto mission is always 3 items regardless of the (irrelevant) point
+     * count: seq 0/1 goto waypoint + seq 2 RTL. */
+    REQUIRE (mission_count_for (0, MissionPlanMode::go_to) == 3);
+    REQUIRE (mission_count_for (7, MissionPlanMode::go_to) == 3);
+
+    /* A search of N points needs 2 setup items + N points + 1 RTL. */
+    REQUIRE (mission_count_for (0, MissionPlanMode::search) == 3);
+    REQUIRE (mission_count_for (3, MissionPlanMode::search) == 6);
+}
+
+TEST_CASE ("mission_count_for and mission_item_for agree on the RTL terminator", "[mission]")
+{
+    /* The count is what is sent in MISSION_COUNT; the FC then requests seq
+     * 0 .. count-1. The last requested seq must resolve to the RTL item, and
+     * the one before it must not, so the search always ends with exactly one
+     * return-home item. This is the invariant todo/23 was about. */
+    for (auto mode : { MissionPlanMode::search, MissionPlanMode::go_to })
+    {
+        for (std::size_t num_points : { std::size_t{ 0 }, std::size_t{ 1 }, std::size_t{ 3 }, std::size_t{ 50 } })
+        {
+            std::size_t count = mission_count_for (num_points, mode);
+            uint16_t last_seq = static_cast<uint16_t> (count - 1);
+            REQUIRE (mission_item_for (last_seq, num_points, mode).kind == MissionItemKind::rtl);
+            REQUIRE (mission_item_for (static_cast<uint16_t> (last_seq - 1), num_points, mode).kind
+                     != MissionItemKind::rtl);
+        }
+    }
+}
+
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
 {
     known_aircraft ka;
