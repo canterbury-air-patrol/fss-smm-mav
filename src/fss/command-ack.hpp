@@ -47,11 +47,11 @@ inline constexpr auto stale_command_ack_reason = flight_safety_system::transport
 inline auto
 fss_command_ack_reason_for (const FSSCommandResolution &res) -> flight_safety_system::transport::fss_command_ack_reason
 {
-    if (res.outcome != fss_command_superseded)
+    if (res.outcome != fss_command_superseded || !res.superseding_state.has_value ())
     {
         return flight_safety_system::transport::supersede_none;
     }
-    switch (res.superseding_state)
+    switch (*res.superseding_state)
     {
         case fmu_state_low_battery:
             return flight_safety_system::transport::supersede_low_battery;
