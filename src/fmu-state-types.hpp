@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 /* Core FMU state and command-resolution types. Kept in their own header (free of
  * the MAV/SMM/FSS interface includes that fmu.hpp pulls in) so lightweight
  * consumers — notably fmu-types.hpp, which fmu.hpp transitively includes — can
@@ -35,9 +37,10 @@ enum FSSCommandOutcome
 struct FSSCommandResolution
 {
     FSSCommandOutcome outcome{ fss_command_actioned };
-    /* Only meaningful when outcome == fss_command_superseded: the
-     * higher-priority state that blocked the command. */
-    FMUState superseding_state{ fmu_state_manual };
+    /* Set only when outcome == fss_command_superseded: the higher-priority
+     * state that blocked the command. Empty otherwise, so an irrelevant value
+     * cannot be read for an actioned command. */
+    std::optional<FMUState> superseding_state{};
     /* True when the command actually moved the aircraft to a new state (as
      * opposed to confirming a state it was already in). Lets a caller treat a
      * benign no-op distinctly from a real transition if it needs to. */
