@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -146,11 +147,18 @@ class mav_connection
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
     void setFlightMode (uint8_t fmode);
     /* Switch to a resolved flight mode that drops out of an active search (RTL,
-     * hold, manual): set the mode and clear the loaded-search flag. fmode == 0
-     * means the airframe-specific mode could not be resolved — the autopilot
-     * type is not yet known (no heartbeat) — so warn and do nothing rather than
-     * silently dropping the command. `command` names the command for the log. */
-    void setSearchExitMode (uint8_t fmode, const char *command);
+     * hold, manual): set the mode and clear the loaded-search flag. An empty
+     * fmode means the airframe-specific mode could not be resolved — the
+     * autopilot type is not yet known (no heartbeat) — so warn (via
+     * warnUnresolvedMode) and do nothing rather than silently dropping the
+     * command. The mode is carried as an optional, not a 0 sentinel, because 0
+     * is itself a valid mode (e.g. COPTER_MODE_STABILIZE, ROVER_MODE_MANUAL).
+     * `command` names the command for the log. */
+    void setSearchExitMode (std::optional<uint8_t> fmode, const char *command);
+    /* Log that `command` arrived before the autopilot type was known, so the
+     * airframe-specific flight mode could not be resolved. Shared by every
+     * command path so the wording stays identical. */
+    static void warnUnresolvedMode (const char *command);
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     void connect_to_mav ();
     void disconnect_from_mav ();
