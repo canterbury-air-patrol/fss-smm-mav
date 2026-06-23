@@ -11,7 +11,6 @@
 #include <mutex>
 #include <optional>
 #include <thread>
-#include <vector>
 
 #include <cerrno>
 #include <netdb.h>
@@ -333,10 +332,11 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
         return;
     }
 
-    /* getPoints() is a copy; in goto mode there is no search, so use an empty
-     * list (its size is irrelevant to the goto layout anyway). */
-    auto points = local_search != nullptr ? local_search->getPoints () : std::vector<Point>{};
-    MissionItem item = mission_item_for (seq, points.size (), local_goto_active);
+    /* In goto mode there is no search, and the point count is irrelevant to the
+     * goto layout anyway; read the count without copying the point vector. */
+    std::size_t num_points = local_search != nullptr ? static_cast<std::size_t> (local_search->getPointsCount ()) : 0;
+    MissionPlanMode mode = local_goto_active ? MissionPlanMode::go_to : MissionPlanMode::search;
+    MissionItem item = mission_item_for (seq, num_points, mode);
 
     switch (item.kind)
     {
@@ -389,7 +389,7 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
         case MissionItemKind::search_point:
         {
             /* Load each point of the search, the first 2 mission items are setup, so the seq is offset */
-            Point p = points[item.point_index];
+            Point p = local_search->getPoint (item.point_index);
             /* The scaled int32 lat/lon legitimately sit next to the float altitude in this MAVLink message;
              * clang-tidy's swapped-arguments heuristic cannot tell them apart. */
             // NOLINTNEXTLINE(bugprone-swapped-arguments)

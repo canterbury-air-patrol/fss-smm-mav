@@ -81,6 +81,13 @@ class SMMSearch
     {
         return this->points;
     };
+    /* Single search waypoint by index, so a caller that needs only one point
+     * (e.g. building one mission item) need not copy the whole vector. */
+    auto
+    getPoint (std::size_t index) -> Point
+    {
+        return this->points[index];
+    };
     auto
     getAltitude () -> uint16_t
     {

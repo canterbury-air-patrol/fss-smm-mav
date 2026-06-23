@@ -25,6 +25,14 @@ enum class MissionItemKind
     rtl,
 };
 
+/* Which kind of mission is being uploaded — used instead of a bare bool so the
+ * call sites read as ...::go_to / ...::search rather than true / false. */
+enum class MissionPlanMode
+{
+    search,
+    go_to,
+};
+
 struct MissionItem
 {
     /* Defaults to rtl: a default-constructed item resolves to the safe
@@ -35,9 +43,9 @@ struct MissionItem
 };
 
 inline auto
-mission_item_for (uint16_t seq, std::size_t num_points, bool goto_active) -> MissionItem
+mission_item_for (uint16_t seq, std::size_t num_points, MissionPlanMode mode) -> MissionItem
 {
-    if (goto_active)
+    if (mode == MissionPlanMode::go_to)
     {
         /* seq 0/1 are the goto waypoint; anything past it returns home. */
         if (seq >= 2)
