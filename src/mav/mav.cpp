@@ -96,8 +96,11 @@ MAV::sendADSB (PositionData pd)
                                 0, pd.getFlags (), pd.getSquawk ());
 }
 
-MAV::MAV (std::string t_addr, uint16_t t_port, terminate_action ta, uint16_t t_goto_altitude_m)
-    : connection (std::make_shared<mav_connection> (std::move (t_addr), t_port, t_goto_altitude_m)), action (ta)
+MAV::MAV (std::string t_addr, uint16_t t_port, terminate_action ta, uint16_t t_goto_altitude_m,
+          uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m)
+    : connection (std::make_shared<mav_connection> (std::move (t_addr), t_port, t_goto_altitude_m, t_altitude_floor_m,
+                                                    t_altitude_cap_m)),
+      action (ta)
 {
 }
 

@@ -1,5 +1,6 @@
 #include "internal.hpp"
 #include "mav.hpp"
+#include "smm/search-altitude.hpp"
 #include "util.hpp"
 
 #include <chrono>
@@ -255,9 +256,11 @@ void
 mav_connection::commandAltitude (uint16_t alt)
 {
     mavlink_message_t msg;
-    /* Map feet to meters for MAVLink */
-    constexpr float FEET_TO_METERS = 0.3048f;
-    float alt_m = static_cast<float> (alt) * FEET_TO_METERS;
+    /* alt is feet (the FSS wire unit). Convert to metres and clamp into the
+     * regulatory [floor, cap] range so a direct operator altitude command
+     * cannot fly above the ceiling — or below the floor — that the search and
+     * goto altitudes already honour. */
+    float alt_m = static_cast<float> (clamp_command_altitude (alt, this->altitude_floor_m, this->altitude_cap_m));
 
     /* MAV_CMD_DO_CHANGE_ALTITUDE:
        Param 1: Altitude (float, meters)
@@ -793,8 +796,10 @@ mav_connection::disconnect_from_mav ()
     }
 }
 
-mav_connection::mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m)
-    : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_goto_altitude_m)
+mav_connection::mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m,
+                                uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m)
+    : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_goto_altitude_m),
+      altitude_floor_m (t_altitude_floor_m), altitude_cap_m (t_altitude_cap_m)
 {
 }
 

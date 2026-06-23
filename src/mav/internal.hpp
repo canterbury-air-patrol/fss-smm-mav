@@ -138,6 +138,11 @@ class mav_connection
      * construction and only read on the recv thread when building the goto
      * mission item, so it needs no locking. */
     uint16_t goto_altitude_m;
+    /* Regulatory altitude bounds (metres AGL), supplied from config and used to
+     * clamp a direct FSS altitude command in commandAltitude(). Set once at
+     * construction; read on the command path only, so they need no locking. */
+    uint16_t altitude_floor_m;
+    uint16_t altitude_cap_m;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
     void setFlightMode (uint8_t fmode);
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
@@ -154,7 +159,8 @@ class mav_connection
     void heartbeat_loop ();
 
   public:
-    mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m);
+    mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m, uint16_t t_altitude_floor_m,
+                    uint16_t t_altitude_cap_m);
     ~mav_connection ();
     mav_connection (mav_connection &) = delete;
     mav_connection (mav_connection &&) = delete;
