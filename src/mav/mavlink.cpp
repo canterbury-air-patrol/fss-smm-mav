@@ -671,10 +671,15 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             break;
         case MAVLINK_MSG_ID_STATUSTEXT:
         {
-            std::cout << "Status: ";
-            char text_buf[BUFFER_LEN];
+            /* The STATUSTEXT text field is a fixed 50 bytes and is NOT guaranteed
+             * NUL-terminated on the wire (a full 50-char message has no
+             * terminator). Size the buffer one larger and zero-initialise it so
+             * the trailing byte is always 0; get_text() writes only the 50 field
+             * bytes, leaving that terminator intact. Printing the raw field
+             * directly would over-read past the copied bytes. */
+            char text_buf[MAVLINK_MSG_STATUSTEXT_FIELD_TEXT_LEN + 1] = { 0 };
             mavlink_msg_statustext_get_text (msg, text_buf);
-            std::cout << text_buf << '\n';
+            std::cout << "Status: " << text_buf << '\n';
         }
         break;
         default:
