@@ -30,7 +30,9 @@ struct FmuConfig
      * to derive the flight altitude that yields a desired ground sweep
      * width: width = 2 * altitude * tan(fov / 2). Must be in (0, 180). */
     double camera_fov_deg{ 90.0 };
-    /* Battery percentage at or below which a low-battery RTL is triggered. */
+    /* Battery percentage below which a low-battery RTL is triggered (strict: a
+     * reading equal to the threshold is not low — see the `< lowbat_threshold`
+     * test in main.cpp). */
     int lowbat_threshold{ 20 };
     /* Interval between FSS/MAV reconnection attempts, seconds. */
     int reconnect_interval_s{ 10 };
