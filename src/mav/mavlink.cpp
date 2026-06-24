@@ -683,9 +683,12 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         }
         break;
         default:
-            std::cout << '\n'
-                      << "Received packet: SYS: " << (short)msg->sysid << ", COMP: " << (short)msg->compid
-                      << ", LEN: " << (short)msg->len << ", MSG ID: " << msg->msgid << '\n';
+            /* A genuinely unrecognised message id (everything we expect is
+             * enumerated above). Keep it to a single concise stderr line — the
+             * old multi-field stdout dump fanned out across the operator console
+             * and, for any unexpected high-rate stream, behaved as a firehose. */
+            std::cerr << "WARN: unhandled MAVLink msg id " << msg->msgid << " from sys " << (short)msg->sysid
+                      << " comp " << (short)msg->compid << '\n';
     }
 }
 
