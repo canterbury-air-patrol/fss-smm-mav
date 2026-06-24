@@ -1181,7 +1181,6 @@ const FmuConfig def{};
 
 TEST_CASE ("loadFmuConfig returns defaults when the fmu block is absent", "[config]")
 {
-    const FmuConfig def{};
     FmuConfig cfg = load_config (R"({ "name": "test" })");
     REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
     REQUIRE (cfg.altitude_floor_m == def.altitude_floor_m);
@@ -1221,7 +1220,6 @@ TEST_CASE ("loadFmuConfig reads a custom log_dir and rejects bad ones", "[config
     REQUIRE (cfg.log_dir == "/tmp/cap-fmu-logs");
 
     /* An empty or non-string log_dir keeps the default. */
-    const FmuConfig def{};
     FmuConfig empty = load_config (R"({ "fmu": { "log_dir": "" } })");
     REQUIRE (empty.log_dir == def.log_dir);
     FmuConfig wrong_type = load_config (R"({ "fmu": { "log_dir": 42 } })");
@@ -1266,7 +1264,6 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
 {
     /* FoV outside (0, 180), battery outside [0, 100], interval outside
      * [1, 3600], and an unknown log level each fall back to their default. */
-    const FmuConfig def{};
     FmuConfig cfg = load_config (R"({
         "fmu": {
             "camera_fov_deg": 200.0,
@@ -1283,7 +1280,6 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
 
 TEST_CASE ("loadFmuConfig falls back to defaults on malformed JSON", "[config]")
 {
-    const FmuConfig def{};
     FmuConfig cfg = load_config ("{ this is not valid json ");
     REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
     REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
@@ -1291,7 +1287,6 @@ TEST_CASE ("loadFmuConfig falls back to defaults on malformed JSON", "[config]")
 
 TEST_CASE ("loadFmuConfig falls back to defaults when the file is missing", "[config]")
 {
-    const FmuConfig def{};
     FmuConfig cfg = loadFmuConfig ("/nonexistent/cap-fmu-no-such-config.json");
     REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
     REQUIRE (cfg.log_level == def.log_level);
