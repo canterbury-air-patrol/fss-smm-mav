@@ -37,6 +37,17 @@ PKG_CHECK_MODULES([CATCH2], [catch2-with-main],
     [have_catch2=yes], [have_catch2=no])
 AM_CONDITIONAL([HAVE_CATCH2], [test "x$have_catch2" = "xyes"])
 
+# Dependency headers found via pkg-config are third-party: we cannot fix the
+# warnings they emit, but our build uses -Werror. Re-emit their include paths
+# with -isystem so the compiler treats them as system headers and does not
+# diagnose them. The vendored MAVLink tree is handled the same way, with
+# -isystem, in src/Makefile.am and tests/Makefile.am.
+for _dep in SMM_ASSET FSS_CLIENT_SSL FSS_TRANSPORT JSONCPP CATCH2; do
+  eval "_dep_cflags=\$${_dep}_CFLAGS"
+  _dep_cflags=`echo " $_dep_cflags" | sed 's/ -I/ -isystem /g'`
+  eval "${_dep}_CFLAGS=\$_dep_cflags"
+done
+
 # Output Makefile files.
 AC_CONFIG_FILES([Makefile src/Makefile])
 if test "x$have_catch2" = "xyes"; then

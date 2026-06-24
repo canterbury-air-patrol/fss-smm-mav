@@ -7,6 +7,6 @@ check_PROGRAMS = fmu_test
 TESTS = $(check_PROGRAMS)
 
 fmu_test_SOURCES = fmu_test.cpp $(top_srcdir)/src/fmu.cpp $(top_srcdir)/src/fmu-config.cpp $(top_srcdir)/src/mav/mav-sys.cpp
-fmu_test_CPPFLAGS = -I$(top_srcdir)/src -I$(top_srcdir)/mavlink $(CATCH2_CFLAGS) $(SMM_ASSET_CFLAGS) $(FSS_CLIENT_SSL_CFLAGS) $(JSONCPP_CFLAGS)
+fmu_test_CPPFLAGS = -I$(top_srcdir)/src -isystem $(top_srcdir)/mavlink $(CATCH2_CFLAGS) $(SMM_ASSET_CFLAGS) $(FSS_CLIENT_SSL_CFLAGS) $(JSONCPP_CFLAGS)
 fmu_test_CXXFLAGS = $(AM_CXXFLAGS)
 fmu_test_LDADD = $(CATCH2_LIBS) $(JSONCPP_LIBS)
