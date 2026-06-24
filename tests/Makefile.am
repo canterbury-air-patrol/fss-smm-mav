@@ -4,7 +4,8 @@ AM_CXXFLAGS = -pthread -Wno-address-of-packed-member
 AM_CXXFLAGS += -Wall -Wextra -Werror -Wshadow -Wnon-virtual-dtor -Wduplicated-cond -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
 AM_CXXFLAGS += $(SANITIZER_FLAGS)
 
-AM_LDFLAGS = $(SANITIZER_FLAGS)
+AM_LDFLAGS =
+AM_LDFLAGS += $(SANITIZER_FLAGS)
 
 check_PROGRAMS = fmu_test
 TESTS = $(check_PROGRAMS)
