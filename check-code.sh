@@ -40,5 +40,10 @@ if [ ! -f compile_commands.json ]; then
 	echo "check-code.sh: compile_commands.json not found; build with 'bear -- make' first" >&2
 	exit 1
 fi
-run-clang-tidy -p . 'src/.*\.cpp$' 2>&1 | tee clang-tidy.log
+# The compile database is captured from g++ and carries GCC-only warning flags
+# (-Wlogical-op, -Wduplicated-cond). clang-tidy uses the clang front end, which
+# does not know them; with -Werror also recorded it would turn the resulting
+# -Wunknown-warning-option into a hard error and abort before running a single
+# check. Disable just that diagnostic so clang-tidy's own checks still run.
+run-clang-tidy -p . -extra-arg=-Wno-unknown-warning-option 'src/.*\.cpp$' 2>&1 | tee clang-tidy.log
 ! grep -Eq ':[0-9]+:[0-9]+: (warning|error):' clang-tidy.log
