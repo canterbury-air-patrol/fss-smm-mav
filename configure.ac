@@ -48,6 +48,37 @@ for _dep in SMM_ASSET FSS_CLIENT_SSL FSS_TRANSPORT JSONCPP CATCH2; do
   eval "${_dep}_CFLAGS=\$_dep_cflags"
 done
 
+# Optional sanitizers, off by default and intended for CI and local debugging.
+# AddressSanitizer (ASan) and ThreadSanitizer (TSan) instrument memory the same
+# way and cannot be combined; UndefinedBehaviorSanitizer (UBSan) layers on top
+# of either. The collected flags are exported as SANITIZER_FLAGS and applied to
+# both compilation and linking in the Makefiles.
+AC_ARG_ENABLE([asan],
+    [AS_HELP_STRING([--enable-asan], [build with AddressSanitizer])],
+    [enable_asan=$enableval], [enable_asan=no])
+AC_ARG_ENABLE([ubsan],
+    [AS_HELP_STRING([--enable-ubsan], [build with UndefinedBehaviorSanitizer])],
+    [enable_ubsan=$enableval], [enable_ubsan=no])
+AC_ARG_ENABLE([tsan],
+    [AS_HELP_STRING([--enable-tsan], [build with ThreadSanitizer])],
+    [enable_tsan=$enableval], [enable_tsan=no])
+
+AS_IF([test "x$enable_asan" = "xyes" && test "x$enable_tsan" = "xyes"],
+    [AC_MSG_ERROR([--enable-asan and --enable-tsan cannot be used together])])
+
+SANITIZER_FLAGS=
+AS_IF([test "x$enable_asan" = "xyes"],
+    [SANITIZER_FLAGS="$SANITIZER_FLAGS -fsanitize=address"])
+AS_IF([test "x$enable_tsan" = "xyes"],
+    [SANITIZER_FLAGS="$SANITIZER_FLAGS -fsanitize=thread"])
+# Make UBSan abort (and so fail CI) instead of just logging and continuing.
+AS_IF([test "x$enable_ubsan" = "xyes"],
+    [SANITIZER_FLAGS="$SANITIZER_FLAGS -fsanitize=undefined -fno-sanitize-recover=all"])
+# Keep frame pointers and debug info so sanitizer reports carry usable traces.
+AS_IF([test -n "$SANITIZER_FLAGS"],
+    [SANITIZER_FLAGS="$SANITIZER_FLAGS -fno-omit-frame-pointer -g"])
+AC_SUBST([SANITIZER_FLAGS])
+
 # Output Makefile files.
 AC_CONFIG_FILES([Makefile src/Makefile])
 if test "x$have_catch2" = "xyes"; then
