@@ -9,7 +9,8 @@ AM_CXXFLAGS+= -Wall -Wextra -Werror -Wshadow -Wnon-virtual-dtor -Wduplicated-con
 AM_CXXFLAGS+= -isystem ../mavlink
 AM_CXXFLAGS+= $(SANITIZER_FLAGS)
 
-AM_LDFLAGS = $(SANITIZER_FLAGS)
+AM_LDFLAGS=
+AM_LDFLAGS+= $(SANITIZER_FLAGS)
 
 cap_fmu_SOURCES = main.cpp fmu.cpp fmu.hpp fmu-types.hpp event.hpp aircraft.hpp logger.cpp logger.hpp fmu-config.cpp fmu-config.hpp
 cap_fmu_SOURCES += fss/fss.cpp fss/fmu-fss.hpp fss/fmu-fss-types.hpp fss/fss-client-ssl.cpp fss/internal.hpp
