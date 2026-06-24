@@ -25,7 +25,7 @@ jobs:
       run: |
         apt-get update
         apt-get install -y lsb-release ca-certificates curl gnupg
-        echo "deb http://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+        echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
           > /etc/apt/sources.list.d/cap.list
         curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
           | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
@@ -123,7 +123,7 @@ jobs:
       run: |
         apt-get update
         apt-get install -y lsb-release ca-certificates curl gnupg
-        echo "deb http://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+        echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
           > /etc/apt/sources.list.d/cap.list
         curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
           | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
