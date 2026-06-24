@@ -480,8 +480,16 @@ mav_connection::loadSearch ()
         this->goto_active = false;
         this->search_loaded = false;
         this->search_loading = true;
-        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1,
-                                        mission_count_for (this->search->getPoints ().size (), MissionPlanMode::search),
+        std::size_t count = mission_count_for (this->search->getPoints ().size (), MissionPlanMode::search);
+        /* MISSION_COUNT is a 16-bit field. A real search has a handful of
+         * waypoints so this never trips, but log if it ever does rather than
+         * silently uploading a truncated mission with no idea why. */
+        if (count > UINT16_MAX)
+        {
+            std::cerr << "WARN: search has " << this->search->getPoints ().size () << " waypoints; mission count "
+                      << count << " exceeds the 16-bit MAVLink field and will be truncated\n";
+        }
+        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1, static_cast<uint16_t> (count),
                                         MAV_MISSION_TYPE_MISSION, 0);
     }
     this->sendMavLinkMsg (&msg);
