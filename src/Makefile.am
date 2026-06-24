@@ -5,7 +5,7 @@ bin_PROGRAMS = cap-fmu
 
 AM_CXXFLAGS=
 AM_CXXFLAGS+= -pthread -Wno-address-of-packed-member
-AM_CXXFLAGS+= -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wduplicated-cond -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
+AM_CXXFLAGS+= -Wall -Wextra -Werror -Wshadow -Wnon-virtual-dtor -Wduplicated-cond -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
 AM_CXXFLAGS+= -I ../mavlink
 
 cap_fmu_SOURCES = main.cpp fmu.cpp fmu.hpp fmu-types.hpp event.hpp aircraft.hpp logger.cpp logger.hpp fmu-config.cpp fmu-config.hpp

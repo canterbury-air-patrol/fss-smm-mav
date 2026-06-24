@@ -1,7 +1,7 @@
 AUTOMAKE_OPTIONS = subdir-objects
 
 AM_CXXFLAGS = -pthread -Wno-address-of-packed-member
-AM_CXXFLAGS += -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wduplicated-cond -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
+AM_CXXFLAGS += -Wall -Wextra -Werror -Wshadow -Wnon-virtual-dtor -Wduplicated-cond -Wmisleading-indentation -Wlogical-op -Wformat=2 -Weffc++
 
 check_PROGRAMS = fmu_test
 TESTS = $(check_PROGRAMS)
