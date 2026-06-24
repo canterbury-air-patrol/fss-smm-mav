@@ -605,8 +605,8 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_MISSION_REQUEST_INT:
         {
-            if (mavlink_msg_mission_request_get_target_system (msg) == SYS_ID
-                && mavlink_msg_mission_request_get_target_component (msg) == COMP_ID)
+            if (mavlink_msg_mission_request_int_get_target_system (msg) == SYS_ID
+                && mavlink_msg_mission_request_int_get_target_component (msg) == COMP_ID)
             {
                 /* Getting asked for a specific point in mission */
                 uint16_t seq = mavlink_msg_mission_request_int_get_seq (msg);
