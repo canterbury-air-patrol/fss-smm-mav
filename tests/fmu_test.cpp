@@ -6,15 +6,18 @@
 #include "fmu.hpp"
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
+#include "mav/internal.hpp"
 #include "mav/mission-plan.hpp"
 #include "smm/search-acquire.hpp"
 #include "smm/search-altitude.hpp"
 
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <unistd.h>
 #include <vector>
@@ -978,6 +981,111 @@ TEST_CASE ("mission_count_for and mission_item_for agree on the RTL terminator",
                      != MissionItemKind::rtl);
         }
     }
+}
+
+TEST_CASE ("mav_systems creates a system once and finds it again", "[mav_sys]")
+{
+    mav_systems systems;
+
+    /* The command paths must not conjure a system: before the recv thread has
+     * seen a heartbeat for an id, the non-mutating lookup reports it absent. */
+    REQUIRE (systems.findExistingSystem (1) == nullptr);
+
+    /* findSystem is the recv-thread find-or-create; the first call makes it. */
+    auto first = systems.findSystem (1);
+    REQUIRE (first != nullptr);
+    REQUIRE (first->getSysId () == 1);
+
+    /* A second find-or-create for the same id returns the same object, not a
+     * duplicate, so metadata written via one handle is visible through any. */
+    REQUIRE (systems.findSystem (1) == first);
+
+    /* And the command-path lookup now resolves to that same system. */
+    REQUIRE (systems.findExistingSystem (1) == first);
+
+    /* Distinct ids are distinct systems. */
+    auto second = systems.findSystem (2);
+    REQUIRE (second != first);
+    REQUIRE (systems.findExistingSystem (2) == second);
+}
+
+TEST_CASE ("mav_sys metadata defaults to unknown and reflects updates", "[mav_sys]")
+{
+    /* A freshly created system has no heartbeat yet: the autopilot type reads
+     * back as 0 (unknown), which is what makes the command paths fail safely
+     * and no-op rather than command a wrong mode while the type is unknown. */
+    mav_sys sys (7);
+    REQUIRE (sys.getAutoPilotType () == 0);
+    REQUIRE (sys.getFlightMode () == 0);
+    REQUIRE_FALSE (sys.isSetup ());
+
+    /* Once the heartbeat populates the metadata, the getters reflect it. */
+    sys.setAutoPilotMode (MAV_TYPE_FIXED_WING);
+    sys.setFlightMode (PLANE_MODE_RTL);
+    sys.setupComplete ();
+    REQUIRE (sys.getAutoPilotType () == MAV_TYPE_FIXED_WING);
+    REQUIRE (sys.getFlightMode () == PLANE_MODE_RTL);
+    REQUIRE (sys.isSetup ());
+}
+
+TEST_CASE ("mav_systems metadata access is race-free across recv and command threads", "[mav_sys][concurrency]")
+{
+    /* Regression guard for todo/25: the recv thread grows the systems list and
+     * writes per-system metadata while the command threads read it. This drives
+     * those paths concurrently so a reintroduced unsynchronised list mutation
+     * or non-atomic scalar shows up as a crash here, and as a reported race
+     * under -fsanitize=thread. */
+    mav_systems systems;
+    constexpr int iterations = 2000;
+    std::atomic<bool> go{ false };
+
+    /* Recv-thread role: find-or-create across the full id space (growing the
+     * list) and keep rewriting system 1's metadata. */
+    std::thread writer (
+        [&] ()
+        {
+            while (!go.load ())
+            {
+            }
+            for (int i = 0; i < iterations; i++)
+            {
+                systems.findSystem (static_cast<uint8_t> (i % 250 + 1));
+                auto sys = systems.findSystem (1);
+                sys->setAutoPilotMode (MAV_TYPE_FIXED_WING);
+                sys->setFlightMode (PLANE_MODE_RTL);
+            }
+        });
+
+    /* Command-thread role: non-mutating lookups plus metadata reads, exactly as
+     * commandRTL/Hold/Manual/Auto do. */
+    auto reader = [&] ()
+    {
+        while (!go.load ())
+        {
+        }
+        for (int i = 0; i < iterations; i++)
+        {
+            auto sys = systems.findExistingSystem (1);
+            if (sys != nullptr)
+            {
+                (void)sys->getAutoPilotType ();
+                (void)sys->getFlightMode ();
+            }
+            (void)systems.findExistingSystem (static_cast<uint8_t> (i % 250 + 1));
+        }
+    };
+    std::thread reader_one (reader);
+    std::thread reader_two (reader);
+
+    go.store (true);
+    writer.join ();
+    reader_one.join ();
+    reader_two.join ();
+
+    /* The writer always ends having created system 1 with a known type. */
+    auto sys = systems.findExistingSystem (1);
+    REQUIRE (sys != nullptr);
+    REQUIRE (sys->getAutoPilotType () == MAV_TYPE_FIXED_WING);
 }
 
 TEST_CASE ("search_acquire_action never fetches without an asset", "[smm][acquire]")
