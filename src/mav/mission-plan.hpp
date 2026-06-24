@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 /* Pure mapping of a requested mission sequence number to the kind of mission
  * item the FMU should send for it, factored out of send_waypoint() so the
@@ -75,11 +76,17 @@ mission_item_for (uint16_t seq, std::size_t num_points, MissionPlanMode mode) ->
 inline auto
 mission_count_for (std::size_t num_points, MissionPlanMode mode) -> std::size_t
 {
-    if (mode == MissionPlanMode::go_to)
+    switch (mode)
     {
-        /* seq 0/1 goto waypoint + seq 2 RTL terminator. */
-        return 3;
+        case MissionPlanMode::go_to:
+            /* seq 0/1 goto waypoint + seq 2 RTL terminator. */
+            return 3;
+        case MissionPlanMode::search:
+            /* seq 0/1 setup/takeoff + the N search waypoints + one RTL terminator. */
+            return num_points + 3;
     }
-    /* seq 0/1 setup/takeoff + the N search waypoints + one RTL terminator. */
-    return num_points + 3;
+    /* Unreachable: every MissionPlanMode is handled above, and the switch has no
+     * default so -Wswitch flags any new mode at compile time. Fail loudly rather
+     * than silently miscounting a mission if one is ever reached at runtime. */
+    std::abort ();
 }
