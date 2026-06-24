@@ -98,7 +98,7 @@ jobs:
       env:
         # Make any finding abort the run so the job fails loudly.
         ASAN_OPTIONS: abort_on_error=1
-        UBSAN_OPTIONS: print_stacktrace=1
+        UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         TSAN_OPTIONS: halt_on_error=1
       run: |
         autoreconf -fi
