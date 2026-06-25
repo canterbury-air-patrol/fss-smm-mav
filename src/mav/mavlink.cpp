@@ -93,23 +93,10 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, uint32_
 }
 
 void
-mav_connection::warnUnresolvedMode (const char *command)
+mav_connection::warnUnresolvedMode (MavModeCommand command)
 {
-    std::cerr << "WARN: " << command
-              << " command received before the autopilot type is known (no heartbeat yet); ignoring\n";
-}
-
-void
-mav_connection::setSearchExitMode (std::optional<uint8_t> fmode, const char *command)
-{
-    if (!fmode.has_value ())
-    {
-        warnUnresolvedMode (command);
-        return;
-    }
-    this->setFlightMode (*fmode);
-    std::lock_guard<std::mutex> lk{ this->state_lock };
-    this->search_loaded = false;
+    std::cerr << "WARN: " << mav_mode_command_name (command)
+              << " command received before the autopilot type is known (no heartbeat yet); deferring\n";
 }
 
 void
@@ -125,32 +112,63 @@ mav_connection::setFlightMode (uint8_t fmode)
 }
 
 void
+mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loaded)
+{
+    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
+    std::optional<uint8_t> fmode = resolve_mav_mode (sys != nullptr ? sys->getAutoPilotType () : 0, command);
+    if (!fmode.has_value ())
+    {
+        {
+            std::lock_guard<std::mutex> lk{ this->state_lock };
+            this->pending_mode_command = command;
+        }
+        warnUnresolvedMode (command);
+        return;
+    }
+    this->setFlightMode (*fmode);
+    std::lock_guard<std::mutex> lk{ this->state_lock };
+    this->pending_mode_command.reset ();
+    if (clear_search_loaded)
+    {
+        this->search_loaded = false;
+    }
+}
+
+void
+mav_connection::replayPendingMode (uint8_t autopilot_type)
+{
+    std::optional<MavModeCommand> command;
+    {
+        std::lock_guard<std::mutex> lk{ this->state_lock };
+        command = this->pending_mode_command;
+    }
+    if (!command.has_value ())
+    {
+        return;
+    }
+    std::optional<uint8_t> fmode = resolve_mav_mode (autopilot_type, *command);
+    if (!fmode.has_value ())
+    {
+        return;
+    }
+    this->setFlightMode (*fmode);
+    {
+        std::lock_guard<std::mutex> lk{ this->state_lock };
+        if (this->pending_mode_command == command)
+        {
+            this->pending_mode_command.reset ();
+        }
+        if (*command != MavModeCommand::auto_mode)
+        {
+            this->search_loaded = false;
+        }
+    }
+}
+
+void
 mav_connection::commandRTL ()
 {
-    /* Map type to RTL mode */
-    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    std::optional<uint8_t> fmode;
-    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
-    {
-        case MAV_TYPE_FIXED_WING:
-            fmode = PLANE_MODE_RTL;
-            break;
-        case MAV_TYPE_QUADROTOR:
-        case MAV_TYPE_COAXIAL:
-        case MAV_TYPE_HELICOPTER:
-        case MAV_TYPE_HEXAROTOR:
-        case MAV_TYPE_OCTOROTOR:
-        case MAV_TYPE_TRICOPTER:
-            fmode = COPTER_MODE_RTL;
-            break;
-        case MAV_TYPE_GROUND_ROVER:
-            fmode = ROVER_MODE_RTL;
-            break;
-        default:
-            /* Autopilot type not yet known: leave fmode unresolved. */
-            break;
-    }
-    this->setSearchExitMode (fmode, "RTL");
+    this->setResolvedMode (MavModeCommand::rtl, true);
 }
 
 void
@@ -185,99 +203,19 @@ mav_connection::commandGoto (Point p)
 void
 mav_connection::commandManual ()
 {
-    /* Map type to RTL mode */
-    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    std::optional<uint8_t> fmode;
-    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
-    {
-        case MAV_TYPE_FIXED_WING:
-            fmode = PLANE_MODE_FLY_BY_WIRE_B;
-            break;
-        case MAV_TYPE_QUADROTOR:
-        case MAV_TYPE_COAXIAL:
-        case MAV_TYPE_HELICOPTER:
-        case MAV_TYPE_HEXAROTOR:
-        case MAV_TYPE_OCTOROTOR:
-        case MAV_TYPE_TRICOPTER:
-            /* COPTER_MODE_STABILIZE is 0 — a valid mode, hence the optional. */
-            fmode = COPTER_MODE_STABILIZE;
-            break;
-        case MAV_TYPE_GROUND_ROVER:
-            /* ROVER_MODE_MANUAL is also 0. */
-            fmode = ROVER_MODE_MANUAL;
-            break;
-        default:
-            /* Autopilot type not yet known: leave fmode unresolved. */
-            break;
-    }
-    this->setSearchExitMode (fmode, "manual");
+    this->setResolvedMode (MavModeCommand::manual, true);
 }
 
 void
 mav_connection::commandHold ()
 {
-    /* Map type to LOITER/HOLD mode */
-    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    std::optional<uint8_t> fmode;
-    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
-    {
-        case MAV_TYPE_FIXED_WING:
-            fmode = PLANE_MODE_LOITER;
-            break;
-        case MAV_TYPE_QUADROTOR:
-        case MAV_TYPE_COAXIAL:
-        case MAV_TYPE_HELICOPTER:
-        case MAV_TYPE_HEXAROTOR:
-        case MAV_TYPE_OCTOROTOR:
-        case MAV_TYPE_TRICOPTER:
-            fmode = COPTER_MODE_POSHOLD;
-            break;
-        case MAV_TYPE_GROUND_ROVER:
-            fmode = ROVER_MODE_HOLD;
-            break;
-        default:
-            /* Autopilot type not yet known: leave fmode unresolved. */
-            break;
-    }
-    this->setSearchExitMode (fmode, "hold");
+    this->setResolvedMode (MavModeCommand::hold, true);
 }
 
 void
 mav_connection::commandAuto ()
 {
-    /* Map type to AUTO mode */
-    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
-    std::optional<uint8_t> fmode;
-    switch (sys != nullptr ? sys->getAutoPilotType () : 0)
-    {
-        case MAV_TYPE_FIXED_WING:
-            fmode = PLANE_MODE_AUTO;
-            break;
-        case MAV_TYPE_QUADROTOR:
-        case MAV_TYPE_COAXIAL:
-        case MAV_TYPE_HELICOPTER:
-        case MAV_TYPE_HEXAROTOR:
-        case MAV_TYPE_OCTOROTOR:
-        case MAV_TYPE_TRICOPTER:
-            fmode = COPTER_MODE_AUTO;
-            break;
-        case MAV_TYPE_GROUND_ROVER:
-            fmode = ROVER_MODE_AUTO;
-            break;
-        default:
-            /* Autopilot type not yet known: leave fmode unresolved. */
-            break;
-    }
-    /* Auto must not clear search_loaded (it enters the loaded search), so it
-     * does not use setSearchExitMode — but it shares the same warning wording. */
-    if (fmode.has_value ())
-    {
-        this->setFlightMode (*fmode);
-    }
-    else
-    {
-        warnUnresolvedMode ("auto");
-    }
+    this->setResolvedMode (MavModeCommand::auto_mode, false);
 }
 
 void
@@ -559,8 +497,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
              * the link "up" (and the resulting comms-status report) is decided by
              * heartbeat_loop(), the single owner of the comms status. */
             this->last_heartbeat_ts.store (current_timestamp_ms ());
-            sys->setAutoPilotMode (mavlink_msg_heartbeat_get_type (msg));
+            uint8_t autopilot_type = mavlink_msg_heartbeat_get_type (msg);
+            sys->setAutoPilotMode (autopilot_type);
             sys->setFlightMode (mavlink_msg_heartbeat_get_custom_mode (msg));
+            this->replayPendingMode (autopilot_type);
         }
         break;
         case MAVLINK_MSG_ID_GLOBAL_POSITION_INT:

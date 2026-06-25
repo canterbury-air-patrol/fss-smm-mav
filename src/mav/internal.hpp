@@ -11,6 +11,7 @@
 #include "../fmu-types.hpp"
 #include "../smm/smm.hpp"
 #include "../util.hpp"
+#include "mode-resolve.hpp"
 
 class mav_comp
 {
@@ -138,6 +139,7 @@ class mav_connection
     bool search_loaded{ false };
     Point goto_position{};
     bool goto_active{ false };
+    std::optional<MavModeCommand> pending_mode_command{};
     /* Altitude (metres AGL, relative to home) a goto waypoint is flown at;
      * supplied from config, already clamped to [floor, cap]. Set once at
      * construction and only read on the recv thread when building the goto
@@ -158,11 +160,12 @@ class mav_connection
      * command. The mode is carried as an optional, not a 0 sentinel, because 0
      * is itself a valid mode (e.g. COPTER_MODE_STABILIZE, ROVER_MODE_MANUAL).
      * `command` names the command for the log. */
-    void setSearchExitMode (std::optional<uint8_t> fmode, const char *command);
+    void setResolvedMode (MavModeCommand command, bool clear_search_loaded);
+    void replayPendingMode (uint8_t autopilot_type);
     /* Log that `command` arrived before the autopilot type was known, so the
      * airframe-specific flight mode could not be resolved. Shared by every
      * command path so the wording stays identical. */
-    static void warnUnresolvedMode (const char *command);
+    static void warnUnresolvedMode (MavModeCommand command);
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     void connect_to_mav ();
     void disconnect_from_mav ();
