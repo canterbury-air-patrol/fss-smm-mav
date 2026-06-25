@@ -9,6 +9,7 @@
 #include "mav/internal.hpp"
 #include "mav/mav-comms.hpp"
 #include "mav/mission-plan.hpp"
+#include "mav/mode-resolve.hpp"
 #include "smm/search-acquire.hpp"
 #include "smm/search-altitude.hpp"
 
@@ -907,6 +908,27 @@ TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor,
 
     /* Exactly at the cap in feet: 400 ft == 121.92 m, within (122) -> 121. */
     REQUIRE (clamp_command_altitude (400, floor, cap) == 121);
+}
+
+TEST_CASE ("resolve_mav_mode returns no mode until the autopilot type is known", "[mav]")
+{
+    REQUIRE (!resolve_mav_mode (0, MavModeCommand::rtl).has_value ());
+    REQUIRE (!resolve_mav_mode (0, MavModeCommand::manual).has_value ());
+    REQUIRE (!resolve_mav_mode (0, MavModeCommand::hold).has_value ());
+    REQUIRE (!resolve_mav_mode (0, MavModeCommand::auto_mode).has_value ());
+}
+
+TEST_CASE ("resolve_mav_mode treats zero-valued manual modes as valid", "[mav]")
+{
+    REQUIRE (resolve_mav_mode (MAV_TYPE_QUADROTOR, MavModeCommand::manual) == COPTER_MODE_STABILIZE);
+    REQUIRE (resolve_mav_mode (MAV_TYPE_GROUND_ROVER, MavModeCommand::manual) == ROVER_MODE_MANUAL);
+}
+
+TEST_CASE ("resolve_mav_mode maps supported airframes to command modes", "[mav]")
+{
+    REQUIRE (resolve_mav_mode (MAV_TYPE_FIXED_WING, MavModeCommand::rtl) == PLANE_MODE_RTL);
+    REQUIRE (resolve_mav_mode (MAV_TYPE_QUADROTOR, MavModeCommand::hold) == COPTER_MODE_POSHOLD);
+    REQUIRE (resolve_mav_mode (MAV_TYPE_GROUND_ROVER, MavModeCommand::auto_mode) == ROVER_MODE_AUTO);
 }
 
 TEST_CASE ("mission_item_for lays out a goto mission", "[mission]")
