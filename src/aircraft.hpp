@@ -6,6 +6,29 @@
 #include <memory>
 #include <mutex>
 
+/* Aircraft that report no ICAO address are handed a synthetic one from the
+ * "Unallocated" range starting at 0x1000. */
+inline constexpr uint32_t first_icao_address_for_unknown_aircraft = 0x1000;
+/* Top of the 24-bit ICAO address space. Synthetic allocation wraps back to the
+ * start of the range here rather than running past 24 bits — the on-the-wire
+ * ICAO field is only 24 bits, so a larger value could not be represented. */
+inline constexpr uint32_t last_icao_address_for_unknown_aircraft = 0xFFFFFF;
+
+/* Next synthetic ICAO address after `current`, wrapping to the start of the
+ * range at the 24-bit ceiling. A single mission never approaches 16 million
+ * distinct callsigns, so the wrap is a defensive guard against an unbounded
+ * counter rather than an expected path. Pure and free of the map/mutex state so
+ * the wrap can be unit tested directly. */
+inline auto
+next_synthetic_icao (uint32_t current) -> uint32_t
+{
+    if (current >= last_icao_address_for_unknown_aircraft)
+    {
+        return first_icao_address_for_unknown_aircraft;
+    }
+    return current + 1;
+}
+
 class aircraft_details
 {
   private:
@@ -35,10 +58,6 @@ class aircraft_details
 
 class known_aircraft
 {
-  public:
-    /* Warning: This is part of an "Unallocated" range of ICAO callsigns */
-    static constexpr uint32_t first_icao_address_for_unknown_aircraft = 0x1000;
-
   private:
     std::mutex lock{};
     uint32_t lastAllocatedICAO{ first_icao_address_for_unknown_aircraft };
@@ -53,7 +72,8 @@ class known_aircraft
         }
         if (t_icao_address == 0)
         {
-            t_icao_address = ++this->lastAllocatedICAO;
+            this->lastAllocatedICAO = next_synthetic_icao (this->lastAllocatedICAO);
+            t_icao_address = this->lastAllocatedICAO;
         }
         std::cout << "Aircraft: Creating new aircraft with callsign " << t_call_sign << " ICAO: " << t_icao_address
                   << std::endl;
