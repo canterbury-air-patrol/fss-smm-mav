@@ -119,7 +119,11 @@ class mav_connection
     std::mutex heartbeat_mutex{};
     std::condition_variable heartbeat_cv{};
     std::atomic<uint64_t> last_heartbeat_ts{ 0 };
-    std::atomic<bool> mav_comms_ok{ false };
+    /* Last *reported* MAV comms status, owned solely by heartbeat_loop(). Starts
+     * "up" to match the state machine's optimistic default, so the first observed
+     * down state (no link/heartbeat at cold start) edge-triggers a failure report
+     * that corrects it, rather than the link being silently assumed healthy. */
+    std::atomic<bool> mav_comms_ok{ true };
     notify_mav_comms_cb mav_comms_cb{};
     mav_systems systems{};
     /* state_lock guards: last_position, search, search_loaded,

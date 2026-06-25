@@ -1,4 +1,5 @@
 #include "internal.hpp"
+#include "mav-comms.hpp"
 #include "mav.hpp"
 #include "mission-plan.hpp"
 #include "smm/search-altitude.hpp"
@@ -46,20 +47,31 @@ mav_connection::heartbeat_loop ()
     constexpr uint64_t heartbeat_timeout_ms = 5000;
     while (!this->stopping)
     {
-        if (this->fd.load () != -1)
+        bool fd_open = this->fd.load () != -1;
+        if (fd_open)
         {
             this->sendHeartBeat ();
-            uint64_t ts = this->last_heartbeat_ts.load ();
-            bool timed_out = (current_timestamp_ms () - ts) > heartbeat_timeout_ms;
-            if (timed_out)
+        }
+        /* This loop is the single authority for the MAV comms status: it edge-
+         * triggers the callback on every up<->down change. mav_comms_ok holds the
+         * last reported state, initialised to "up" to match the state machine's
+         * optimistic default, so the first down observation (no link / no
+         * heartbeat yet at cold start) reports a failure and corrects it. A real
+         * heartbeat then reports the link back up. Keeping the report in one place
+         * also means the callback is only ever invoked from this thread. */
+        bool up
+            = mav_comms_is_up (fd_open, current_timestamp_ms (), this->last_heartbeat_ts.load (), heartbeat_timeout_ms);
+        if (up != this->mav_comms_ok.load ())
+        {
+            this->mav_comms_ok.store (up);
+            if (!up)
             {
-                bool expected = true;
-                if (this->mav_comms_ok.compare_exchange_strong (expected, false))
-                {
-                    std::cerr << "WARN: Autopilot heartbeat timeout — MAV comms failure\n";
-                    if (this->mav_comms_cb)
-                        this->mav_comms_cb (MavCommsStatus::failure);
-                }
+                std::cerr << "WARN: Autopilot link down (" << (fd_open ? "no heartbeat" : "no link")
+                          << ") — MAV comms failure\n";
+            }
+            if (this->mav_comms_cb)
+            {
+                this->mav_comms_cb (up ? MavCommsStatus::ok : MavCommsStatus::failure);
             }
         }
         std::unique_lock<std::mutex> lk (this->heartbeat_mutex);
@@ -543,13 +555,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
     {
         case MAVLINK_MSG_ID_HEARTBEAT:
         {
+            /* Just record receipt and the autopilot metadata. Whether this makes
+             * the link "up" (and the resulting comms-status report) is decided by
+             * heartbeat_loop(), the single owner of the comms status. */
             this->last_heartbeat_ts.store (current_timestamp_ms ());
-            bool expected = false;
-            if (this->mav_comms_ok.compare_exchange_strong (expected, true))
-            {
-                if (this->mav_comms_cb)
-                    this->mav_comms_cb (MavCommsStatus::ok);
-            }
             sys->setAutoPilotMode (mavlink_msg_heartbeat_get_type (msg));
             sys->setFlightMode (mavlink_msg_heartbeat_get_custom_mode (msg));
         }
@@ -801,8 +810,10 @@ mav_connection::connect_to_mav ()
         this->retry_count = 0;
     }
     this->broken = false;
-    this->last_heartbeat_ts.store (current_timestamp_ms ());
-    this->mav_comms_ok.store (false);
+    /* Deliberately do NOT seed last_heartbeat_ts here: a freshly (re)connected
+     * socket has not yet produced a heartbeat, so the link stays "down" until the
+     * autopilot is actually heard from. heartbeat_loop() owns mav_comms_ok and
+     * reports the link up only once a real heartbeat lands. */
 
     this->recv_thread = std::thread (recv_mav_thread, this);
 }
