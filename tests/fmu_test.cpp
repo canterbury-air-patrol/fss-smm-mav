@@ -1113,7 +1113,7 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
     std::string callsign = "TEST123";
 
     uint32_t icao1 = ka.getAircraftICAOAddress (callsign);
-    REQUIRE (icao1 >= known_aircraft::first_icao_address_for_unknown_aircraft);
+    REQUIRE (icao1 >= first_icao_address_for_unknown_aircraft);
 
     uint32_t icao2 = ka.getAircraftICAOAddress (callsign);
     REQUIRE (icao1 == icao2);
@@ -1124,6 +1124,23 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
 
     uint32_t icao3 = ka.getAircraftICAOAddress (callsign);
     REQUIRE (icao1 == icao3);
+}
+
+TEST_CASE ("next_synthetic_icao advances and wraps at the 24-bit ceiling", "[aircraft]")
+{
+    /* Normal case: advance by one within the range. */
+    REQUIRE (next_synthetic_icao (first_icao_address_for_unknown_aircraft)
+             == first_icao_address_for_unknown_aircraft + 1);
+    REQUIRE (next_synthetic_icao (0x1234) == 0x1235);
+
+    /* At (or above) the 24-bit ceiling, wrap back to the start of the range
+     * rather than emitting a value that does not fit the 24-bit wire field. */
+    REQUIRE (next_synthetic_icao (last_icao_address_for_unknown_aircraft) == first_icao_address_for_unknown_aircraft);
+    REQUIRE (next_synthetic_icao (last_icao_address_for_unknown_aircraft - 1)
+             == last_icao_address_for_unknown_aircraft);
+
+    /* Every produced address stays inside the valid 24-bit range. */
+    REQUIRE (next_synthetic_icao (last_icao_address_for_unknown_aircraft) <= last_icao_address_for_unknown_aircraft);
 }
 
 /* loadFmuConfig reads a file path, so the tests write JSON to a temp file. This
