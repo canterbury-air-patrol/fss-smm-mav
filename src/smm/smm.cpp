@@ -2,6 +2,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "connection-state.hpp"
 #include "search-acquire.hpp"
 #include "search-altitude.hpp"
 #include "smm.hpp"
@@ -44,13 +45,18 @@ SMM::connect ()
     std::string user_cstr (this->smm_user.data (), this->smm_user.size ());
     std::string pass_cstr (this->smm_pass.data (), this->smm_pass.size ());
     this->conn = smm_asset_connect (this->smm_host.c_str (), user_cstr.c_str (), pass_cstr.c_str ());
+    if (this->conn == nullptr)
+    {
+        std::cout << "SMM: Connection failed (no connection)" << '\n';
+        return;
+    }
 
     /* smm_asset_connect() only validates the host; the library authenticates
      * lazily on the first request and reports SMM_CONNECTION_NEW until then.
      * Log in eagerly so the state check below reflects the real outcome. */
     smm_asset_connection_login (this->conn);
 
-    if (smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
+    if (!smm_connection_is_connected (this->conn))
     {
         /* Oh dear */
         std::cout << "SMM: Connection failed (" << smm_asset_connection_get_state (this->conn) << ")" << '\n';
