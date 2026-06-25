@@ -10,6 +10,7 @@
 #include "mav/mav-comms.hpp"
 #include "mav/mission-plan.hpp"
 #include "mav/mode-resolve.hpp"
+#include "smm/connection-state.hpp"
 #include "smm/search-acquire.hpp"
 #include "smm/search-altitude.hpp"
 
@@ -1128,6 +1129,11 @@ TEST_CASE ("search_acquire_action never fetches without an asset", "[smm][acquir
     /* Timer elapsed and asset present: safe to fetch. */
     REQUIRE (search_acquire_action (true, now, now) == SearchAcquireAction::fetch);
     REQUIRE (search_acquire_action (true, 0, now) == SearchAcquireAction::fetch);
+}
+
+TEST_CASE ("smm_connection_is_connected rejects null before asking the C library for state", "[smm]")
+{
+    REQUIRE (!smm_connection_is_connected (nullptr));
 }
 
 TEST_CASE ("mav_comms_is_up requires an open socket and a recent heartbeat", "[mav][comms]")
