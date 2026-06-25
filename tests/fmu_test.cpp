@@ -7,6 +7,7 @@
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
 #include "mav/internal.hpp"
+#include "mav/mav-comms.hpp"
 #include "mav/mission-plan.hpp"
 #include "smm/search-acquire.hpp"
 #include "smm/search-altitude.hpp"
@@ -1105,6 +1106,34 @@ TEST_CASE ("search_acquire_action never fetches without an asset", "[smm][acquir
     /* Timer elapsed and asset present: safe to fetch. */
     REQUIRE (search_acquire_action (true, now, now) == SearchAcquireAction::fetch);
     REQUIRE (search_acquire_action (true, 0, now) == SearchAcquireAction::fetch);
+}
+
+TEST_CASE ("mav_comms_is_up requires an open socket and a recent heartbeat", "[mav][comms]")
+{
+    constexpr uint64_t timeout = 5000;
+    constexpr uint64_t now = 100000;
+
+    /* A closed socket is always down — even if a heartbeat timestamp looks
+     * recent. This is the cold-start case: never connected, so no heartbeat can
+     * time out and the link must read down rather than be assumed healthy. */
+    REQUIRE_FALSE (mav_comms_is_up (false, now, now, timeout));
+    REQUIRE_FALSE (mav_comms_is_up (false, now, 0, timeout));
+
+    /* Open socket, heartbeat within the window (including the exact boundary). */
+    REQUIRE (mav_comms_is_up (true, now, now, timeout));           /* age 0 */
+    REQUIRE (mav_comms_is_up (true, now, now - 2000, timeout));    /* age 2000 */
+    REQUIRE (mav_comms_is_up (true, now, now - timeout, timeout)); /* age == timeout */
+
+    /* Open socket, heartbeat too old -> down. */
+    REQUIRE_FALSE (mav_comms_is_up (true, now, now - (timeout + 1), timeout));
+
+    /* Open socket, no heartbeat yet (ts 0, far in the past) -> down. A freshly
+     * connected socket stays down until the autopilot is actually heard from. */
+    REQUIRE_FALSE (mav_comms_is_up (true, now, 0, timeout));
+
+    /* A clock anomaly (last heartbeat timestamped after now) must not wrap the
+     * unsigned subtraction into a huge age and spuriously fail; treat it as up. */
+    REQUIRE (mav_comms_is_up (true, now, now + 1000, timeout));
 }
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
