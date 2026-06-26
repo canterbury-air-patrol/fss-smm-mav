@@ -209,6 +209,63 @@ TEST_CASE ("fss_cmd_continue with smm_cmd_abandon_search leads to searching", "[
     REQUIRE (smm->search_calls > 0);
 }
 
+/* Override matrix: the searching state defers to the SMM command, and any higher
+ * priority input (an explicit FSS command, low battery, or comms failure) takes
+ * over an active search. These cover the transitions into/out of searching; the
+ * pause/resume behaviour of the search itself is tracked separately (todo/50). */
+TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 1);
+
+    /* SMM reports the search done: the FMU leaves searching for RTL. */
+    sm->SMMNewCommand (smm_cmd_mission_complete);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("an explicit FSS command overrides an active SMM search", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 1);
+
+    /* hold maps directly (it never consults the SMM command), so it takes over
+     * the search and the aircraft holds. */
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+    REQUIRE (res.outcome == fss_command_actioned);
+
+    /* rtl likewise overrides a search. */
+    sm->FSSNewCommand (fss_cmd_continue);
+    sm->FSSNewCommand (fss_cmd_rtl);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("low battery forces RTL out of an active search", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 1);
+
+    latch_low_battery (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("comms failure forces RTL out of an active search", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 1);
+
+    sm->setCommsFailure (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
 /* Design decision: terminate has the highest priority and overrides both
  * low_battery and comms_failure.  The ground station must always be able to
  * halt the aircraft, even during an emergency RTL. */
