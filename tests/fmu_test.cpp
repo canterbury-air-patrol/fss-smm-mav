@@ -1078,6 +1078,30 @@ TEST_CASE ("mission_item_for lays out a search mission with the two-item offset"
     REQUIRE (mission_item_for (100, num_points, MissionPlanMode::search).kind == MissionItemKind::rtl);
 }
 
+TEST_CASE ("search_point_mission_seq offsets a search point index to its mission sequence", "[mission]")
+{
+    /* A resume must jump the autopilot to the mission sequence, which is offset
+     * past the two setup/takeoff items: point 0 -> seq 2, point N -> seq N + 2. */
+    REQUIRE (search_point_mission_seq (0) == 2);
+    REQUIRE (search_point_mission_seq (1) == 3);
+    REQUIRE (search_point_mission_seq (7) == 9);
+
+    /* Round-trip invariant: the sequence for point i maps back to point index i
+     * via mission_item_for (the inverse offset), so a resume lands on exactly the
+     * intended search point rather than a setup item or the wrong waypoint. */
+    constexpr std::size_t num_points = 10;
+    for (int i = 0; i < static_cast<int> (num_points); i++)
+    {
+        auto item = mission_item_for (search_point_mission_seq (i), num_points, MissionPlanMode::search);
+        REQUIRE (item.kind == MissionItemKind::search_point);
+        REQUIRE (item.point_index == static_cast<std::size_t> (i));
+    }
+
+    /* A goto resume is unaffected: it always sets current to seq 0, which is the
+     * goto waypoint (the search offset never applies to a goto upload). */
+    REQUIRE (mission_item_for (0, num_points, MissionPlanMode::go_to).kind == MissionItemKind::goto_point);
+}
+
 TEST_CASE ("mission_item_for handles an empty search (no points)", "[mission]")
 {
     /* With zero points, only the two takeoff items exist; seq 2 onward is RTL. */

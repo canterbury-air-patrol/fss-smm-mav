@@ -394,7 +394,10 @@ mav_connection::mission_ack (bool accepted)
                 search_set_current = true;
                 if (this->search != nullptr)
                 {
-                    search_seq = this->search->getCurrentPointIdx ();
+                    /* getCurrentPointIdx is a search-point index; the autopilot
+                     * needs the mission sequence number, which is offset past the
+                     * two setup/takeoff items. */
+                    search_seq = search_point_mission_seq (this->search->getCurrentPointIdx ());
                 }
             }
             else
