@@ -2,11 +2,81 @@
 
 #include "../fmu-state-types.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <mutex>
 #include <optional>
 #include <utility>
 #include <vector>
+
+/* Identity payload for payload-bearing FSS commands. Two deliveries of the same
+ * command type are the same logical command only if their payloads also match,
+ * so a re-targeted goto or a changed altitude opens a new group and actuates
+ * rather than replaying the first command's cached acknowledgement.
+ *
+ * goto carries a target position (floating-point degrees, compared with a small
+ * tolerance so wire round-trip noise is not mistaken for a new command);
+ * altitude carries an integer altitude (compared exactly). Commands without a
+ * payload use the default (Kind::none), which always compares equal. */
+struct CommandPayload
+{
+    enum class Kind : uint8_t
+    {
+        none,
+        position,
+        altitude,
+    };
+
+    /* Tolerance for the goto target position comparison: ~1e-7 deg is roughly
+     * 1 cm of latitude, well below the precision of any real retarget but above
+     * wire round-trip noise. Named at struct scope so the dedup sensitivity is
+     * visible and tunable in one place. */
+    static constexpr double position_tolerance_deg = 1e-7;
+
+    Kind kind{ Kind::none };
+    double lat{ 0.0 };
+    double lng{ 0.0 };
+    int32_t altitude{ 0 };
+
+    static auto
+    forPosition (double t_lat, double t_lng) -> CommandPayload
+    {
+        CommandPayload payload;
+        payload.kind = Kind::position;
+        payload.lat = t_lat;
+        payload.lng = t_lng;
+        return payload;
+    }
+
+    static auto
+    forAltitude (int32_t t_altitude) -> CommandPayload
+    {
+        CommandPayload payload;
+        payload.kind = Kind::altitude;
+        payload.altitude = t_altitude;
+        return payload;
+    }
+
+    auto
+    sameAs (const CommandPayload &other) const -> bool
+    {
+        if (this->kind != other.kind)
+        {
+            return false;
+        }
+        switch (this->kind)
+        {
+            case Kind::none:
+                return true;
+            case Kind::altitude:
+                return this->altitude == other.altitude;
+            case Kind::position:
+                return std::fabs (this->lat - other.lat) < position_tolerance_deg
+                       && std::fabs (this->lng - other.lng) < position_tolerance_deg;
+        }
+        return false;
+    }
+};
 
 /* Groups the redundant per-server deliveries of a single logical command so they
  * all receive the same terminal acknowledgement.
@@ -63,14 +133,20 @@ template <typename Target> class CommandAckGroup
     explicit CommandAckGroup (uint64_t t_tolerance_ms) : tolerance_ms (t_tolerance_ms) {}
 
     /* `t_command` is an opaque command-identity value (the caller's enum), matched
-     * for equality; `t_timestamp` is matched within the tolerance. */
+     * for equality; `t_payload` is the payload for payload-bearing commands,
+     * matched via CommandPayload::sameAs (so a changed goto target / altitude is a
+     * new logical command, not a duplicate); `t_timestamp` is matched within the
+     * tolerance. */
     auto
-    onDelivery (int t_command, uint64_t t_timestamp, Target copy) -> DeliveryResult
+    onDelivery (int t_command, uint64_t t_timestamp, Target copy, const CommandPayload &t_payload = {})
+        -> DeliveryResult
     {
         const std::scoped_lock lock (this->mtx);
         DeliveryResult result;
 
-        if (this->active && this->command == t_command && withinTolerance (t_timestamp))
+        const bool same_logical_command = this->command == t_command && this->payload.sameAs (t_payload);
+
+        if (this->active && same_logical_command && withinTolerance (t_timestamp))
         {
             /* Redundant re-delivery of the command already being handled. */
             if (this->resolution.has_value ())
@@ -86,10 +162,11 @@ template <typename Target> class CommandAckGroup
             return result;
         }
 
-        if (this->active && this->command != t_command && t_timestamp < this->timestamp
+        if (this->active && !same_logical_command && t_timestamp < this->timestamp
             && (this->timestamp - t_timestamp) < this->tolerance_ms)
         {
-            /* Older, different command: the newer one is already in effect. */
+            /* Older, different command (different type or different payload): the
+             * newer one is already in effect. */
             result.disposition = Disposition::stale_superseded;
             return result;
         }
@@ -101,6 +178,7 @@ template <typename Target> class CommandAckGroup
         this->active = true;
         this->epoch++;
         this->command = t_command;
+        this->payload = t_payload;
         this->timestamp = t_timestamp;
         this->pending.clear ();
         this->pending.push_back (std::move (copy));
@@ -141,6 +219,7 @@ template <typename Target> class CommandAckGroup
     bool active{ false };
     uint64_t epoch{ 0 };
     int command{ 0 };
+    CommandPayload payload{};
     uint64_t timestamp{ 0 };
     std::vector<Target> pending{};
     std::optional<FSSCommandResolution> resolution{};

@@ -823,6 +823,57 @@ TEST_CASE ("a new command supersedes an unresolved group and its copies are hand
     REQUIRE (live_resolution[0] == 3);
 }
 
+TEST_CASE ("same goto payload from two connections actions once and acks both", "[command_ack][group]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_goto = 3;
+    const auto target = CommandPayload::forPosition (-43.5, 172.6);
+
+    /* Two servers deliver the SAME goto (same target) within the window: actuate
+     * once, the second joins the group pending the single outcome. */
+    auto first = group.onDelivery (cmd_goto, 1000, 1, target);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+    auto second = group.onDelivery (cmd_goto, 1000, 2, target);
+    REQUIRE (second.disposition == CommandAckGroup<int>::Disposition::pending);
+
+    auto to_ack = group.resolve (first.epoch, actioned ());
+    REQUIRE (to_ack.size () == 2);
+}
+
+TEST_CASE ("a goto with a different target within the window actuates again", "[command_ack][group]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_goto = 3;
+
+    auto first = group.onDelivery (cmd_goto, 1000, 1, CommandPayload::forPosition (-43.5, 172.6));
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+
+    /* A re-targeted goto inside the 60 s tolerance is a NEW logical command, not a
+     * duplicate, so it must actuate (and hand back the first copy as superseded)
+     * rather than replay the first goto's cached ack. */
+    auto retarget = group.onDelivery (cmd_goto, 2000, 2, CommandPayload::forPosition (-43.6, 172.7));
+    REQUIRE (retarget.disposition == CommandAckGroup<int>::Disposition::actuate);
+    REQUIRE (retarget.superseded.size () == 1);
+    REQUIRE (retarget.superseded[0] == 1);
+}
+
+TEST_CASE ("an altitude command with a different value within the window actuates again", "[command_ack][group]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_altitude = 7;
+
+    auto first = group.onDelivery (cmd_altitude, 1000, 1, CommandPayload::forAltitude (300));
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+
+    /* Same altitude is a duplicate... */
+    auto same = group.onDelivery (cmd_altitude, 1000, 2, CommandPayload::forAltitude (300));
+    REQUIRE (same.disposition == CommandAckGroup<int>::Disposition::pending);
+
+    /* ...but a different assigned altitude inside the window must actuate again. */
+    auto changed = group.onDelivery (cmd_altitude, 2000, 3, CommandPayload::forAltitude (500));
+    REQUIRE (changed.disposition == CommandAckGroup<int>::Disposition::actuate);
+}
+
 TEST_CASE ("altitude unit helpers convert between metres, feet and MAVLink mm", "[altitude_units]")
 {
     /* 1 foot is exactly 0.3048 m, so 100 m is ~328.084 ft. */
