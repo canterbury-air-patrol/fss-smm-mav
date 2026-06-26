@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <mutex>
 #include <netinet/in.h>
+#include <optional>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
@@ -27,6 +28,10 @@
 namespace
 {
 
+/* The test packs its autopilot-side MAVLink on a dedicated channel, distinct from
+ * the FMU's recv (COMM_0) and send (COMM_1) channels, so the test thread never
+ * contends with the FMU threads on a shared per-channel status (the wire bytes are
+ * identical regardless of channel). */
 constexpr mavlink_channel_t autopilot_tx_channel = MAVLINK_COMM_2;
 
 /* A minimal stand-in for the autopilot end of the MAVLink link: it listens on an
@@ -54,11 +59,27 @@ class MavLoopbackServer
 
         REQUIRE (listen (this->listen_fd, 1) == 0);
 
+        /* Accept continuously so a reconnect after a drop is picked up. Each new
+         * connection replaces (and closes) any previous client fd. The loop ends
+         * when the listen socket is closed in the destructor. */
         this->accept_thread = std::thread (
             [this] ()
             {
-                int fd = accept (this->listen_fd, nullptr, nullptr);
-                this->client_fd.store (fd);
+                while (true)
+                {
+                    int fd = accept (this->listen_fd, nullptr, nullptr);
+                    if (fd < 0)
+                    {
+                        return;
+                    }
+                    int old = this->client_fd.exchange (fd);
+                    if (old >= 0)
+                    {
+                        shutdown (old, SHUT_RDWR);
+                        close (old);
+                    }
+                    this->accept_count.fetch_add (1);
+                }
             });
     }
 
@@ -95,27 +116,36 @@ class MavLoopbackServer
         return waitFor ([this] () { return this->client_fd.load () >= 0; }, timeout);
     }
 
+    /* Number of connections accepted so far; used to confirm a reconnect produced
+     * a genuinely new socket rather than reusing stale state. */
+    auto
+    acceptCount () const -> int
+    {
+        return this->accept_count.load ();
+    }
+
     /* Send a HEARTBEAT as if from the autopilot (sysid 1), so the FMU records a
-     * fresh last_heartbeat_ts and the heartbeat loop reports the link up.
-     *
-     * Pack on a dedicated MAVLink channel, not the default COMM_0 or the FMU's
-     * transmit channel: MAVLink's generated pack helpers update shared per-
-     * channel status, while the wire bytes are identical regardless of channel. */
+     * fresh last_heartbeat_ts and the heartbeat loop reports the link up. */
     void
     sendHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR)
     {
-        int fd = this->client_fd.load ();
-        if (fd < 0)
-        {
-            return;
-        }
         mavlink_message_t msg;
         mavlink_msg_heartbeat_pack_chan (1, 1, autopilot_tx_channel, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0,
                                          MAV_STATE_ACTIVE);
-        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        unsigned int len = mavlink_msg_to_send_buffer (buf, &msg);
-        ssize_t sent = send (fd, buf, len, MSG_NOSIGNAL);
-        (void)sent;
+        sendMsg (msg);
+    }
+
+    /* Send a GLOBAL_POSITION_INT so the FMU's recv path fires its position
+     * callback — a deterministic observable that the link carries data, used to
+     * prove a reconnect re-established a working recv path. */
+    void
+    sendPosition ()
+    {
+        mavlink_message_t msg;
+        mavlink_msg_global_position_int_pack_chan (1, 1, autopilot_tx_channel, &msg, 0, /*lat*/ -435000000,
+                                                   /*lon*/ 1726000000,
+                                                   /*alt mm*/ 100000, /*rel alt mm*/ 100000, 0, 0, 0, /*hdg*/ 0);
+        sendMsg (msg);
     }
 
     /* Drop the accepted connection to simulate a mid-stream link loss. */
@@ -147,9 +177,24 @@ class MavLoopbackServer
     }
 
   private:
+    void
+    sendMsg (const mavlink_message_t &msg)
+    {
+        int fd = this->client_fd.load ();
+        if (fd < 0)
+        {
+            return;
+        }
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        unsigned int len = mavlink_msg_to_send_buffer (buf, &msg);
+        ssize_t sent = send (fd, buf, len, MSG_NOSIGNAL);
+        (void)sent;
+    }
+
     int listen_fd{ -1 };
     uint16_t listen_port{ 0 };
     std::atomic<int> client_fd{ -1 };
+    std::atomic<int> accept_count{ 0 };
     std::thread accept_thread{};
 };
 
@@ -166,17 +211,14 @@ class CommsRecorder
     }
 
     auto
-    sawStatus (MavCommsStatus status) -> bool
+    lastStatus () -> std::optional<MavCommsStatus>
     {
         const std::lock_guard<std::mutex> lk (this->mtx);
-        for (auto event : this->events)
+        if (this->events.empty ())
         {
-            if (event == status)
-            {
-                return true;
-            }
+            return std::nullopt;
         }
-        return false;
+        return this->events.back ();
     }
 
   private:
@@ -189,10 +231,42 @@ constexpr uint16_t test_altitude_floor_m = 10;
 constexpr uint16_t test_altitude_cap_m = 120;
 constexpr auto io_timeout = std::chrono::seconds (8);
 
+/* mav_connection parses on the single global channel MAVLINK_COMM_0. In the real
+ * app there is only ever one connection, but here each test spins up its own, so
+ * a previous test (or a previous connection within a test) can leave partial-
+ * frame state on that channel and desync the next test's parser. Reset it at the
+ * start of each test so the cases are independent. */
+void
+reset_mav_parser ()
+{
+    mavlink_reset_channel_status (MAVLINK_COMM_0);
+}
+
+/* Thread-safe counter of position callbacks (invoked from the FMU recv thread),
+ * a direct observable that the recv path is processing inbound MAVLink. */
+class PositionRecorder
+{
+  public:
+    void
+    record ()
+    {
+        this->count.fetch_add (1);
+    }
+    auto
+    count_at_least (int n) -> bool
+    {
+        return this->count.load () >= n;
+    }
+
+  private:
+    std::atomic<int> count{ 0 };
+};
+
 } // namespace
 
-TEST_CASE ("mav_connection reports the link up after a heartbeat is received", "[mav_io]")
+TEST_CASE ("mav_connection reports the link down at cold start, then up once a heartbeat arrives", "[mav_io]")
 {
+    reset_mav_parser ();
     MavLoopbackServer server;
     CommsRecorder recorder;
 
@@ -202,14 +276,66 @@ TEST_CASE ("mav_connection reports the link up after a heartbeat is received", "
 
     REQUIRE (server.waitForClient (io_timeout));
 
-    /* The autopilot starts heartbeating: the FMU must report the link up. The
-     * heartbeat loop runs ~1 Hz, so keep emitting until it observes one. */
-    const bool up = MavLoopbackServer::waitFor (
+    /* The link is connected but no heartbeat has arrived: the heartbeat loop must
+     * edge-trigger a failure rather than leave the optimistic default unreported.
+     * Wait for that down BEFORE sending heartbeats, so the subsequent up is a real
+     * down->up edge (the status callback only fires on a change). */
+    REQUIRE (
+        MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
+
+    /* Now the autopilot heartbeats: the FMU must report the link up. */
+    REQUIRE (MavLoopbackServer::waitFor (
         [&] ()
         {
             server.sendHeartbeat ();
-            return recorder.sawStatus (MavCommsStatus::ok);
+            return recorder.lastStatus () == MavCommsStatus::ok;
         },
-        io_timeout);
-    REQUIRE (up);
+        io_timeout));
+}
+
+TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconnect", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m);
+    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.start ();
+
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* Confirm the initial recv path works: a position message reaches the FMU. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition ();
+            return positions.count_at_least (1);
+        },
+        io_timeout));
+    const int before_drop = 1;
+
+    /* Drop the link mid-stream. The recv thread sees EOF and flags the connection
+     * broken; the reconnector (driven here, as the main loop would) tears the old
+     * socket down and dials a fresh one. */
+    server.dropClient ();
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            conn.attemptReconnect ();
+            return server.acceptCount () >= 2;
+        },
+        io_timeout));
+
+    /* On the new connection, a position message must again reach the FMU —
+     * proving the reconnect re-established a working recv path, not just a
+     * socket. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            conn.attemptReconnect ();
+            server.sendPosition ();
+            return positions.count_at_least (before_drop + 1);
+        },
+        io_timeout));
 }
