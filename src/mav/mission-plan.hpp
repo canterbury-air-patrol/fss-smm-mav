@@ -43,6 +43,20 @@ struct MissionItem
     std::size_t point_index{ 0 };
 };
 
+/* Search waypoints begin at this mission sequence number, after the two
+ * setup/takeoff items at seq 0 and 1. */
+inline constexpr uint16_t search_first_point_seq = 2;
+
+/* MAVLink mission sequence number for a given search point index. Search point i
+ * is uploaded at sequence i + search_first_point_seq, so resuming a search must
+ * jump the autopilot to that sequence — not to the bare point index, which would
+ * land on the setup/takeoff items. Inverse of the `seq - 2` in mission_item_for. */
+inline auto
+search_point_mission_seq (int point_index) -> uint16_t
+{
+    return static_cast<uint16_t> (point_index + search_first_point_seq);
+}
+
 inline auto
 mission_item_for (uint16_t seq, std::size_t num_points, MissionPlanMode mode) -> MissionItem
 {
