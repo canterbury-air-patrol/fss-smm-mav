@@ -108,6 +108,10 @@ class mav_connection
   private:
     std::string addr;
     uint16_t port;
+    /* Atomic because the recv and heartbeat loops read it lock-free on their own
+     * threads; send_lock additionally serialises its publish (connect_to_mav) and
+     * retire (disconnect_from_mav) against in-flight sends, so the descriptor's
+     * lifetime — not just its value — is safe across threads. */
     std::atomic<int> fd{ -1 };
     uint64_t last_tried{ 0 };
     uint16_t retry_count{ 0 };

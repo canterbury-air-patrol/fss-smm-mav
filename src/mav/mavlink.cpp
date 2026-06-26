@@ -767,21 +767,30 @@ mav_connection::connect_to_mav ()
         return;
     }
 
-    this->fd.store (socket (remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP));
+    /* Build the socket in a local descriptor and only publish it once it is fully
+     * connected and configured. A send must never observe a half-open fd (one
+     * returned by socket() but not yet connected), and the fd must not become
+     * visible — or its number reused — until the previous connection has been
+     * fully retired by disconnect_from_mav(). */
+    int new_fd = socket (remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    if (new_fd < 0)
+    {
+        perror ("Failed to create MAV socket");
+        return;
+    }
 
-    if (connect (this->fd.load (), reinterpret_cast<struct sockaddr *> (&remote),
+    if (connect (new_fd, reinterpret_cast<struct sockaddr *> (&remote),
                  remote.ss_family == AF_INET ? sizeof (struct sockaddr_in) : sizeof (struct sockaddr_in6))
         < 0)
     {
         perror (("Failed to connect to " + this->addr).c_str ());
-        close (this->fd.load ());
-        this->fd.store (-1);
+        close (new_fd);
         return;
     }
 
     /* Wake recv() periodically so the thread can notice fd being torn down. */
     struct timeval rcv_timeout = { .tv_sec = 1, .tv_usec = 0 };
-    setsockopt (this->fd.load (), SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof (rcv_timeout));
+    setsockopt (new_fd, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof (rcv_timeout));
 
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
@@ -793,13 +802,37 @@ mav_connection::connect_to_mav ()
      * autopilot is actually heard from. heartbeat_loop() owns mav_comms_ok and
      * reports the link up only once a real heartbeat lands. */
 
+    /* Publish the ready fd under send_lock so a concurrent send sees either the
+     * old fd, -1, or this fully-connected one — never an intermediate state. */
+    {
+        std::lock_guard<std::mutex> lk{ this->send_lock };
+        this->fd.store (new_fd);
+    }
     this->recv_thread = std::thread (recv_mav_thread, this);
 }
 
 void
 mav_connection::disconnect_from_mav ()
 {
-    int orig_fd = this->fd.exchange (-1);
+    int orig_fd;
+    {
+        /* Read and retire the fd atomically under send_lock: an in-flight send
+         * (which holds send_lock for its whole syscall) completes on the still-open
+         * descriptor, every later send short-circuits on fd == -1 rather than
+         * landing on a descriptor about to be closed and reused, and the captured
+         * orig_fd cannot be a value a concurrent connect_to_mav() is publishing. */
+        std::lock_guard<std::mutex> lk{ this->send_lock };
+        orig_fd = this->fd.exchange (-1);
+    }
+    if (orig_fd != -1)
+    {
+        /* Wake the recv thread out of its blocking recv() so it observes the
+         * teardown and exits, without yet closing the descriptor. */
+        shutdown (orig_fd, SHUT_RDWR);
+    }
+    /* Join before close(): closing a descriptor another thread is blocked in
+     * recv() on is undefined on Linux, so the recv thread must have left recv()
+     * (and returned) before the fd is closed and its number freed for reuse. */
     if (this->recv_thread.joinable ())
     {
         this->recv_thread.join ();
@@ -844,15 +877,9 @@ mav_connection::~mav_connection ()
     {
         this->heartbeat_thread.join ();
     }
-    int orig_fd = this->fd.exchange (-1);
-    if (this->recv_thread.joinable ())
-    {
-        this->recv_thread.join ();
-    }
-    if (orig_fd != -1)
-    {
-        close (orig_fd);
-    }
+    /* Tear the link down through the shared path: shutdown + join the recv thread
+     * before closing the fd, so teardown is not racy at process exit either. */
+    this->disconnect_from_mav ();
 }
 
 auto
