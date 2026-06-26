@@ -7,10 +7,18 @@ AM_CXXFLAGS += $(SANITIZER_FLAGS)
 AM_LDFLAGS =
 AM_LDFLAGS += $(SANITIZER_FLAGS)
 
-check_PROGRAMS = fmu_test
+check_PROGRAMS = fmu_test mav_io_test
 TESTS = $(check_PROGRAMS)
 
 fmu_test_SOURCES = fmu_test.cpp $(top_srcdir)/src/fmu.cpp $(top_srcdir)/src/fmu-config.cpp $(top_srcdir)/src/mav/mav-sys.cpp
 fmu_test_CPPFLAGS = -I$(top_srcdir)/src -isystem $(top_srcdir)/mavlink $(CATCH2_CFLAGS) $(SMM_ASSET_CFLAGS) $(FSS_CLIENT_SSL_CFLAGS) $(JSONCPP_CFLAGS)
 fmu_test_CXXFLAGS = $(AM_CXXFLAGS)
 fmu_test_LDADD = $(CATCH2_LIBS) $(JSONCPP_LIBS)
+
+# Integration tests that drive the real mav_connection over a loopback socket.
+# This links the actual MAVLink/SMM networking objects (and libsmmasset), unlike
+# fmu_test which stays a fast, pure unit suite over the decision logic.
+mav_io_test_SOURCES = mav_io_test.cpp $(top_srcdir)/src/mav/mavlink.cpp $(top_srcdir)/src/mav/mav.cpp $(top_srcdir)/src/mav/mav-sys.cpp $(top_srcdir)/src/smm/smm.cpp
+mav_io_test_CPPFLAGS = -I$(top_srcdir)/src -isystem $(top_srcdir)/mavlink $(CATCH2_CFLAGS) $(SMM_ASSET_CFLAGS) $(FSS_CLIENT_SSL_CFLAGS) $(JSONCPP_CFLAGS)
+mav_io_test_CXXFLAGS = $(AM_CXXFLAGS)
+mav_io_test_LDADD = $(CATCH2_LIBS) $(SMM_ASSET_LIBS) $(FSS_CLIENT_SSL_LIBS) $(JSONCPP_LIBS)
