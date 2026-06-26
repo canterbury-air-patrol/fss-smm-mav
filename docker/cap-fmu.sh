@@ -1,5 +1,17 @@
 #!/bin/bash -ex
 
+# cap-fmu requires a flight-termination action; it is safety-critical and has no
+# universally safe default, so it must be set explicitly via TERMINATE_ACTION.
+# Validate it before generating any config so a misconfigured container fails
+# loudly and early rather than after writing a config it will never use.
+case "${TERMINATE_ACTION}" in
+    none | disarm | terminate) ;;
+    *)
+        echo "Error: TERMINATE_ACTION must be set to one of: none, disarm, terminate" >&2
+        exit 1
+        ;;
+esac
+
 CONFIG_FILE=/home/autopilot/config/fmu-client.json
 
 echo "{" > ${CONFIG_FILE}
@@ -23,4 +35,4 @@ then
     DEBUGGER=valgrind --leak-check=full -v
 fi
 
-${DEBUGGER} /src/src/cap-fmu /home/autopilot/config/fmu-client.json $MAVPROXY_HOST $MAVPROXY_PORT
+${DEBUGGER} /src/src/cap-fmu --terminate-action="${TERMINATE_ACTION}" /home/autopilot/config/fmu-client.json $MAVPROXY_HOST $MAVPROXY_PORT
