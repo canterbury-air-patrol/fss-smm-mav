@@ -265,6 +265,11 @@ class PositionRecorder
     {
         return this->count.load () >= n;
     }
+    auto
+    count_now () const -> int
+    {
+        return this->count.load ();
+    }
 
   private:
     std::atomic<int> count{ 0 };
@@ -346,4 +351,52 @@ TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconne
             return positions.count_at_least (before_drop + 1);
         },
         io_timeout));
+}
+
+TEST_CASE ("mav_connection survives repeated drop/reconnect cycles", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m);
+    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.start ();
+
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* Confirm a position reaches the FMU on the current connection. */
+    auto prove_delivery = [&] ()
+    {
+        const int before = positions.count_now ();
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPosition ();
+                return positions.count_now () > before;
+            },
+            io_timeout));
+    };
+
+    prove_delivery ();
+
+    /* Hammer the fd lifecycle: each cycle drops the link and drives a reconnect,
+     * so the recv thread is repeatedly torn down (close while it may be in recv)
+     * and a fresh socket dialled — the close-during-recv and fd-reuse paths. Run
+     * under TSan in CI, this is where those races would surface. After each
+     * reconnect, a position must again reach the FMU on the new socket. */
+    constexpr int cycles = 5;
+    for (int c = 0; c < cycles; c++)
+    {
+        const int target_accepts = server.acceptCount () + 1;
+        server.dropClient ();
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                conn.attemptReconnect ();
+                return server.acceptCount () >= target_accepts;
+            },
+            io_timeout));
+        prove_delivery ();
+    }
 }
