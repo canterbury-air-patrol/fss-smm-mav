@@ -2,7 +2,7 @@ Source: cap-fmu
 Section: main
 Priority: optional
 Maintainer: Scott Parlane <sjp@canterburyairpatrol.org>
-Build-Depends: debhelper (>= 10), autotools-dev, pkg-config, libfss-client-ssl (>=1.1.0), libsmm-asset-dev (>= 1.0.0)
+Build-Depends: debhelper (>= 10), autotools-dev, pkg-config, libfss-client-ssl (>=1.1.0), libsmm-asset-dev (>= 1.0.0), libjsoncpp-dev
 Standards-Version: 4.1.3
 
 Package: cap-fmu
