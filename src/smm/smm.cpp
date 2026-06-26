@@ -121,7 +121,7 @@ SMM::connect (const std::string &t_host, const flight_safety_system::secure_stri
 void
 SMM::reportPosition (PositionData t_pd)
 {
-    std::lock_guard<std::mutex> lk (this->search_lock);
+    std::unique_lock<std::mutex> lk (this->search_lock);
     if (this->asset)
     {
         uint64_t curr_ts = current_timestamp_ms ();
@@ -141,14 +141,21 @@ SMM::reportPosition (PositionData t_pd)
     }
     if (this->search_active && this->current_search == nullptr)
     {
-        this->tryAcquireSearch (t_pd.getP ());
+        this->tryAcquireSearch (lk, t_pd.getP ());
     }
 }
 
-/* Called with search_lock held. Tries to acquire a search from SMM.
- * On failure, sets a retry timestamp so periodic calls back off. */
+/* Tries to acquire a search from SMM. On failure, sets a retry timestamp so
+ * periodic calls back off.
+ *
+ * Locking contract: `lock` is the caller's lock on search_lock and must be held
+ * (owns_lock()) on entry. The blocking smm_asset_get_search() fetch runs with
+ * the lock released so other threads are not stalled; ownership stays explicit
+ * through `lock` rather than this function toggling search_lock behind the
+ * caller's guard. The lock is always re-acquired before returning, so the
+ * caller's lock is held again on every exit. */
 void
-SMM::tryAcquireSearch (Point current_pos)
+SMM::tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos)
 {
     uint64_t curr_ts = current_timestamp_ms ();
     switch (search_acquire_action (this->asset != nullptr, this->search_retry_ts, curr_ts))
@@ -170,9 +177,9 @@ SMM::tryAcquireSearch (Point current_pos)
     while (this->current_search == nullptr)
     {
         /* Release lock during blocking network call to avoid stalling other threads. */
-        this->search_lock.unlock ();
+        lock.unlock ();
         auto new_search = smm_asset_get_search (this->asset, current_pos.getLatitude (), current_pos.getLongitude ());
-        this->search_lock.lock ();
+        lock.lock ();
 
         /* If the search was cancelled while we were waiting, clean up and exit. */
         if (!this->search_active)
@@ -227,7 +234,7 @@ SMM::tryAcquireSearch (Point current_pos)
 void
 SMM::search (Point current_pos)
 {
-    std::lock_guard<std::mutex> lk (this->search_lock);
+    std::unique_lock<std::mutex> lk (this->search_lock);
     this->search_active = true;
     if (this->current_search != nullptr)
     {
@@ -236,7 +243,7 @@ SMM::search (Point current_pos)
     /* tryAcquireSearch() guards the null-asset case itself (RTL + back off, then
      * retry after reconnect), so the disconnected path no longer needs a special
      * case here and both entry points share one rule. */
-    this->tryAcquireSearch (current_pos);
+    this->tryAcquireSearch (lk, current_pos);
 }
 
 void

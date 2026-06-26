@@ -40,7 +40,7 @@ class SMM : public ISMM
     static constexpr uint64_t search_retry_interval_ms{ 5000 };
     void connect ();
     void disconnect ();
-    void tryAcquireSearch (Point current_pos);
+    void tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos);
 
   public:
     SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg);
