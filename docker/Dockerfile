@@ -8,9 +8,9 @@ RUN apt install -y lsb-release
 
 RUN apt install -y ca-certificates curl gnupg
 
-RUN echo "deb http://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/cap.list
-RUN curl https://apt.canterburyairpatrol.org/repository.key -o repo.key
-RUN apt-key add repo.key
+# CAP repo: dearmored keyring over HTTPS, matching CI (no deprecated apt-key)
+RUN echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/cap.list
+RUN curl -fsSL https://apt.canterburyairpatrol.org/repository.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
 
 # Update the database
 RUN apt update && apt upgrade -y
