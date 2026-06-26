@@ -6,6 +6,7 @@
 #include "fmu.hpp"
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
+#include "mav/battery-voltage.hpp"
 #include "mav/internal.hpp"
 #include "mav/mav-comms.hpp"
 #include "mav/mission-plan.hpp"
@@ -817,6 +818,21 @@ TEST_CASE ("a new command supersedes an unresolved group and its copies are hand
     auto live_resolution = group.resolve (second.epoch, actioned ());
     REQUIRE (live_resolution.size () == 1);
     REQUIRE (live_resolution[0] == 3);
+}
+
+TEST_CASE ("battery_pack_voltage_v converts millivolts and maps the unknown sentinel", "[battery]")
+{
+    /* A normal cell-0 pack voltage converts millivolts to volts. */
+    REQUIRE (battery_pack_voltage_v (22400) == Catch::Approx (22.4));
+    REQUIRE (battery_pack_voltage_v (12600) == Catch::Approx (12.6));
+
+    /* UINT16_MAX is MAVLink's "unknown" sentinel; it must not surface as
+     * 65.535 V but as the FSS "unknown" convention (0.0). */
+    REQUIRE (battery_pack_voltage_v (UINT16_MAX) == Catch::Approx (battery_voltage_unknown));
+    REQUIRE (battery_voltage_unknown == Catch::Approx (0.0));
+
+    /* An empty 0 mV slot already coincides with the unknown sentinel. */
+    REQUIRE (battery_pack_voltage_v (0) == Catch::Approx (0.0));
 }
 
 TEST_CASE ("raw_search_altitude derives height from sweep width and FoV", "[altitude]")

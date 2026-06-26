@@ -1,3 +1,4 @@
+#include "battery-voltage.hpp"
 #include "internal.hpp"
 #include "mav-comms.hpp"
 #include "mav.hpp"
@@ -532,7 +533,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             int8_t remaining = mavlink_msg_battery_status_get_battery_remaining (msg);
             uint16_t voltages[10] = { 0 };
             mavlink_msg_battery_status_get_voltages (msg, voltages);
-            this->report_battery_status (remaining, current_consumed, (double)voltages[0] / 1000.0);
+            this->report_battery_status (remaining, current_consumed, battery_pack_voltage_v (voltages[0]));
         }
         break;
         case MAVLINK_MSG_ID_MISSION_ITEM_REACHED:
