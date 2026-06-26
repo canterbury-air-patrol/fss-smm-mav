@@ -1199,6 +1199,44 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
     REQUIRE (icao1 == icao3);
 }
 
+TEST_CASE ("known_aircraft evicts aircraft that go quiet past the eviction window", "[aircraft]")
+{
+    known_aircraft ka;
+    const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
+
+    /* Establish aircraft A at t=1000 and capture its synthetic ICAO. */
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "A", 0, 0, 1000, 0, 0, 0));
+    const uint32_t icao_a_first = ka.getAircraftICAOAddress ("A");
+
+    /* A different aircraft reports well past the eviction window. That report
+     * drives the sweep, which must reclaim the now-stale entry for A. */
+    const uint64_t late = 1000 + window_ms + 1000;
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "B", 0, 0, late, 0, 0, 0));
+
+    /* Re-introducing the previously-seen callsign A must allocate a fresh
+     * synthetic ICAO, proving the old entry was evicted rather than retained. */
+    const uint32_t icao_a_second = ka.getAircraftICAOAddress ("A");
+    REQUIRE (icao_a_second != icao_a_first);
+}
+
+TEST_CASE ("known_aircraft keeps actively-reporting aircraft across the window", "[aircraft]")
+{
+    known_aircraft ka;
+    const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
+
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "C", 0, 0, 1000, 0, 0, 0));
+    const uint32_t icao_c_first = ka.getAircraftICAOAddress ("C");
+
+    /* C keeps reporting; each report refreshes its timestamp, so it must never
+     * be evicted and must retain its original synthetic ICAO. */
+    for (uint64_t t = 1000 + window_ms; t <= 1000 + (3 * window_ms); t += window_ms)
+    {
+        ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "C", 0, 0, t, 0, 0, 0));
+    }
+
+    REQUIRE (ka.getAircraftICAOAddress ("C") == icao_c_first);
+}
+
 TEST_CASE ("next_synthetic_icao advances and wraps at the 24-bit ceiling", "[aircraft]")
 {
     /* Normal case: advance by one within the range. */
