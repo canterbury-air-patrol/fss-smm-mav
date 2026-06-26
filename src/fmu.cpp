@@ -141,7 +141,11 @@ FMUStateMachine::actionState (FMUState state)
         case fmu_state_rtl:
         case fmu_state_failsafe:
         case fmu_state_low_battery:
-            /* Tell MAV to RTL */
+            /* Tell MAV to RTL. When the MAV link is down (e.g. the comms-loss
+             * failsafe fired precisely because telemetry was lost), this send is
+             * best-effort: sendMavLinkMsg short-circuits with the link down, so the
+             * RTL may not reach the autopilot. ArduPilot's own comms/GCS failsafe
+             * is the backstop in that case. */
             this->mav.setMode (flight_mode_rtl);
             break;
         case fmu_state_goto:

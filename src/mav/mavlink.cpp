@@ -830,12 +830,24 @@ auto
 mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
 {
     std::lock_guard<std::mutex> lk (this->send_lock);
+    int cur_fd = this->fd.load ();
+    if (cur_fd == -1)
+    {
+        /* The link is down: there is nothing to send on. Skip the syscall
+         * (send(-1) would only return EBADF), do NOT flag `broken` — there is no
+         * live connection to tear down — and stay silent so a disconnected window
+         * (cold start, reconnect) does not spam WARN; the heartbeat loop already
+         * reports comms-down once. State-machine actions dispatched while the link
+         * is down (e.g. the comms-loss failsafe RTL) are therefore best-effort,
+         * with ArduPilot's own failsafe as the backstop. */
+        return false;
+    }
     uint8_t buf[BUFFER_LEN];
     size_t to_send = mavlink_msg_to_send_buffer (buf, msg);
     size_t sent = 0;
     while (sent < to_send)
     {
-        ssize_t transfered = send (this->fd.load (), buf + sent, to_send - sent, 0);
+        ssize_t transfered = send (cur_fd, buf + sent, to_send - sent, 0);
         if (transfered < 0)
         {
             /* Preserve the failure detail before tearing anything down. */
