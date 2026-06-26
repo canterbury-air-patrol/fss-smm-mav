@@ -114,7 +114,17 @@ FMUStateMachine::resolveFSSCommand (FMUState desired, const std::optional<FMUSta
         /* updateState() selected a different state than the command alone maps
          * to, which only happens when a higher-priority latch (terminate, low
          * battery, or comms failsafe) is engaged. current_state is that latch's
-         * state. */
+         * state.
+         *
+         * Decision (todo/43): report "superseded" even when the command's effect
+         * matches the active latch — e.g. an operator RTL while a low-battery or
+         * comms-loss latch (which also flies RTL) is engaged. The latch, not the
+         * command, is in control, and the ground station relies on this: the FSS
+         * web's supersededRtlInEffect() keys off the superseded outcome and the
+         * latch reason to show "low-battery/comms-loss RTL in effect" rather than
+         * a failure. Reporting "actioned" here would discard that context. The
+         * command is still retained (this->fss_command), so it re-applies if the
+         * latch is a recoverable one (comms) that later clears. */
         res.outcome = fss_command_superseded;
         res.superseding_state = this->current_state;
     }
