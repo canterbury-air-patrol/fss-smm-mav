@@ -476,7 +476,9 @@ void
 mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status __attribute__ ((unused)))
 {
     auto sys = this->systems.findSystem (msg->sysid);
-    auto comp = sys->findComponent (msg->compid);
+    /* ensure this component is registered (find-or-create side effect); the
+     * returned component object is not needed here. */
+    (void)sys->findComponent (msg->compid);
 
     if (!sys->isSetup ())
     {
