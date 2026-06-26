@@ -591,6 +591,52 @@ TEST_CASE ("FSS command superseded by comms failsafe names the latch", "[state_m
     REQUIRE (res.superseding_state == fmu_state_failsafe);
 }
 
+/* todo/43 decision: an operator RTL whose effect matches an active latch (which
+ * also flies RTL) is still reported "superseded", not "actioned" — the latch,
+ * not the command, is in control, and the GS surfaces it as the latch's RTL in
+ * effect. These tests pin that decision so it cannot silently regress. */
+TEST_CASE ("an explicit RTL during the low-battery latch is reported superseded", "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    latch_low_battery (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    /* The operator asks for RTL and the aircraft is in fact flying RTL, yet the
+     * latch (not the command) is in control, so the ack names the latch. */
+    auto res = sm->FSSNewCommand (fss_cmd_rtl);
+    REQUIRE (res.outcome == fss_command_superseded);
+    REQUIRE (res.superseding_state == fmu_state_low_battery);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("an RTL superseded by a recoverable comms failure still applies once comms clears",
+           "[state_machine][command_ack]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    /* Baseline so "the commanded RTL applied on recovery" is observable: without
+     * the RTL below, recovery would restore this hold. */
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    /* A (recoverable) comms failure engages the failsafe RTL latch. */
+    sm->setCommsFailure (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    /* The operator commands RTL during the failure: the latch is in control, so
+     * the ack is superseded (decision above) ... */
+    auto res = sm->FSSNewCommand (fss_cmd_rtl);
+    REQUIRE (res.outcome == fss_command_superseded);
+    REQUIRE (res.superseding_state == fmu_state_failsafe);
+
+    /* ... but the command is retained, so when the recoverable comms failure
+     * clears the aircraft holds RTL rather than reverting to the earlier hold.
+     * The operator's intent is honoured once the latch releases. */
+    sm->setCommsFailure (false);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
 /* terminate is an FSS command occupying the same input slot as every other FSS
  * command, so a later FSS command replaces it rather than being superseded by
  * it. (The terminate priority in updateState() guards against the *concurrent*
