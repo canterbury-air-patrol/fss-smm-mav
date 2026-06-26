@@ -1,6 +1,8 @@
+#include "altitude-units.hpp"
 #include "fmu-fss-types.hpp"
 #include "fmu-fss.hpp"
 #include "internal.hpp"
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <type_traits>
@@ -86,8 +88,10 @@ FSS::reportPosition (PositionData t_pd)
     if (this->ssl_client != nullptr)
     {
         Point p = t_pd.getP ();
-        this->ssl_client->sendPosition (p.getLatitude (), p.getLongitude (), static_cast<int16_t> (t_pd.getAltitude ()),
-                                        t_pd.getHeading (), t_pd.getVelocityHorizontal (), t_pd.getVelocityVertical ());
+        /* PositionData carries metres; the FSS wire altitude is feet. */
+        auto alt_ft = static_cast<int16_t> (std::lround (metres_to_feet (t_pd.getAltitudeMetres ())));
+        this->ssl_client->sendPosition (p.getLatitude (), p.getLongitude (), alt_ft, t_pd.getHeading (),
+                                        t_pd.getVelocityHorizontal (), t_pd.getVelocityVertical ());
     }
 }
 

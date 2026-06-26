@@ -33,7 +33,9 @@ class PositionData
 {
   private:
     Point p{};
-    double alt{ 0.0 };
+    /* Altitude in metres. Each protocol boundary converts to/from its own wire
+     * unit via altitude-units.hpp (MAVLink mm, FSS feet, SMM metres). */
+    double alt_m{ 0.0 };
     uint16_t hdg{ 0 };
     uint16_t vel_hor{ 0 };
     int16_t vel_ver{ 0 };
@@ -47,12 +49,13 @@ class PositionData
 
   public:
     PositionData () = default;
-    PositionData (double t_lat, double t_lng, double t_alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver)
-        : p (Point (t_lat, t_lng)), alt (t_alt), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver) {};
-    PositionData (double t_lat, double t_lng, double t_alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
+    /* t_alt_m is altitude in metres (see alt_m above). */
+    PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver)
+        : p (Point (t_lat, t_lng)), alt_m (t_alt_m), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver) {};
+    PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
                   std::string t_callsign, uint16_t t_squawk, uint32_t t_icaoaddress, uint64_t t_timestamp,
                   uint16_t t_flags, uint8_t t_altitude_type, uint8_t t_emitter_type)
-        : p (Point (t_lat, t_lng)), alt (t_alt), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver),
+        : p (Point (t_lat, t_lng)), alt_m (t_alt_m), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver),
           callsign (std::move (t_callsign)), squawk (t_squawk), icaoaddress (t_icaoaddress), timestamp (t_timestamp),
           flags (t_flags), altitude_type (t_altitude_type), emitter_type (t_emitter_type) {};
     void
@@ -66,9 +69,9 @@ class PositionData
         return this->p;
     };
     auto
-    getAltitude () -> double
+    getAltitudeMetres () -> double
     {
-        return this->alt;
+        return this->alt_m;
     };
     auto
     getHeading () -> uint16_t
