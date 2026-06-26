@@ -116,11 +116,24 @@ fss_client_ssl::handleCommandFrom (
         return;
     }
 
+    /* Payload-bearing commands carry a target the dedup must distinguish on: a
+     * second goto/altitude with a different payload inside the tolerance window is
+     * a new logical command, not a duplicate of the first. */
+    CommandPayload payload;
+    if (raw_command == flight_safety_system::transport::asset_command_goto)
+    {
+        payload = CommandPayload::forPosition (msg->getLatitude (), msg->getLongitude ());
+    }
+    else if (raw_command == flight_safety_system::transport::asset_command_altitude)
+    {
+        payload = CommandPayload::forAltitude (static_cast<int32_t> (msg->getAltitude ()));
+    }
+
     /* The FMU is connected to all FSS servers and the web frontend pushes the same
      * command to each, so this logical command arrives once per connection. The
      * group decides whether to action it (new command), queue/replay its ack
      * (redundant delivery), or reject it as stale. */
-    auto delivery = this->command_group.onDelivery (static_cast<int> (raw_command), ts, this_copy);
+    auto delivery = this->command_group.onDelivery (static_cast<int> (raw_command), ts, this_copy, payload);
 
     switch (delivery.disposition)
     {
