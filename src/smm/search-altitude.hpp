@@ -1,4 +1,5 @@
 #pragma once
+#include "altitude-units.hpp"
 #include <cmath>
 #include <cstdint>
 
@@ -59,6 +60,5 @@ clamp_search_altitude (double altitude, uint16_t altitude_floor, uint16_t altitu
 inline auto
 clamp_command_altitude (uint16_t altitude_ft, uint16_t altitude_floor, uint16_t altitude_cap) -> uint16_t
 {
-    constexpr double feet_to_metres = 0.3048;
-    return clamp_search_altitude (static_cast<double> (altitude_ft) * feet_to_metres, altitude_floor, altitude_cap);
+    return clamp_search_altitude (feet_to_metres (static_cast<double> (altitude_ft)), altitude_floor, altitude_cap);
 }

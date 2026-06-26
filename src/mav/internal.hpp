@@ -203,7 +203,7 @@ class mav_connection
     void commandManual ();
     void commandTerminate ();
     void loadSearch ();
-    void sendADSB (uint32_t icao_address, double lat, double lng, uint32_t altitude, uint8_t altitude_type,
+    void sendADSB (uint32_t icao_address, double lat, double lng, double altitude_m, uint8_t altitude_type,
                    uint16_t heading, uint16_t hor_vel, uint16_t ver_vel, char *callsign, uint8_t emitter_type,
                    uint8_t tslc, uint16_t flags, uint16_t squawk);
     void requestStream (int sysid, int compid, uint32_t command, uint32_t interval);

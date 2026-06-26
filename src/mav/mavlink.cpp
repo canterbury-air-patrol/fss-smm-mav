@@ -1,3 +1,4 @@
+#include "altitude-units.hpp"
 #include "battery-voltage.hpp"
 #include "internal.hpp"
 #include "mav-comms.hpp"
@@ -31,8 +32,6 @@ constexpr uint8_t TARGET_SYS_ID = 1;
 
 /* Convert double/float into int32_t */
 constexpr double LAT_LNG_COV = 0.0000001;
-/* Convert ft into mm */
-constexpr double ALT_COV = 304.8;
 
 void
 mav_connection::sendHeartBeat ()
@@ -81,15 +80,16 @@ mav_connection::heartbeat_loop ()
 }
 
 void
-mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, uint32_t altitude, uint8_t altitude_type,
+mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, double altitude_m, uint8_t altitude_type,
                           uint16_t heading, uint16_t hor_vel, uint16_t ver_vel, char *callsign, uint8_t emitter_type,
                           uint8_t tslc, uint16_t flags, uint16_t squawk)
 {
     mavlink_message_t msg;
+    /* ADSB_VEHICLE.altitude is millimetres; PositionData carries metres. */
     mavlink_msg_adsb_vehicle_pack (SYS_ID, COMP_ID, &msg, icao_address, static_cast<int32_t> (lat / LAT_LNG_COV),
                                    static_cast<int32_t> (lng / LAT_LNG_COV), altitude_type,
-                                   static_cast<int32_t> (altitude * ALT_COV), heading, hor_vel,
-                                   static_cast<int16_t> (ver_vel), callsign, emitter_type, tslc, flags, squawk);
+                                   metres_to_mav_mm (altitude_m), heading, hor_vel, static_cast<int16_t> (ver_vel),
+                                   callsign, emitter_type, tslc, flags, squawk);
     this->sendMavLinkMsg (&msg);
 }
 
@@ -523,7 +523,8 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
                 std::lock_guard<std::mutex> lk (this->state_lock);
                 this->last_position = Point (latd, lngd);
             }
-            this->report_position (latd, lngd, (alt / ALT_COV), heading, vh, vz);
+            /* GLOBAL_POSITION_INT.alt is millimetres; PositionData carries metres. */
+            this->report_position (latd, lngd, mav_mm_to_metres (alt), heading, vh, vz);
         }
         break;
         case MAVLINK_MSG_ID_BATTERY_STATUS:

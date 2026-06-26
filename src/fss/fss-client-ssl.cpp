@@ -1,3 +1,4 @@
+#include "altitude-units.hpp"
 #include "command-ack.hpp"
 #include "fmu-fss-types.hpp"
 #include "internal.hpp"
@@ -209,10 +210,11 @@ void
 fss_client_ssl::handlePositionReport (
     const std::shared_ptr<flight_safety_system::transport::fss_message_position_report> &msg)
 {
+    /* The FSS wire altitude is feet; PositionData carries metres. */
     this->report_position_data (PositionData (
-        msg->getLatitude (), msg->getLongitude (), msg->getAltitude (), msg->getHeading (), msg->getHorzVel (),
-        msg->getVertVel (), msg->getCallSign (), msg->getSquawk (), msg->getICAOAddress (), msg->getTimeStamp (),
-        msg->getFlags (), msg->getAltitudeType (), msg->getEmitterType ()));
+        msg->getLatitude (), msg->getLongitude (), feet_to_metres (msg->getAltitude ()), msg->getHeading (),
+        msg->getHorzVel (), msg->getVertVel (), msg->getCallSign (), msg->getSquawk (), msg->getICAOAddress (),
+        msg->getTimeStamp (), msg->getFlags (), msg->getAltitudeType (), msg->getEmitterType ()));
 }
 
 void

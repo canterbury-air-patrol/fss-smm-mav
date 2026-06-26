@@ -91,7 +91,7 @@ MAV::sendADSB (PositionData pd)
     char callsign[9] = { 0 };
     std::strncpy (callsign, pd.getCallSign ().c_str (), 8);
     this->connection->sendADSB (pd.getICAOAddress (), pd.getP ().getLatitude (), pd.getP ().getLongitude (),
-                                static_cast<uint16_t> (pd.getAltitude ()), pd.getAltitudeType (), pd.getHeading (),
+                                pd.getAltitudeMetres (), pd.getAltitudeType (), pd.getHeading (),
                                 pd.getVelocityHorizontal (), pd.getVelocityVertical (), callsign, pd.getEmitterType (),
                                 0, pd.getFlags (), pd.getSquawk ());
 }

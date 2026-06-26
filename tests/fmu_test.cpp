@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "aircraft.hpp"
+#include "altitude-units.hpp"
 #include "fmu-config.hpp"
 #include "fmu.hpp"
 #include "fss/command-ack-group.hpp"
@@ -16,6 +17,7 @@
 #include "smm/search-altitude.hpp"
 
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -818,6 +820,39 @@ TEST_CASE ("a new command supersedes an unresolved group and its copies are hand
     auto live_resolution = group.resolve (second.epoch, actioned ());
     REQUIRE (live_resolution.size () == 1);
     REQUIRE (live_resolution[0] == 3);
+}
+
+TEST_CASE ("altitude unit helpers convert between metres, feet and MAVLink mm", "[altitude_units]")
+{
+    /* 1 foot is exactly 0.3048 m, so 100 m is ~328.084 ft. */
+    REQUIRE (metres_to_feet (100.0) == Catch::Approx (328.0839895));
+    REQUIRE (feet_to_metres (328.0839895) == Catch::Approx (100.0));
+    /* Round-trip a whole-foot value back to itself. */
+    REQUIRE (metres_to_feet (feet_to_metres (500.0)) == Catch::Approx (500.0));
+
+    /* MAVLink GLOBAL_POSITION_INT.alt / ADSB_VEHICLE.altitude are millimetres. */
+    REQUIRE (mav_mm_to_metres (100000) == Catch::Approx (100.0));
+    REQUIRE (metres_to_mav_mm (100.0) == 100000);
+    /* metres_to_mav_mm rounds to the nearest millimetre. */
+    REQUIRE (metres_to_mav_mm (1.2345) == 1235);
+}
+
+TEST_CASE ("PositionData altitude is metres and converts correctly at each protocol boundary", "[altitude_units]")
+{
+    /* A position at exactly 100 m drives the three outbound boundaries. */
+    PositionData pd (0.0, 0.0, 100.0, 0, 0, 0);
+    REQUIRE (pd.getAltitudeMetres () == Catch::Approx (100.0));
+
+    /* SMM is sent metres directly (this is the bug fix: previously feet were
+     * forwarded mislabelled as metres). */
+    REQUIRE (std::lround (pd.getAltitudeMetres ()) == 100);
+
+    /* FSS is sent feet: 100 m -> 328 ft (rounded), matching the FSS web UI's
+     * "Altitude (ft)" display. */
+    REQUIRE (static_cast<int16_t> (std::lround (metres_to_feet (pd.getAltitudeMetres ()))) == 328);
+
+    /* ADS-B (MAVLink ADSB_VEHICLE.altitude) is sent millimetres: 100 m -> 100000 mm. */
+    REQUIRE (metres_to_mav_mm (pd.getAltitudeMetres ()) == 100000);
 }
 
 TEST_CASE ("battery_pack_voltage_v converts millivolts and maps the unknown sentinel", "[battery]")
