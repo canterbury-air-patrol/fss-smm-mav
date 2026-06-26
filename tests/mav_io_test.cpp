@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "mav/internal.hpp"
+#include "mav/mission-plan.hpp"
 
 #include <ardupilotmega/mavlink.h>
 
@@ -13,6 +14,7 @@
 #include <netinet/in.h>
 #include <optional>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -34,6 +36,9 @@ namespace
  * contends with the FMU threads on a shared per-channel status (the wire bytes are
  * identical regardless of channel). */
 constexpr mavlink_channel_t autopilot_tx_channel = MAVLINK_COMM_2;
+/* The test parses the FMU's traffic on its own channel too, distinct from the TX
+ * channel above and the FMU's COMM_0/COMM_1, so no channel status is shared. */
+constexpr mavlink_channel_t autopilot_rx_channel = MAVLINK_COMM_3;
 
 /* A minimal stand-in for the autopilot end of the MAVLink link: it listens on an
  * ephemeral loopback port, accepts a single connection, and lets the test inject
@@ -80,6 +85,10 @@ class MavLoopbackServer
                         }
                         return;
                     }
+                    /* Bound recv() so the server-side parse loop can re-check its
+                     * deadline rather than block forever waiting for the FMU. */
+                    struct timeval tv = { 0, 200000 };
+                    setsockopt (fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof (tv));
                     int old = this->client_fd.exchange (fd);
                     if (old >= 0)
                     {
@@ -156,6 +165,59 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
+    /* Send a MISSION_REQUEST_INT for `seq` as the autopilot would during a
+     * mission upload (addressed to the FMU at SYS_ID/COMP_ID). */
+    void
+    sendMissionRequestInt (uint16_t seq, uint8_t mission_type)
+    {
+        mavlink_message_t msg;
+        mavlink_msg_mission_request_int_pack_chan (1, 1, autopilot_tx_channel, &msg, fmu_sys_id, fmu_comp_id, seq,
+                                                   mission_type);
+        sendMsg (msg);
+    }
+
+    /* Acknowledge a completed mission upload as accepted. */
+    void
+    sendMissionAck (uint8_t mission_type)
+    {
+        mavlink_message_t msg;
+        mavlink_msg_mission_ack_pack_chan (1, 1, autopilot_tx_channel, &msg, fmu_sys_id, fmu_comp_id,
+                                           MAV_MISSION_ACCEPTED, mission_type, 0);
+        sendMsg (msg);
+    }
+
+    /* Read and parse inbound MAVLink from the FMU until a message of `want`
+     * arrives (skipping heartbeats, mode sets, etc.) or the timeout elapses. */
+    auto
+    recvMessage (uint32_t want, mavlink_message_t &out, std::chrono::milliseconds timeout) -> bool
+    {
+        const auto deadline = std::chrono::steady_clock::now () + timeout;
+        mavlink_status_t status;
+        while (std::chrono::steady_clock::now () < deadline)
+        {
+            int fd = this->client_fd.load ();
+            if (fd < 0)
+            {
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+                continue;
+            }
+            uint8_t buf[1024];
+            ssize_t n = recv (fd, buf, sizeof (buf), 0);
+            if (n <= 0)
+            {
+                continue; /* timeout or EOF: the while-condition re-checks the deadline */
+            }
+            for (ssize_t i = 0; i < n; i++)
+            {
+                if (mavlink_parse_char (autopilot_rx_channel, buf[i], &out, &status) && out.msgid == want)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /* Drop the accepted connection to simulate a mid-stream link loss. */
     void
     dropClient ()
@@ -185,6 +247,11 @@ class MavLoopbackServer
     }
 
   private:
+    /* The FMU's MAVLink identity (SYS_ID/COMP_ID in mavlink.cpp): mission
+     * requests/acks must be addressed here for the FMU to act on them. */
+    static constexpr uint8_t fmu_sys_id = 200;
+    static constexpr uint8_t fmu_comp_id = 1;
+
     void
     sendMsg (const mavlink_message_t &msg)
     {
@@ -247,7 +314,8 @@ constexpr auto io_timeout = std::chrono::seconds (8);
 void
 reset_mav_parser ()
 {
-    mavlink_reset_channel_status (MAVLINK_COMM_0);
+    mavlink_reset_channel_status (MAVLINK_COMM_0);       /* FMU parse channel */
+    mavlink_reset_channel_status (autopilot_rx_channel); /* test-side parse channel */
 }
 
 /* Thread-safe counter of position callbacks (invoked from the FMU recv thread),
@@ -399,4 +467,73 @@ TEST_CASE ("mav_connection survives repeated drop/reconnect cycles", "[mav_io]")
             io_timeout));
         prove_delivery ();
     }
+}
+
+/* Drive a full mission-upload handshake (count -> request -> item -> ack) and
+ * assert the resulting MISSION_SET_CURRENT, which the pure mission_item_for tests
+ * cannot reach. Returns the set-current sequence the FMU selected after the ack.
+ * `expected_count` items are exchanged. */
+namespace
+{
+auto
+run_mission_upload (MavLoopbackServer &server, uint16_t expected_count, std::vector<uint16_t> &item_seqs) -> uint16_t
+{
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
+    REQUIRE (mavlink_msg_mission_count_get_count (&msg) == expected_count);
+    const uint8_t mission_type = mavlink_msg_mission_count_get_mission_type (&msg);
+
+    for (uint16_t seq = 0; seq < expected_count; seq++)
+    {
+        server.sendMissionRequestInt (seq, mission_type);
+        REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_ITEM_INT, msg, io_timeout));
+        item_seqs.push_back (mavlink_msg_mission_item_int_get_seq (&msg));
+    }
+
+    server.sendMissionAck (mission_type);
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, io_timeout));
+    return mavlink_msg_mission_set_current_get_seq (&msg);
+}
+} // namespace
+
+TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m);
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* A goto lays out seq 0/1 = waypoint, seq 2 = RTL terminator (count 3). */
+    conn.commandGoto (Point (-43.5, 172.6));
+
+    std::vector<uint16_t> item_seqs;
+    const uint16_t set_current = run_mission_upload (server, 3, item_seqs);
+
+    REQUIRE (item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
+    /* A goto resumes at mission sequence 0 (no search offset). */
+    REQUIRE (set_current == 0);
+}
+
+TEST_CASE ("a search mission resume sets current past the setup items (todo/48)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m);
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* An empty search: seq 0/1 = setup/takeoff, seq 2 = RTL terminator (count 3).
+     * Its current point index is 0, which must resume at mission sequence 2 — the
+     * two-item offset, not the bare point index. */
+    conn.loadSearch (std::make_shared<SMMSearch> ());
+
+    std::vector<uint16_t> item_seqs;
+    const uint16_t set_current = run_mission_upload (server, 3, item_seqs);
+
+    REQUIRE (item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
+    REQUIRE (set_current == search_point_mission_seq (0));
+    REQUIRE (set_current == 2);
 }
