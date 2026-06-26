@@ -50,6 +50,20 @@ jobs:
         ./configure
         make check
 
+    - name: Smoke test (CLI and docker entrypoint scripts)
+      run: |
+        # The binary must start and handle --help/--version cleanly.
+        ./src/cap-fmu --help
+        ./src/cap-fmu --version
+        # A missing --terminate-action must fail (exit non-zero), matching the
+        # contract the Docker entrypoint now satisfies.
+        if ./src/cap-fmu; then echo "expected failure without --terminate-action" >&2; exit 1; fi
+        # The deployment scripts must at least parse.
+        bash -n docker/cap-fmu.sh
+        bash -n docker/setup.sh
+        bash -n docker/build.sh
+        bash -n docker/install.sh
+
   sanitizers:
     runs-on: ubuntu-latest
     container: debian:trixie
