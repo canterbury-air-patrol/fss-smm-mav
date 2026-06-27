@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -157,6 +158,9 @@ SMM::reportPosition (PositionData t_pd)
 void
 SMM::tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos)
 {
+    /* Enforce the locking contract: the caller must hold the lock on entry, or the
+     * lock.unlock() around the blocking fetch below would be undefined. */
+    assert (lock.owns_lock ());
     uint64_t curr_ts = current_timestamp_ms ();
     switch (search_acquire_action (this->asset != nullptr, this->search_retry_ts, curr_ts))
     {
