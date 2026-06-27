@@ -242,6 +242,13 @@ SMM::search (Point current_pos)
     this->search_active = true;
     if (this->current_search != nullptr)
     {
+        /* We already hold a search that was paused by an interrupting command
+         * (hold/rtl, which cancelSearch()'d without dropping current_search and
+         * cleared search_loaded on the MAV side). Re-issue it so `continue`
+         * resumes it from the last point: mav.loadSearch() re-uploads and jumps to
+         * the current point when the mission is no longer loaded, and is a no-op if
+         * it still is. */
+        this->mav.loadSearch (this->current_search);
         return;
     }
     /* tryAcquireSearch() guards the null-asset case itself (RTL + back off, then
@@ -253,6 +260,11 @@ SMM::search (Point current_pos)
 void
 SMM::cancelSearch ()
 {
+    /* Pause, not abandon: deactivate the search but deliberately retain
+     * current_search so a later `continue` (which re-enters SMM::search) can
+     * resume it from the last reached point rather than re-acquiring a fresh one
+     * from the server. The search is only truly dropped on completion
+     * (reachedPoint) or a failed (re)acquire. */
     std::lock_guard<std::mutex> lk (this->search_lock);
     this->search_active = false;
     this->search_retry_ts = 0;

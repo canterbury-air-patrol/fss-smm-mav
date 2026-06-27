@@ -209,6 +209,26 @@ TEST_CASE ("fss_cmd_continue with smm_cmd_abandon_search leads to searching", "[
     REQUIRE (smm->search_calls > 0);
 }
 
+/* The search is paused (not abandoned) by an interrupting command, so returning
+ * to searching via `continue` must re-invoke SMM::search to resume it. This pins
+ * the state-machine half of todo/50; the SMM half (re-issuing the mission upload)
+ * is covered in mav_io_test. */
+TEST_CASE ("continue after a hold re-invokes the search so it can resume", "[state_machine]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 1);
+
+    /* hold interrupts the search... */
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    /* ...and continue must drive another search() call to resume it. */
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 2);
+}
+
 /* Override matrix: the searching state defers to the SMM command, and any higher
  * priority input (an explicit FSS command, low battery, or comms failure) takes
  * over an active search. These cover the transitions into/out of searching; the

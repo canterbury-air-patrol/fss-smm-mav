@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "mav/internal.hpp"
+#include "mav/mav.hpp"
 #include "mav/mission-plan.hpp"
+#include "smm/smm.hpp"
 
 #include <ardupilotmega/mavlink.h>
 
@@ -543,4 +545,40 @@ TEST_CASE ("a search mission resume sets current past the setup items (todo/48)"
     REQUIRE (result.item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
     REQUIRE (result.set_current == search_point_mission_seq (0));
     REQUIRE (result.set_current == 2);
+}
+
+/* Test-only accessor for the friend seam in SMM: inject a held (paused) search,
+ * since the only production path to current_search is an HTTP acquire. */
+struct SMMTestAccess
+{
+    static void
+    setSearch (SMM &smm, std::shared_ptr<SMMSearch> search)
+    {
+        smm.current_search = std::move (search);
+    }
+};
+
+TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+
+    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_goto_altitude_m, test_altitude_floor_m,
+             test_altitude_cap_m);
+    mav.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0);
+    /* Simulate a search acquired earlier and then paused by an interrupting hold/
+     * rtl: still held locally, but no longer loaded on the autopilot. */
+    SMMTestAccess::setSearch (smm, std::make_shared<SMMSearch> ());
+
+    /* `continue` re-enters searching, which calls SMM::search. Before todo/50 this
+     * early-returned and never re-commanded the autopilot; it must now re-issue
+     * the mission upload so the search resumes. */
+    smm.search (Point (-43.5, 172.6));
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
+    REQUIRE (mavlink_msg_mission_count_get_count (&msg) == 3);
 }
