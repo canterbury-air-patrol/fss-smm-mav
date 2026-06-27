@@ -530,13 +530,16 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
     {
         case MAVLINK_MSG_ID_HEARTBEAT:
         {
-            /* Just record receipt and the autopilot metadata. Whether this makes
-             * the link "up" (and the resulting comms-status report) is decided by
-             * heartbeat_loop(), the single owner of the comms status. */
-            this->last_heartbeat_ts.store (current_timestamp_ms ());
+            /* Record the autopilot metadata BEFORE the receipt timestamp. The
+             * comms-up signal is driven off last_heartbeat_ts by heartbeat_loop(),
+             * the single owner of the comms status; recording the type first means
+             * "link up" implies the FMU can already resolve airframe-specific
+             * commands, so a command issued the instant the link comes up is not
+             * needlessly deferred. */
             uint8_t autopilot_type = mavlink_msg_heartbeat_get_type (msg);
             sys->setAutoPilotMode (autopilot_type);
             sys->setFlightMode (mavlink_msg_heartbeat_get_custom_mode (msg));
+            this->last_heartbeat_ts.store (current_timestamp_ms ());
             this->replayPendingMode (autopilot_type);
         }
         break;

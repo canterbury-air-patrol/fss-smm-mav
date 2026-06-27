@@ -142,12 +142,36 @@ SMM::reportPosition (PositionData t_pd)
     }
     if (this->search_active && this->current_search == nullptr)
     {
+        /* Opportunistic retry: a fresh position arrived, so use it to (re)attempt
+         * acquisition. This is one of two retry triggers; retryPendingSearch()
+         * drives the other off the reconnect timer so a search is still retried
+         * when position reports stop (see todo/41). */
         this->tryAcquireSearch (lk, t_pd.getP ());
     }
 }
 
+void
+SMM::retryPendingSearch ()
+{
+    /* Timer-driven counterpart to the opportunistic retry in reportPosition().
+     * Driven from the reconnect thread, it re-attempts acquisition of a search
+     * that is active but not yet acquired even when MAV position reports have
+     * stopped (a GPS/telemetry gap) — without it, an incoming position report was
+     * the only retry trigger, so acquisition (or the disconnected-RTL fallback in
+     * tryAcquireSearch) could stall indefinitely after an SMM reconnect. The
+     * last known MAV position is used for the fetch. The search_retry_ts backoff
+     * still rate-limits the actual fetches, so calling this every reconnect tick
+     * is cheap when a retry is not yet due. */
+    std::unique_lock<std::mutex> lk (this->search_lock);
+    if (this->search_active && this->current_search == nullptr)
+    {
+        this->tryAcquireSearch (lk, this->mav.getCurrentPosition ());
+    }
+}
+
 /* Tries to acquire a search from SMM. On failure, sets a retry timestamp so
- * periodic calls back off.
+ * periodic calls back off. Reached from both retry triggers — reportPosition()
+ * (on a fresh position) and retryPendingSearch() (off the reconnect timer).
  *
  * Locking contract: `lock` is the caller's lock on search_lock and must be held
  * (owns_lock()) on entry. The blocking smm_asset_get_search() fetch runs with

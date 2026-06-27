@@ -57,6 +57,10 @@ class SMM : public ISMM
                   const flight_safety_system::secure_string &pass, const std::string &asset_name);
     void search (Point current_pos) override;
     void cancelSearch () override;
+    /* Timer-driven retry of a pending (active but not yet acquired) search.
+     * Called periodically off the reconnect thread so acquisition is not
+     * coupled solely to MAV position-report cadence (see todo/41). */
+    void retryPendingSearch ();
     void reportPosition (PositionData t_pd);
     void reachedPoint (int point);
     auto currentSearchPoints () -> int;
