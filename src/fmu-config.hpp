@@ -36,6 +36,17 @@ struct FmuConfig
     int lowbat_threshold{ 20 };
     /* Interval between FSS/MAV reconnection attempts, seconds. */
     int reconnect_interval_s{ 10 };
+    /* Rate at which the autopilot is asked to stream GLOBAL_POSITION_INT,
+     * milliseconds between messages (200ms = 5Hz). Faster airframes (fixed-wing)
+     * may want a shorter interval than a slow rover. */
+    int position_stream_interval_ms{ 200 };
+    /* Rate at which the autopilot is asked to stream BATTERY_STATUS,
+     * milliseconds between messages. */
+    int battery_stream_interval_ms{ 1000 };
+    /* Minimum interval between SMM position reports, milliseconds. Throttles the
+     * once-per-position HTTP report to the SMM server independently of the
+     * (faster) MAVLink position stream above. */
+    int smm_position_report_interval_ms{ 1000 };
     /* Logging verbosity: error, info (default), or debug. */
     LogLevel log_level{ LogLevel::info };
     /* Directory the rotating fmu.log is written to. Defaults to the system

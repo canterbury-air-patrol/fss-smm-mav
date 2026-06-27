@@ -39,6 +39,8 @@ class SMM : public ISMM
     size_t assets_list_count{ 0 };
     smm_asset asset{ nullptr };
     uint64_t position_report_last_ts{ 0 };
+    /* Minimum gap between SMM position reports, milliseconds (from config). */
+    uint64_t position_report_interval_ms{ 1000 };
     bool search_active{ false };
     uint64_t search_retry_ts{ 0 };
     static constexpr uint64_t search_retry_interval_ms{ 5000 };
@@ -47,7 +49,8 @@ class SMM : public ISMM
     void tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos);
 
   public:
-    SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg);
+    SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
+         uint64_t t_position_report_interval_ms = 1000);
     SMM (SMM &) = delete;
     SMM (SMM &&) = delete;
     auto operator= (SMM &) -> SMM & = delete;

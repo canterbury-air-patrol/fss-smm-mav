@@ -91,9 +91,11 @@ MAV::sendADSB (PositionData pd)
 }
 
 MAV::MAV (std::string t_addr, uint16_t t_port, terminate_action ta, uint16_t t_goto_altitude_m,
-          uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m)
+          uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m, uint32_t t_position_stream_interval_us,
+          uint32_t t_battery_stream_interval_us)
     : connection (std::make_shared<mav_connection> (std::move (t_addr), t_port, t_goto_altitude_m, t_altitude_floor_m,
-                                                    t_altitude_cap_m)),
+                                                    t_altitude_cap_m, t_position_stream_interval_us,
+                                                    t_battery_stream_interval_us)),
       action (ta)
 {
 }

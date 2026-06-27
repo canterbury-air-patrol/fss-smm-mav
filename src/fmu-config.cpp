@@ -168,6 +168,21 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
     {
         setRangedInt (cfg.reconnect_interval_s, "reconnect_interval_s", fmu["reconnect_interval_s"], 1, 3600);
     }
+    if (fmu.isMember ("position_stream_interval_ms"))
+    {
+        setRangedInt (cfg.position_stream_interval_ms, "position_stream_interval_ms",
+                      fmu["position_stream_interval_ms"], 50, 60000);
+    }
+    if (fmu.isMember ("battery_stream_interval_ms"))
+    {
+        setRangedInt (cfg.battery_stream_interval_ms, "battery_stream_interval_ms", fmu["battery_stream_interval_ms"],
+                      50, 60000);
+    }
+    if (fmu.isMember ("smm_position_report_interval_ms"))
+    {
+        setRangedInt (cfg.smm_position_report_interval_ms, "smm_position_report_interval_ms",
+                      fmu["smm_position_report_interval_ms"], 100, 60000);
+    }
 
     if (fmu.isMember ("log_level"))
     {
