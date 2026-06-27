@@ -27,8 +27,17 @@ class FMUStateMachine
      * changed is what updateState() actually selected (nullopt when no
      * transition occurred). Must be called with this->lock held. */
     auto resolveFSSCommand (FMUState desired, const std::optional<FMUState> &changed) -> FSSCommandResolution;
-    void actionState (FMUState state);
+    /* Carry out the side effects of entering `state` (command the MAV, cancel the
+     * search, fire the state-change callback). Returns whether the MAV command was
+     * transmitted; for a safety-critical state a false result is recorded in
+     * pending_replay_state so it is re-sent once the MAV link recovers (todo/46).
+     * Must be called WITHOUT this->lock held (it locks internally). */
+    auto actionState (FMUState state) -> bool;
     FMUState current_state{ fmu_state_manual };
+    /* A safety-critical state (RTL / failsafe / low-battery / terminate) whose MAV
+     * command could not be transmitted (link down). Replayed when MAV comms
+     * recover; empty once delivered or superseded. Guarded by this->lock. */
+    std::optional<FMUState> pending_replay_state{};
     FSSCommand fss_command{ fss_cmd_unknown };
     SMMCommand smm_command{ smm_cmd_none };
     int low_battery_count{ 0 };

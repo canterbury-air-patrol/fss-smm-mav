@@ -201,6 +201,62 @@ TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machin
     REQUIRE (mav->last_mode == flight_mode_hold);
 }
 
+TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms recover (todo/46)",
+           "[state_machine][replay]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    /* MAV link is down: action sends do not reach the autopilot. */
+    mav->send_succeeds = false;
+    sm->setMavCommsFailure (true);
+    latch_low_battery (sm);
+    /* The low-battery latch (higher priority than comms) holds the state at RTL,
+     * but the command never made it onto the wire. */
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    const int calls_before = mav->set_mode_calls;
+
+    /* The link recovers. The latch keeps current_state unchanged, so there is no
+     * transition to re-drive the action — without replay the RTL would never be
+     * re-sent. It must be replayed now. */
+    mav->send_succeeds = true;
+    sm->setMavCommsFailure (false);
+    REQUIRE (mav->set_mode_calls == calls_before + 1);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (todo/46)", "[state_machine][replay]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    mav->send_succeeds = false;
+    sm->setMavCommsFailure (true);
+    sm->FSSNewCommand (fss_cmd_terminate);
+    REQUIRE (mav->terminated);
+    const int terminate_before = mav->terminate_calls;
+
+    /* terminate stays the current state on recovery (it is the top priority and
+     * still commanded), so updateState reports no transition; the failed send must
+     * still be re-issued. Policy: re-send terminate on recovery. */
+    mav->send_succeeds = true;
+    sm->setMavCommsFailure (false);
+    REQUIRE (mav->terminate_calls == terminate_before + 1);
+}
+
+TEST_CASE ("a safety action that was transmitted is not replayed on a later MAV recovery (todo/46)",
+           "[state_machine][replay]")
+{
+    auto [mav, smm, fss, sm] = make_sm ();
+
+    /* send_succeeds stays true: the RTL reaches the autopilot first time. */
+    latch_low_battery (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    const int calls_before = mav->set_mode_calls;
+
+    /* A subsequent MAV recovery edge with nothing outstanding must not re-send. */
+    sm->setMavCommsFailure (false);
+    REQUIRE (mav->set_mode_calls == calls_before);
+}
+
 TEST_CASE ("fss_cmd_continue with smm_cmd_none leads to searching", "[state_machine]")
 {
     auto [mav, smm, fss, sm] = make_sm ();

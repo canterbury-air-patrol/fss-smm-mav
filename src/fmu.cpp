@@ -131,18 +131,42 @@ FMUStateMachine::resolveFSSCommand (FMUState desired, const std::optional<FMUSta
     return res;
 }
 
-void
-FMUStateMachine::actionState (FMUState state)
+namespace
+{
+/* States whose MAV command must reach the autopilot for flight safety. If the
+ * send fails (link down) these are recorded for replay once the link recovers;
+ * a failed manual/hold/goto/altitude is left to the operator to re-issue. */
+auto
+requires_replay_on_failure (FMUState state) -> bool
+{
+    switch (state)
+    {
+        case fmu_state_rtl:
+        case fmu_state_failsafe:
+        case fmu_state_low_battery:
+        case fmu_state_terminate:
+            return true;
+        default:
+            return false;
+    }
+}
+} // namespace
+
+auto
+FMUStateMachine::actionState (FMUState state) -> bool
 {
     if (state != fmu_state_searching)
     {
         this->smm.cancelSearch ();
     }
+    /* searching is driven by SMM (which owns the mission upload), not a direct MAV
+     * action whose transmission we track, so it counts as "sent". */
+    bool sent = true;
     switch (state)
     {
         case fmu_state_manual:
             /* Tell MAV to exit auto mode */
-            this->mav.setMode (flight_mode_manual);
+            sent = this->mav.setMode (flight_mode_manual);
             break;
         case fmu_state_searching:
             /* Tell SMM to implement the search */
@@ -152,39 +176,57 @@ FMUStateMachine::actionState (FMUState state)
         case fmu_state_failsafe:
         case fmu_state_low_battery:
             /* Tell MAV to RTL. When the MAV link is down (e.g. the comms-loss
-             * failsafe fired precisely because telemetry was lost), this send is
-             * best-effort: sendMavLinkMsg short-circuits with the link down, so the
-             * RTL may not reach the autopilot. ArduPilot's own comms/GCS failsafe
-             * is the backstop in that case. */
-            this->mav.setMode (flight_mode_rtl);
+             * failsafe fired precisely because telemetry was lost), the send is
+             * skipped (sendMavLinkMsg short-circuits with the link down), so the
+             * RTL does not reach the autopilot now. ArduPilot's own comms/GCS
+             * failsafe is the immediate backstop; in addition, a failed send here
+             * is recorded below and replayed once the MAV link recovers (todo/46). */
+            sent = this->mav.setMode (flight_mode_rtl);
             break;
         case fmu_state_goto:
             /* Tell MAV to Goto the fss position */
             this->mav.gotoPosition (this->fss.getGoto ());
-            this->mav.setMode (flight_mode_goto);
+            sent = this->mav.setMode (flight_mode_goto);
             break;
         case fmu_state_hold:
             /* Tell MAV to Circle/Hold Position */
-            this->mav.setMode (flight_mode_hold);
+            sent = this->mav.setMode (flight_mode_hold);
             break;
         case fmu_state_altitude_adjust:
             /* Tell MAV to adjust the altitude */
-            this->mav.setAltitude (this->fss.getAltitude ());
+            sent = this->mav.setAltitude (this->fss.getAltitude ());
             break;
         case fmu_state_disarmed:
             /* Tell MAV to disarm the aircraft */
-            this->mav.disarm ();
+            sent = this->mav.disarm ();
             break;
         case fmu_state_terminate:
             /* Tell MAV to terminate the flight */
-            this->mav.terminate ();
+            sent = this->mav.terminate ();
             break;
+    }
+
+    {
+        /* Remember a safety-critical action that did not make it onto the wire so
+         * it can be replayed on MAV recovery; clear the record on any action that
+         * did transmit (or any non-safety transition), since the autopilot now has
+         * the latest command and there is nothing stale to re-send. */
+        std::lock_guard<std::mutex> lk (this->lock);
+        if (requires_replay_on_failure (state) && !sent)
+        {
+            this->pending_replay_state = state;
+        }
+        else
+        {
+            this->pending_replay_state.reset ();
+        }
     }
 
     if (this->state_change_cb)
     {
         this->state_change_cb (state);
     }
+    return sent;
 }
 
 auto
@@ -279,14 +321,30 @@ void
 FMUStateMachine::setMavCommsFailure (bool failed)
 {
     std::optional<FMUState> changed_to;
+    std::optional<FMUState> replay;
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->mav_comms_lost = failed;
         changed_to = this->updateState ();
+        /* The MAV link just recovered. If a safety-critical action could not be
+         * transmitted while it was down, re-send it now. A non-clearing latch
+         * (low-battery, or a still-current terminate) keeps current_state the
+         * same, so updateState() reports no transition and the action would
+         * otherwise never be retried. A clearing latch (comms failsafe) instead
+         * transitions to the commanded state, handled by the changed_to branch
+         * below — which also clears any pending replay. */
+        if (!failed && !changed_to && this->pending_replay_state.has_value ())
+        {
+            replay = this->pending_replay_state;
+        }
     }
     if (changed_to)
     {
         this->actionState (*changed_to);
+    }
+    else if (replay)
+    {
+        this->actionState (*replay);
     }
 }
 
