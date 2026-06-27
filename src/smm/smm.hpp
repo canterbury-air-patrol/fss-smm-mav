@@ -18,6 +18,10 @@ extern "C"
 
 class SMM : public ISMM
 {
+    /* Test-only accessor: lets the resume tests inject a held (paused) search,
+     * since the only production path to current_search is an HTTP acquire. */
+    friend struct SMMTestAccess;
+
   private:
     MAV &mav;
     smm_connection conn{ nullptr };
