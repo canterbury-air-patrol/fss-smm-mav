@@ -556,6 +556,14 @@ struct SMMTestAccess
     {
         smm.current_search = std::move (search);
     }
+    /* Mark a search active without a held search, as if one had been requested
+     * but not yet acquired (no SMM connection in these tests, so the production
+     * HTTP acquire path is unavailable). */
+    static void
+    setSearchActive (SMM &smm, bool active)
+    {
+        smm.search_active = active;
+    }
 };
 
 TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "[mav_io]")
@@ -581,4 +589,46 @@ TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "
     mavlink_message_t msg;
     REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
     REQUIRE (mavlink_msg_mission_count_get_count (&msg) == 3);
+}
+
+TEST_CASE ("a pending search acquisition is retried off the timer, not just on position (todo/41)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_goto_altitude_m, test_altitude_floor_m,
+             test_altitude_cap_m);
+    mav.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    mav.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* Wait for the cold-start comms-down edge BEFORE sending heartbeats, so the
+     * heartbeats below produce a real down->up transition the status callback
+     * reports (it only fires on change; if the link came up before the loop
+     * observed it down, no "ok" edge would ever fire). */
+    REQUIRE (
+        MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
+    /* Now drive the up edge. Once comms reports ok the autopilot type is known
+     * (the heartbeat handler registers it before recording receipt), so the
+     * commanded RTL below is sent as SET_MODE rather than deferred. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendHeartbeat ();
+            return recorder.lastStatus () == MavCommsStatus::ok;
+        },
+        io_timeout));
+
+    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0);
+    /* A search is active but not yet acquired, with no SMM asset (no connect
+     * call). The acquire fallback in that state is a safe RTL; the resulting
+     * SET_MODE is the observable that retryPendingSearch drove an acquire attempt
+     * off the reconnect-timer path, with no position report involved. */
+    SMMTestAccess::setSearchActive (smm, true);
+
+    smm.retryPendingSearch ();
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, io_timeout));
 }

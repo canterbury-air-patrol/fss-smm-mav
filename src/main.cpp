@@ -245,6 +245,12 @@ class App
             }
             fss->reconnectAll ();
             mav->attemptReconnect ();
+            /* Drive a timer-based retry of a pending search acquisition so it is
+             * not starved when MAV position reports stop (todo/41). Done after the
+             * reconnect attempts above so a slow SMM call cannot delay them within
+             * a cycle; the search_retry_ts backoff makes this a cheap no-op when a
+             * retry is not yet due. */
+            smm->retryPendingSearch ();
         }
         enqueue_event (std::make_shared<event> (Nudge{}));
     }
