@@ -94,7 +94,12 @@ class MavLoopbackServer
     }
 
     /* Send a HEARTBEAT as if from the autopilot (sysid 1), so the FMU records a
-     * fresh last_heartbeat_ts and the heartbeat loop reports the link up. */
+     * fresh last_heartbeat_ts and the heartbeat loop reports the link up.
+     *
+     * Pack on a dedicated MAVLink channel (COMM_1), not the default COMM_0: the
+     * FMU's recv and heartbeat threads pack/parse on COMM_0, and packing here from
+     * the test thread too would race on that channel's shared global status (the
+     * wire bytes are identical regardless of channel). */
     void
     sendHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR)
     {
@@ -104,7 +109,8 @@ class MavLoopbackServer
             return;
         }
         mavlink_message_t msg;
-        mavlink_msg_heartbeat_pack (1, 1, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0, MAV_STATE_ACTIVE);
+        mavlink_msg_heartbeat_pack_chan (1, 1, MAVLINK_COMM_1, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0,
+                                         MAV_STATE_ACTIVE);
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
         unsigned int len = mavlink_msg_to_send_buffer (buf, &msg);
         ssize_t sent = send (fd, buf, len, MSG_NOSIGNAL);
