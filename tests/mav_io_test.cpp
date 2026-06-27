@@ -27,6 +27,8 @@
 namespace
 {
 
+constexpr mavlink_channel_t autopilot_tx_channel = MAVLINK_COMM_2;
+
 /* A minimal stand-in for the autopilot end of the MAVLink link: it listens on an
  * ephemeral loopback port, accepts a single connection, and lets the test inject
  * MAVLink frames or drop the connection mid-stream. */
@@ -96,10 +98,9 @@ class MavLoopbackServer
     /* Send a HEARTBEAT as if from the autopilot (sysid 1), so the FMU records a
      * fresh last_heartbeat_ts and the heartbeat loop reports the link up.
      *
-     * Pack on a dedicated MAVLink channel (COMM_1), not the default COMM_0: the
-     * FMU's recv and heartbeat threads pack/parse on COMM_0, and packing here from
-     * the test thread too would race on that channel's shared global status (the
-     * wire bytes are identical regardless of channel). */
+     * Pack on a dedicated MAVLink channel, not the default COMM_0 or the FMU's
+     * transmit channel: MAVLink's generated pack helpers update shared per-
+     * channel status, while the wire bytes are identical regardless of channel. */
     void
     sendHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR)
     {
@@ -109,7 +110,7 @@ class MavLoopbackServer
             return;
         }
         mavlink_message_t msg;
-        mavlink_msg_heartbeat_pack_chan (1, 1, MAVLINK_COMM_1, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0,
+        mavlink_msg_heartbeat_pack_chan (1, 1, autopilot_tx_channel, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0,
                                          MAV_STATE_ACTIVE);
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
         unsigned int len = mavlink_msg_to_send_buffer (buf, &msg);

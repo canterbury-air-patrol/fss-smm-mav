@@ -111,6 +111,9 @@ class mav_connection
     std::atomic<int> fd{ -1 };
     uint64_t last_tried{ 0 };
     uint16_t retry_count{ 0 };
+    /* Guards both the socket write and MAVLink's per-channel transmit state.
+     * Generated *_pack_chan() helpers update global sequence/status for the
+     * channel they finalize on, so packing and sending must be serialized. */
     std::mutex send_lock{};
     std::thread recv_thread{};
     std::thread heartbeat_thread{};
@@ -150,6 +153,7 @@ class mav_connection
      * construction; read on the command path only, so they need no locking. */
     uint16_t altitude_floor_m;
     uint16_t altitude_cap_m;
+    auto sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
     void setFlightMode (uint8_t fmode);
     /* Switch to a resolved flight mode that drops out of an active search (RTL,
