@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -835,6 +836,13 @@ TEST_CASE ("altitude unit helpers convert between metres, feet and MAVLink mm", 
     REQUIRE (metres_to_mav_mm (100.0) == 100000);
     /* metres_to_mav_mm rounds to the nearest millimetre. */
     REQUIRE (metres_to_mav_mm (1.2345) == 1235);
+
+    /* A non-finite altitude must not reach std::lround (UB): report 0. */
+    REQUIRE (metres_to_mav_mm (std::nan ("")) == 0);
+    REQUIRE (metres_to_mav_mm (std::numeric_limits<double>::infinity ()) == 0);
+    /* An out-of-range magnitude clamps to the int32_t bounds rather than wrapping. */
+    REQUIRE (metres_to_mav_mm (1e12) == std::numeric_limits<int32_t>::max ());
+    REQUIRE (metres_to_mav_mm (-1e12) == std::numeric_limits<int32_t>::min ());
 }
 
 TEST_CASE ("PositionData altitude is metres and converts correctly at each protocol boundary", "[altitude_units]")

@@ -88,8 +88,12 @@ FSS::reportPosition (PositionData t_pd)
     if (this->ssl_client != nullptr)
     {
         Point p = t_pd.getP ();
-        /* PositionData carries metres; the FSS wire altitude is feet. */
-        auto alt_ft = static_cast<int16_t> (std::lround (metres_to_feet (t_pd.getAltitudeMetres ())));
+        /* PositionData carries metres; the FSS wire altitude is feet. std::lround
+         * is undefined for a non-finite altitude, so guard it the same way
+         * SMM::reportPosition does and report 0 for a bad reading. */
+        const double alt_ft_d = metres_to_feet (t_pd.getAltitudeMetres ());
+        auto alt_ft
+            = std::isfinite (alt_ft_d) ? static_cast<int16_t> (std::lround (alt_ft_d)) : static_cast<int16_t> (0);
         this->ssl_client->sendPosition (p.getLatitude (), p.getLongitude (), alt_ft, t_pd.getHeading (),
                                         t_pd.getVelocityHorizontal (), t_pd.getVelocityVertical ());
     }
