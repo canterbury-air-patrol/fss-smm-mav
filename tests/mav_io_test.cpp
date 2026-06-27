@@ -469,15 +469,23 @@ TEST_CASE ("mav_connection survives repeated drop/reconnect cycles", "[mav_io]")
     }
 }
 
-/* Drive a full mission-upload handshake (count -> request -> item -> ack) and
- * assert the resulting MISSION_SET_CURRENT, which the pure mission_item_for tests
- * cannot reach. Returns the set-current sequence the FMU selected after the ack.
- * `expected_count` items are exchanged. */
+/* Outcome of a mission-upload handshake: the sequence numbers the FMU emitted an
+ * item for, and the MISSION_SET_CURRENT sequence it selected after the ack. */
 namespace
 {
-auto
-run_mission_upload (MavLoopbackServer &server, uint16_t expected_count, std::vector<uint16_t> &item_seqs) -> uint16_t
+struct MissionUploadResult
 {
+    std::vector<uint16_t> item_seqs{};
+    uint16_t set_current{ 0 };
+};
+
+/* Drive a full mission-upload handshake (count -> request -> item -> ack) and
+ * return what the FMU emitted, which the pure mission_item_for tests cannot
+ * reach. `expected_count` items are exchanged. */
+auto
+run_mission_upload (MavLoopbackServer &server, uint16_t expected_count) -> MissionUploadResult
+{
+    MissionUploadResult result;
     mavlink_message_t msg;
     REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
     REQUIRE (mavlink_msg_mission_count_get_count (&msg) == expected_count);
@@ -487,12 +495,13 @@ run_mission_upload (MavLoopbackServer &server, uint16_t expected_count, std::vec
     {
         server.sendMissionRequestInt (seq, mission_type);
         REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_ITEM_INT, msg, io_timeout));
-        item_seqs.push_back (mavlink_msg_mission_item_int_get_seq (&msg));
+        result.item_seqs.push_back (mavlink_msg_mission_item_int_get_seq (&msg));
     }
 
     server.sendMissionAck (mission_type);
     REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, io_timeout));
-    return mavlink_msg_mission_set_current_get_seq (&msg);
+    result.set_current = mavlink_msg_mission_set_current_get_seq (&msg);
+    return result;
 }
 } // namespace
 
@@ -508,12 +517,11 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
     /* A goto lays out seq 0/1 = waypoint, seq 2 = RTL terminator (count 3). */
     conn.commandGoto (Point (-43.5, 172.6));
 
-    std::vector<uint16_t> item_seqs;
-    const uint16_t set_current = run_mission_upload (server, 3, item_seqs);
+    const MissionUploadResult result = run_mission_upload (server, 3);
 
-    REQUIRE (item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
+    REQUIRE (result.item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
     /* A goto resumes at mission sequence 0 (no search offset). */
-    REQUIRE (set_current == 0);
+    REQUIRE (result.set_current == 0);
 }
 
 TEST_CASE ("a search mission resume sets current past the setup items (todo/48)", "[mav_io]")
@@ -530,10 +538,9 @@ TEST_CASE ("a search mission resume sets current past the setup items (todo/48)"
      * two-item offset, not the bare point index. */
     conn.loadSearch (std::make_shared<SMMSearch> ());
 
-    std::vector<uint16_t> item_seqs;
-    const uint16_t set_current = run_mission_upload (server, 3, item_seqs);
+    const MissionUploadResult result = run_mission_upload (server, 3);
 
-    REQUIRE (item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
-    REQUIRE (set_current == search_point_mission_seq (0));
-    REQUIRE (set_current == 2);
+    REQUIRE (result.item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
+    REQUIRE (result.set_current == search_point_mission_seq (0));
+    REQUIRE (result.set_current == 2);
 }
