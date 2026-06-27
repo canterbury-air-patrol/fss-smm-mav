@@ -6,6 +6,7 @@
 
 #include <arpa/inet.h>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -70,6 +71,13 @@ class MavLoopbackServer
                     int fd = accept (this->listen_fd, nullptr, nullptr);
                     if (fd < 0)
                     {
+                        /* A signal can interrupt accept(); keep accepting rather
+                         * than stopping the harness. Any other error means the
+                         * listen socket was closed for teardown, so exit. */
+                        if (errno == EINTR)
+                        {
+                            continue;
+                        }
                         return;
                     }
                     int old = this->client_fd.exchange (fd);
