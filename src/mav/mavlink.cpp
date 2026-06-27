@@ -29,6 +29,8 @@ constexpr uint8_t SYS_ID = 200;
 constexpr uint8_t COMP_ID = 1;
 
 constexpr uint8_t TARGET_SYS_ID = 1;
+constexpr mavlink_channel_t MAV_RECV_CHANNEL = MAVLINK_COMM_0;
+constexpr mavlink_channel_t MAV_SEND_CHANNEL = MAVLINK_COMM_1;
 
 /* Convert double/float into int32_t */
 constexpr double LAT_LNG_COV = 0.0000001;
@@ -37,8 +39,10 @@ void
 mav_connection::sendHeartBeat ()
 {
     mavlink_message_t msg;
-    mavlink_msg_heartbeat_pack (SYS_ID, COMP_ID, &msg, MAV_TYPE_GCS, MAV_AUTOPILOT_INVALID, 0, 0, MAV_STATE_ACTIVE);
-    this->sendMavLinkMsg (&msg);
+    std::lock_guard<std::mutex> lk (this->send_lock);
+    mavlink_msg_heartbeat_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, MAV_TYPE_GCS, MAV_AUTOPILOT_INVALID, 0, 0,
+                                     MAV_STATE_ACTIVE);
+    this->sendMavLinkMsgLocked (&msg);
 }
 
 void
@@ -86,11 +90,12 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, double 
 {
     mavlink_message_t msg;
     /* ADSB_VEHICLE.altitude is millimetres; PositionData carries metres. */
-    mavlink_msg_adsb_vehicle_pack (SYS_ID, COMP_ID, &msg, icao_address, static_cast<int32_t> (lat / LAT_LNG_COV),
-                                   static_cast<int32_t> (lng / LAT_LNG_COV), altitude_type,
-                                   metres_to_mav_mm (altitude_m), heading, hor_vel, static_cast<int16_t> (ver_vel),
-                                   callsign, emitter_type, tslc, flags, squawk);
-    this->sendMavLinkMsg (&msg);
+    std::lock_guard<std::mutex> lk (this->send_lock);
+    mavlink_msg_adsb_vehicle_pack_chan (
+        SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, icao_address, static_cast<int32_t> (lat / LAT_LNG_COV),
+        static_cast<int32_t> (lng / LAT_LNG_COV), altitude_type, metres_to_mav_mm (altitude_m), heading, hor_vel,
+        static_cast<int16_t> (ver_vel), callsign, emitter_type, tslc, flags, squawk);
+    this->sendMavLinkMsgLocked (&msg);
 }
 
 void
@@ -104,12 +109,13 @@ void
 mav_connection::setFlightMode (uint8_t fmode)
 {
     mavlink_message_t msg;
-    mavlink_msg_set_mode_pack (SYS_ID, COMP_ID, &msg, 1,
-                               MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | MAV_MODE_FLAG_AUTO_ENABLED
-                                   | MAV_MODE_FLAG_GUIDED_ENABLED | MAV_MODE_FLAG_STABILIZE_ENABLED
-                                   | MAV_MODE_FLAG_MANUAL_INPUT_ENABLED | MAV_MODE_FLAG_SAFETY_ARMED,
-                               fmode);
-    this->sendMavLinkMsg (&msg);
+    std::lock_guard<std::mutex> lk (this->send_lock);
+    mavlink_msg_set_mode_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 1,
+                                    MAV_MODE_FLAG_CUSTOM_MODE_ENABLED | MAV_MODE_FLAG_AUTO_ENABLED
+                                        | MAV_MODE_FLAG_GUIDED_ENABLED | MAV_MODE_FLAG_STABILIZE_ENABLED
+                                        | MAV_MODE_FLAG_MANUAL_INPUT_ENABLED | MAV_MODE_FLAG_SAFETY_ARMED,
+                                    fmode);
+    this->sendMavLinkMsgLocked (&msg);
 }
 
 void
@@ -176,8 +182,12 @@ void
 mav_connection::commandDisARM ()
 {
     mavlink_message_t msg;
-    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0);
-    this->sendMavLinkMsg (&msg);
+    {
+        std::lock_guard<std::mutex> lk (this->send_lock);
+        mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM,
+                                            0, 0, 0, 0, 0, 0, 0, 0);
+        this->sendMavLinkMsgLocked (&msg);
+    }
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->search_loaded = false;
@@ -195,10 +205,14 @@ mav_connection::commandGoto (Point p)
         this->goto_position = p;
         this->goto_active = true;
         this->search_loaded = false;
-        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1, mission_count_for (0, MissionPlanMode::go_to),
-                                        MAV_MISSION_TYPE_MISSION, 0);
     }
-    this->sendMavLinkMsg (&msg);
+    {
+        std::lock_guard<std::mutex> lk (this->send_lock);
+        mavlink_msg_mission_count_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1,
+                                             mission_count_for (0, MissionPlanMode::go_to), MAV_MISSION_TYPE_MISSION,
+                                             0);
+        this->sendMavLinkMsgLocked (&msg);
+    }
 }
 
 void
@@ -233,9 +247,11 @@ mav_connection::commandAltitude (uint16_t alt)
        Param 1: Altitude (float, meters)
        Param 2: Frame (MAV_FRAME_GLOBAL_RELATIVE_ALT = 3)
     */
-    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, TARGET_SYS_ID, 1, MAV_CMD_DO_CHANGE_ALTITUDE, 0, alt_m,
-                                   MAV_FRAME_GLOBAL_RELATIVE_ALT, 0, 0, 0, 0, 0);
-    this->sendMavLinkMsg (&msg);
+    std::lock_guard<std::mutex> lk (this->send_lock);
+    mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, TARGET_SYS_ID, 1,
+                                        MAV_CMD_DO_CHANGE_ALTITUDE, 0, alt_m, MAV_FRAME_GLOBAL_RELATIVE_ALT, 0, 0, 0, 0,
+                                        0);
+    this->sendMavLinkMsgLocked (&msg);
 }
 
 void
@@ -243,9 +259,12 @@ mav_connection::commandForceDisARM ()
 {
     constexpr float force_magic = 21196.0f;
     mavlink_message_t msg;
-    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, force_magic, 0, 0,
-                                   0, 0, 0);
-    this->sendMavLinkMsg (&msg);
+    {
+        std::lock_guard<std::mutex> lk (this->send_lock);
+        mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM,
+                                            0, 0, force_magic, 0, 0, 0, 0, 0);
+        this->sendMavLinkMsgLocked (&msg);
+    }
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->search_loaded = false;
@@ -256,8 +275,12 @@ void
 mav_connection::commandTerminate ()
 {
     mavlink_message_t msg;
-    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, 1, 1, MAV_CMD_DO_FLIGHTTERMINATION, 0, 1, 0, 0, 0, 0, 0, 0);
-    this->sendMavLinkMsg (&msg);
+    {
+        std::lock_guard<std::mutex> lk (this->send_lock);
+        mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 1, 1, MAV_CMD_DO_FLIGHTTERMINATION,
+                                            0, 1, 0, 0, 0, 0, 0, 0);
+        this->sendMavLinkMsgLocked (&msg);
+    }
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->search_loaded = false;
@@ -290,32 +313,33 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
     MissionPlanMode mode = local_goto_active ? MissionPlanMode::go_to : MissionPlanMode::search;
     MissionItem item = mission_item_for (seq, num_points, mode);
 
+    std::lock_guard<std::mutex> lk (this->send_lock);
     switch (item.kind)
     {
         case MissionItemKind::rtl:
-            mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq, /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT,    /* Use altitude relative to the home point */
-                MAV_CMD_NAV_RETURN_TO_LAUNCH,     /* Return home */
-                0,                                /* Not the current point */
-                0,                                /* Auto continue: No */
-                0, 0, 0, 0, 0, 0, 0,              /* Parameters ignored */
+            mavlink_msg_mission_item_int_pack_chan (
+                SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1, seq, /* Which waypoint is this */
+                MAV_FRAME_GLOBAL_RELATIVE_ALT,                      /* Use altitude relative to the home point */
+                MAV_CMD_NAV_RETURN_TO_LAUNCH,                       /* Return home */
+                0,                                                  /* Not the current point */
+                0,                                                  /* Auto continue: No */
+                0, 0, 0, 0, 0, 0, 0,                                /* Parameters ignored */
                 mission_type);
             break;
         case MissionItemKind::goto_point:
             /* The scaled int32 lat/lon legitimately sit next to the float altitude in this MAVLink message;
              * clang-tidy's swapped-arguments heuristic cannot tell them apart. */
             // NOLINTNEXTLINE(bugprone-swapped-arguments)
-            mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq, /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT,    /* Use altitude relative to the home point */
-                MAV_CMD_NAV_WAYPOINT,             /* Navigate to a point */
-                0,                                /* This waypoint is the current target */
-                1,                                /* Auto continue */
-                0,                                /* Hold time: 0s */
-                acceptable_radius,                /* Accept radius: m */
-                0,                                /* Pass radius: 0m */
-                NAN,                              /* Yaw: NaN for dont care */
+            mavlink_msg_mission_item_int_pack_chan (
+                SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1, seq, /* Which waypoint is this */
+                MAV_FRAME_GLOBAL_RELATIVE_ALT,                      /* Use altitude relative to the home point */
+                MAV_CMD_NAV_WAYPOINT,                               /* Navigate to a point */
+                0,                                                  /* This waypoint is the current target */
+                1,                                                  /* Auto continue */
+                0,                                                  /* Hold time: 0s */
+                acceptable_radius,                                  /* Accept radius: m */
+                0,                                                  /* Pass radius: 0m */
+                NAN,                                                /* Yaw: NaN for dont care */
                 static_cast<int32_t> (local_goto_position.getLatitude () / LAT_LNG_COV),  /* Latitude */
                 static_cast<int32_t> (local_goto_position.getLongitude () / LAT_LNG_COV), /* Longitude */
                 static_cast<float> (this->goto_altitude_m),                               /* Altitude (m AGL) */
@@ -323,8 +347,8 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
             break;
         case MissionItemKind::takeoff:
             /* Most versions of ArduPilot ignore the zeroth mission command, so we need to send the first one twice */
-            mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq,                       /* Which waypoint is this */
+            mavlink_msg_mission_item_int_pack_chan (
+                SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1, seq,     /* Which waypoint is this */
                 MAV_FRAME_GLOBAL_RELATIVE_ALT,                          /* Use altitude relative to the home point */
                 MAV_CMD_NAV_TAKEOFF,                                    /* Take off and climb */
                 (seq == 1 && local_search->getCurrentPointIdx () == 0), /* Are we at the beginning of the search */
@@ -345,10 +369,10 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
             /* The scaled int32 lat/lon legitimately sit next to the float altitude in this MAVLink message;
              * clang-tidy's swapped-arguments heuristic cannot tell them apart. */
             // NOLINTNEXTLINE(bugprone-swapped-arguments)
-            mavlink_msg_mission_item_int_pack (
-                SYS_ID, COMP_ID, &msg, 0, 1, seq, /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT,    /* Use altitude relative to the home point */
-                MAV_CMD_NAV_WAYPOINT,             /* Navigate to a point */
+            mavlink_msg_mission_item_int_pack_chan (
+                SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1, seq, /* Which waypoint is this */
+                MAV_FRAME_GLOBAL_RELATIVE_ALT,                      /* Use altitude relative to the home point */
+                MAV_CMD_NAV_WAYPOINT,                               /* Navigate to a point */
                 (local_search->getCurrentPointIdx () == static_cast<int> (item.point_index)), /* The current target? */
                 1,                                                                            /* Auto continue */
                 0,                                                                            /* Hold time: 0s */
@@ -362,15 +386,16 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
             break;
         }
     }
-    this->sendMavLinkMsg (&msg);
+    this->sendMavLinkMsgLocked (&msg);
 }
 
 void
 mav_connection::setCurrentWP (uint16_t seq)
 {
     mavlink_message_t msg;
-    mavlink_msg_mission_set_current_pack (SYS_ID, COMP_ID, &msg, 0, 1, seq);
-    this->sendMavLinkMsg (&msg);
+    std::lock_guard<std::mutex> lk (this->send_lock);
+    mavlink_msg_mission_set_current_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1, seq);
+    this->sendMavLinkMsgLocked (&msg);
 }
 
 void
@@ -429,12 +454,13 @@ mav_connection::loadSearch ()
      * slot, otherwise the FC never requests it and the search has no return-home
      * item at the end. */
     mavlink_message_t msg;
+    std::size_t count;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->goto_active = false;
         this->search_loaded = false;
         this->search_loading = true;
-        std::size_t count = mission_count_for (this->search->getPoints ().size (), MissionPlanMode::search);
+        count = mission_count_for (this->search->getPoints ().size (), MissionPlanMode::search);
         /* MISSION_COUNT is a 16-bit field. A real search has a handful of
          * waypoints so this never trips, but log if it ever does rather than
          * silently uploading a truncated mission with no idea why. */
@@ -443,10 +469,13 @@ mav_connection::loadSearch ()
             std::cerr << "WARN: search has " << this->search->getPoints ().size () << " waypoints; mission count "
                       << count << " exceeds the 16-bit MAVLink field and will be truncated\n";
         }
-        mavlink_msg_mission_count_pack (SYS_ID, COMP_ID, &msg, 0, 1, static_cast<uint16_t> (count),
-                                        MAV_MISSION_TYPE_MISSION, 0);
     }
-    this->sendMavLinkMsg (&msg);
+    {
+        std::lock_guard<std::mutex> lk (this->send_lock);
+        mavlink_msg_mission_count_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1,
+                                             static_cast<uint16_t> (count), MAV_MISSION_TYPE_MISSION, 0);
+        this->sendMavLinkMsgLocked (&msg);
+    }
 }
 
 void
@@ -471,9 +500,11 @@ void
 mav_connection::requestStream (int sysid, int compid, uint32_t command, uint32_t interval)
 {
     mavlink_message_t msg;
-    mavlink_msg_command_long_pack (SYS_ID, COMP_ID, &msg, sysid, compid, MAV_CMD_SET_MESSAGE_INTERVAL, 0,
-                                   static_cast<float> (command), static_cast<float> (interval), 0, 0, 0, 0, 1);
-    this->sendMavLinkMsg (&msg);
+    std::lock_guard<std::mutex> lk (this->send_lock);
+    mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, sysid, compid,
+                                        MAV_CMD_SET_MESSAGE_INTERVAL, 0, static_cast<float> (command),
+                                        static_cast<float> (interval), 0, 0, 0, 0, 1);
+    this->sendMavLinkMsgLocked (&msg);
 }
 
 void
@@ -704,7 +735,7 @@ mav_connection::processMessages ()
         {
             for (ssize_t i = 0; i < received; i++)
             {
-                if (mavlink_parse_char (MAVLINK_COMM_0, buf[i], &msg, &status))
+                if (mavlink_parse_char (MAV_RECV_CHANNEL, buf[i], &msg, &status))
                 {
                     this->processMavLinkMsg (&msg, &status);
                 }
@@ -768,14 +799,14 @@ mav_connection::connect_to_mav ()
 void
 mav_connection::disconnect_from_mav ()
 {
-    if (this->fd.load () != -1)
-    {
-        close (this->fd.load ());
-        this->fd.store (-1);
-    }
+    int orig_fd = this->fd.exchange (-1);
     if (this->recv_thread.joinable ())
     {
         this->recv_thread.join ();
+    }
+    if (orig_fd != -1)
+    {
+        close (orig_fd);
     }
 }
 
@@ -813,23 +844,20 @@ mav_connection::~mav_connection ()
     {
         this->heartbeat_thread.join ();
     }
-    if (this->fd.load () != -1)
-    {
-        int orig_fd = this->fd.load ();
-        this->fd.store (-1);
-        shutdown (orig_fd, 2);
-        close (orig_fd);
-    }
+    int orig_fd = this->fd.exchange (-1);
     if (this->recv_thread.joinable ())
     {
         this->recv_thread.join ();
     }
+    if (orig_fd != -1)
+    {
+        close (orig_fd);
+    }
 }
 
 auto
-mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
+mav_connection::sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool
 {
-    std::lock_guard<std::mutex> lk (this->send_lock);
     int cur_fd = this->fd.load ();
     if (cur_fd == -1)
     {
@@ -862,6 +890,13 @@ mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
         sent += transfered;
     }
     return true;
+}
+
+auto
+mav_connection::sendMavLinkMsg (mavlink_message_t *msg) -> bool
+{
+    std::lock_guard<std::mutex> lk (this->send_lock);
+    return this->sendMavLinkMsgLocked (msg);
 }
 
 void
