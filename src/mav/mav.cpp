@@ -4,60 +4,54 @@
 #include "internal.hpp"
 #include "mav.hpp"
 
-void
-MAV::setMode (flight_mode fm)
+auto
+MAV::setMode (flight_mode fm) -> bool
 {
     switch (fm)
     {
         case flight_mode_manual:
             /* Drop out of Auto/RTL mode, probably for FBW-B */
-            this->connection->commandManual ();
-            break;
+            return this->connection->commandManual ();
         case flight_mode_goto:
             /* Load a track with a single waypoint + RTL.  setMode() is only
              * called by the state machine on an actual transition into goto,
              * so this must always re-send: a goto->hold->goto cycle with the
              * same waypoint still needs the track re-loaded to re-engage. */
-            this->connection->commandGoto (this->goto_position);
-            break;
+            return this->connection->commandGoto (this->goto_position);
         case flight_mode_hold:
             /* Circle or similar */
-            this->connection->commandHold ();
-            break;
+            return this->connection->commandHold ();
         case flight_mode_search:
             /* Load the search */
-            this->connection->loadSearch ();
-            break;
+            return this->connection->loadSearch ();
         case flight_mode_unknown:
         case flight_mode_rtl:
             /* Enter RTL */
-            this->connection->commandRTL ();
-            break;
+            return this->connection->commandRTL ();
     }
+    return false;
 }
 
-void
-MAV::disarm ()
+auto
+MAV::disarm () -> bool
 {
-    this->connection->commandDisARM ();
+    return this->connection->commandDisARM ();
 }
 
-void
-MAV::terminate ()
+auto
+MAV::terminate () -> bool
 {
     switch (this->action)
     {
         case terminate_action::terminate:
-            this->connection->commandTerminate ();
-            break;
+            return this->connection->commandTerminate ();
         case terminate_action::disarm:
-            this->connection->commandForceDisARM ();
-            break;
+            return this->connection->commandForceDisARM ();
         case terminate_action::none:
             std::cerr << "WARN: terminate-action is none, falling through to RTL\n";
-            this->connection->commandRTL ();
-            break;
+            return this->connection->commandRTL ();
     }
+    return false;
 }
 
 void
@@ -78,11 +72,11 @@ MAV::gotoPosition (Point to)
     this->goto_position = to;
 }
 
-void
-MAV::setAltitude (uint16_t alt)
+auto
+MAV::setAltitude (uint16_t alt) -> bool
 {
     this->target_altitude = alt;
-    this->connection->commandAltitude (alt);
+    return this->connection->commandAltitude (alt);
 }
 
 void

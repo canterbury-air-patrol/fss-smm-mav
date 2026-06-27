@@ -159,7 +159,9 @@ class mav_connection
     uint16_t altitude_cap_m;
     auto sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
-    void setFlightMode (uint8_t fmode);
+    /* Returns whether the SET_MODE was actually transmitted to the autopilot
+     * (false when the link is down so the send was skipped). */
+    auto setFlightMode (uint8_t fmode) -> bool;
     /* Switch to a resolved flight mode that drops out of an active search (RTL,
      * hold, manual): set the mode and clear the loaded-search flag. An empty
      * fmode means the airframe-specific mode could not be resolved — the
@@ -167,8 +169,10 @@ class mav_connection
      * warnUnresolvedMode) and do nothing rather than silently dropping the
      * command. The mode is carried as an optional, not a 0 sentinel, because 0
      * is itself a valid mode (e.g. COPTER_MODE_STABILIZE, ROVER_MODE_MANUAL).
-     * `command` names the command for the log. */
-    void setResolvedMode (MavModeCommand command, bool clear_search_loaded);
+     * `command` names the command for the log. Returns whether the mode was
+     * actually transmitted now: false when it was deferred (autopilot type not
+     * yet known) or the link was down, true once the SET_MODE went out. */
+    auto setResolvedMode (MavModeCommand command, bool clear_search_loaded) -> bool;
     void replayPendingMode (uint8_t autopilot_type);
     /* Log that `command` arrived before the autopilot type was known, so the
      * airframe-specific flight mode could not be resolved. Shared by every
@@ -201,16 +205,21 @@ class mav_connection
     void start ();
     void attemptReconnect ();
     void processMessages ();
-    void commandRTL ();
-    void commandGoto (Point p);
-    void commandHold ();
+    /* The command methods used by the state machine's action step return whether
+     * the command was transmitted to the autopilot (false when the link is down,
+     * or for a mode command, when it was deferred because the autopilot type is
+     * not yet known). The state machine uses this to replay a safety-critical
+     * action once the MAV link recovers (todo/46). */
+    auto commandRTL () -> bool;
+    auto commandGoto (Point p) -> bool;
+    auto commandHold () -> bool;
     void commandAuto ();
-    void commandAltitude (uint16_t alt);
-    void commandDisARM ();
-    void commandForceDisARM ();
-    void commandManual ();
-    void commandTerminate ();
-    void loadSearch ();
+    auto commandAltitude (uint16_t alt) -> bool;
+    auto commandDisARM () -> bool;
+    auto commandForceDisARM () -> bool;
+    auto commandManual () -> bool;
+    auto commandTerminate () -> bool;
+    auto loadSearch () -> bool;
     void sendADSB (uint32_t icao_address, double lat, double lng, double altitude_m, uint8_t altitude_type,
                    uint16_t heading, uint16_t hor_vel, uint16_t ver_vel, char *callsign, uint8_t emitter_type,
                    uint8_t tslc, uint16_t flags, uint16_t squawk);

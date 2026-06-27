@@ -105,8 +105,8 @@ mav_connection::warnUnresolvedMode (MavModeCommand command)
               << " command received before the autopilot type is known (no heartbeat yet); deferring\n";
 }
 
-void
-mav_connection::setFlightMode (uint8_t fmode)
+auto
+mav_connection::setFlightMode (uint8_t fmode) -> bool
 {
     mavlink_message_t msg;
     std::lock_guard<std::mutex> lk (this->send_lock);
@@ -115,11 +115,11 @@ mav_connection::setFlightMode (uint8_t fmode)
                                         | MAV_MODE_FLAG_GUIDED_ENABLED | MAV_MODE_FLAG_STABILIZE_ENABLED
                                         | MAV_MODE_FLAG_MANUAL_INPUT_ENABLED | MAV_MODE_FLAG_SAFETY_ARMED,
                                     fmode);
-    this->sendMavLinkMsgLocked (&msg);
+    return this->sendMavLinkMsgLocked (&msg);
 }
 
-void
-mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loaded)
+auto
+mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loaded) -> bool
 {
     auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
     std::optional<uint8_t> fmode = resolve_mav_mode (sys != nullptr ? sys->getAutoPilotType () : 0, command);
@@ -130,15 +130,19 @@ mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loade
             this->pending_mode_command = command;
         }
         warnUnresolvedMode (command);
-        return;
+        /* Deferred, not transmitted: replayPendingMode() re-sends it once the
+         * autopilot type is known. Report not-sent so a safety-critical caller
+         * also tracks it for replay on link recovery. */
+        return false;
     }
-    this->setFlightMode (*fmode);
+    bool sent = this->setFlightMode (*fmode);
     std::lock_guard<std::mutex> lk{ this->state_lock };
     this->pending_mode_command.reset ();
     if (clear_search_loaded)
     {
         this->search_loaded = false;
     }
+    return sent;
 }
 
 void
@@ -172,30 +176,32 @@ mav_connection::replayPendingMode (uint8_t autopilot_type)
     }
 }
 
-void
-mav_connection::commandRTL ()
+auto
+mav_connection::commandRTL () -> bool
 {
-    this->setResolvedMode (MavModeCommand::rtl, true);
+    return this->setResolvedMode (MavModeCommand::rtl, true);
 }
 
-void
-mav_connection::commandDisARM ()
+auto
+mav_connection::commandDisARM () -> bool
 {
     mavlink_message_t msg;
+    bool sent;
     {
         std::lock_guard<std::mutex> lk (this->send_lock);
         mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM,
                                             0, 0, 0, 0, 0, 0, 0, 0);
-        this->sendMavLinkMsgLocked (&msg);
+        sent = this->sendMavLinkMsgLocked (&msg);
     }
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->search_loaded = false;
     }
+    return sent;
 }
 
-void
-mav_connection::commandGoto (Point p)
+auto
+mav_connection::commandGoto (Point p) -> bool
 {
     mavlink_message_t msg;
     // RTL the aircraft so we can load a mission
@@ -211,20 +217,22 @@ mav_connection::commandGoto (Point p)
         mavlink_msg_mission_count_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1,
                                              mission_count_for (0, MissionPlanMode::go_to), MAV_MISSION_TYPE_MISSION,
                                              0);
-        this->sendMavLinkMsgLocked (&msg);
+        /* The goto is a mission upload: report whether its opening MISSION_COUNT
+         * reached the autopilot (the rest is request-driven). */
+        return this->sendMavLinkMsgLocked (&msg);
     }
 }
 
-void
-mav_connection::commandManual ()
+auto
+mav_connection::commandManual () -> bool
 {
-    this->setResolvedMode (MavModeCommand::manual, true);
+    return this->setResolvedMode (MavModeCommand::manual, true);
 }
 
-void
-mav_connection::commandHold ()
+auto
+mav_connection::commandHold () -> bool
 {
-    this->setResolvedMode (MavModeCommand::hold, true);
+    return this->setResolvedMode (MavModeCommand::hold, true);
 }
 
 void
@@ -233,8 +241,8 @@ mav_connection::commandAuto ()
     this->setResolvedMode (MavModeCommand::auto_mode, false);
 }
 
-void
-mav_connection::commandAltitude (uint16_t alt)
+auto
+mav_connection::commandAltitude (uint16_t alt) -> bool
 {
     mavlink_message_t msg;
     /* alt is feet (the FSS wire unit). Convert to metres and clamp into the
@@ -251,40 +259,44 @@ mav_connection::commandAltitude (uint16_t alt)
     mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, TARGET_SYS_ID, 1,
                                         MAV_CMD_DO_CHANGE_ALTITUDE, 0, alt_m, MAV_FRAME_GLOBAL_RELATIVE_ALT, 0, 0, 0, 0,
                                         0);
-    this->sendMavLinkMsgLocked (&msg);
+    return this->sendMavLinkMsgLocked (&msg);
 }
 
-void
-mav_connection::commandForceDisARM ()
+auto
+mav_connection::commandForceDisARM () -> bool
 {
     constexpr float force_magic = 21196.0f;
     mavlink_message_t msg;
+    bool sent;
     {
         std::lock_guard<std::mutex> lk (this->send_lock);
         mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 1, 1, MAV_CMD_COMPONENT_ARM_DISARM,
                                             0, 0, force_magic, 0, 0, 0, 0, 0);
-        this->sendMavLinkMsgLocked (&msg);
+        sent = this->sendMavLinkMsgLocked (&msg);
     }
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->search_loaded = false;
     }
+    return sent;
 }
 
-void
-mav_connection::commandTerminate ()
+auto
+mav_connection::commandTerminate () -> bool
 {
     mavlink_message_t msg;
+    bool sent;
     {
         std::lock_guard<std::mutex> lk (this->send_lock);
         mavlink_msg_command_long_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 1, 1, MAV_CMD_DO_FLIGHTTERMINATION,
                                             0, 1, 0, 0, 0, 0, 0, 0);
-        this->sendMavLinkMsgLocked (&msg);
+        sent = this->sendMavLinkMsgLocked (&msg);
     }
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->search_loaded = false;
     }
+    return sent;
 }
 
 void
@@ -443,8 +455,8 @@ mav_connection::mission_ack (bool accepted)
     }
 }
 
-void
-mav_connection::loadSearch ()
+auto
+mav_connection::loadSearch () -> bool
 {
     /* Enter RTL while loading the search */
     this->commandRTL ();
@@ -474,7 +486,9 @@ mav_connection::loadSearch ()
         std::lock_guard<std::mutex> lk (this->send_lock);
         mavlink_msg_mission_count_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, 0, 1,
                                              static_cast<uint16_t> (count), MAV_MISSION_TYPE_MISSION, 0);
-        this->sendMavLinkMsgLocked (&msg);
+        /* Report whether the opening MISSION_COUNT reached the autopilot; the
+         * remaining items are request-driven. */
+        return this->sendMavLinkMsgLocked (&msg);
     }
 }
 

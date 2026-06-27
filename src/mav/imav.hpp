@@ -24,11 +24,17 @@ class IMAV
     auto operator= (IMAV &&) -> IMAV & = delete;
     virtual ~IMAV () = default;
 
-    virtual void setMode (flight_mode fm) = 0;
-    virtual void disarm () = 0;
-    virtual void terminate () = 0;
+    /* The action methods that transmit a command to the autopilot return whether
+     * it was actually sent (false when the MAV link is down, or for a mode
+     * command, when it was deferred until the autopilot type is known). The state
+     * machine uses this to replay a safety-critical action once the link recovers
+     * (todo/46). gotoPosition only stashes the target — the goto is transmitted by
+     * the following setMode(flight_mode_goto) — so it has nothing to report. */
+    virtual auto setMode (flight_mode fm) -> bool = 0;
+    virtual auto disarm () -> bool = 0;
+    virtual auto terminate () -> bool = 0;
     virtual void gotoPosition (Point to) = 0;
-    virtual void setAltitude (uint16_t alt) = 0;
+    virtual auto setAltitude (uint16_t alt) -> bool = 0;
     virtual auto getCurrentPosition () -> Point = 0;
     virtual void registerMavCommsStatusCB (notify_mav_comms_cb cb) = 0;
 };
