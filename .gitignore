@@ -24,6 +24,7 @@ stamp-h1
 # Test harness (automake) artefacts
 test-driver
 tests/fmu_test
+tests/mav_io_test
 *.trs
 *.log
 
