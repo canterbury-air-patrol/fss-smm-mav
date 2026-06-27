@@ -1639,6 +1639,9 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
             "camera_fov_deg": 60.0,
             "lowbat_threshold": 25,
             "reconnect_interval_s": 30,
+            "position_stream_interval_ms": 100,
+            "battery_stream_interval_ms": 2000,
+            "smm_position_report_interval_ms": 500,
             "log_level": "debug"
         }
     })");
@@ -1648,6 +1651,9 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (60.0));
     REQUIRE (cfg.lowbat_threshold == 25);
     REQUIRE (cfg.reconnect_interval_s == 30);
+    REQUIRE (cfg.position_stream_interval_ms == 100);
+    REQUIRE (cfg.battery_stream_interval_ms == 2000);
+    REQUIRE (cfg.smm_position_report_interval_ms == 500);
     REQUIRE (cfg.log_level == LogLevel::debug);
 }
 
@@ -1700,18 +1706,25 @@ TEST_CASE ("loadFmuConfig clamps an altitude floor above the cap down to the cap
 TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[config]")
 {
     /* FoV outside (0, 180), battery outside [0, 100], interval outside
-     * [1, 3600], and an unknown log level each fall back to their default. */
+     * [1, 3600], the stream/report intervals outside their ranges, and an unknown
+     * log level each fall back to their default. */
     FmuConfig cfg = load_config (R"({
         "fmu": {
             "camera_fov_deg": 200.0,
             "lowbat_threshold": 150,
             "reconnect_interval_s": 0,
+            "position_stream_interval_ms": 10,
+            "battery_stream_interval_ms": 90000,
+            "smm_position_report_interval_ms": 0,
             "log_level": "verbose"
         }
     })");
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (def.camera_fov_deg));
     REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
     REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
+    REQUIRE (cfg.position_stream_interval_ms == def.position_stream_interval_ms);
+    REQUIRE (cfg.battery_stream_interval_ms == def.battery_stream_interval_ms);
+    REQUIRE (cfg.smm_position_report_interval_ms == def.smm_position_report_interval_ms);
     REQUIRE (cfg.log_level == def.log_level);
 }
 

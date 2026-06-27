@@ -157,6 +157,11 @@ class mav_connection
      * construction; read on the command path only, so they need no locking. */
     uint16_t altitude_floor_m;
     uint16_t altitude_cap_m;
+    /* Intervals (microseconds) the autopilot is asked to stream position and
+     * battery at, supplied from config. Set once at construction and read only on
+     * the recv thread when requesting the streams, so they need no locking. */
+    uint32_t position_stream_interval_us;
+    uint32_t battery_stream_interval_us;
     auto sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
     /* Returns whether the SET_MODE was actually transmitted to the autopilot
@@ -193,7 +198,8 @@ class mav_connection
 
   public:
     mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m, uint16_t t_altitude_floor_m,
-                    uint16_t t_altitude_cap_m);
+                    uint16_t t_altitude_cap_m, uint32_t t_position_stream_interval_us,
+                    uint32_t t_battery_stream_interval_us);
     ~mav_connection ();
     mav_connection (mav_connection &) = delete;
     mav_connection (mav_connection &&) = delete;

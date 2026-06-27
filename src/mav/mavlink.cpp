@@ -531,12 +531,11 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
 
     if (!sys->isSetup ())
     {
-        constexpr int position_rate = 200000;
-        constexpr int battery_rate = 1000000;
-        /* Request current position at a rate of 5 per second */
-        this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, position_rate);
-        /* Request battery status every 1 second */
-        this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_BATTERY_STATUS, battery_rate);
+        /* Request the position and battery streams at the configured intervals
+         * (microseconds; defaults are 200ms position / 1s battery). */
+        this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
+                             this->position_stream_interval_us);
+        this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_BATTERY_STATUS, this->battery_stream_interval_us);
         sys->setupComplete ();
     }
 
@@ -861,9 +860,12 @@ mav_connection::disconnect_from_mav ()
 }
 
 mav_connection::mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m,
-                                uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m)
+                                uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m,
+                                uint32_t t_position_stream_interval_us, uint32_t t_battery_stream_interval_us)
     : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_goto_altitude_m),
-      altitude_floor_m (t_altitude_floor_m), altitude_cap_m (t_altitude_cap_m)
+      altitude_floor_m (t_altitude_floor_m), altitude_cap_m (t_altitude_cap_m),
+      position_stream_interval_us (t_position_stream_interval_us),
+      battery_stream_interval_us (t_battery_stream_interval_us)
 {
 }
 

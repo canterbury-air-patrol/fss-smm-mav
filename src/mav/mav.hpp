@@ -28,7 +28,8 @@ class MAV : public IMAV
 
   public:
     MAV (std::string t_addr, uint16_t t_port, terminate_action ta, uint16_t t_goto_altitude_m,
-         uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m);
+         uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m, uint32_t t_position_stream_interval_us,
+         uint32_t t_battery_stream_interval_us);
     MAV (MAV &) = delete;
     MAV (MAV &&) = delete;
     auto operator= (MAV &) -> MAV & = delete;
