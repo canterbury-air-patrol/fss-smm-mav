@@ -48,11 +48,11 @@ class MAV : public IMAV
      * after registering callbacks, so those threads cannot race registration. */
     void start ();
     void attemptReconnect ();
-    void setMode (flight_mode fm) override;
-    void disarm () override;
-    void terminate () override;
+    auto setMode (flight_mode fm) -> bool override;
+    auto disarm () -> bool override;
+    auto terminate () -> bool override;
     void gotoPosition (Point to) override;
-    void setAltitude (uint16_t alt) override;
+    auto setAltitude (uint16_t alt) -> bool override;
     auto getCurrentPosition () -> Point override;
     void loadSearch (const std::shared_ptr<SMMSearch> &);
     void sendADSB (PositionData pd);

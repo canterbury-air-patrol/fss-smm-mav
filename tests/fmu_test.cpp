@@ -35,9 +35,15 @@ class MockMAV : public IMAV
     flight_mode last_mode{ flight_mode_unknown };
     int set_mode_calls{ 0 };
     bool disarmed{ false };
+    int disarm_calls{ 0 };
     bool terminated{ false };
+    int terminate_calls{ 0 };
     uint16_t last_altitude{ 0 };
     int set_altitude_calls{ 0 };
+    /* Controls the transmission result the action methods report. Set false to
+     * simulate a send that did not reach the autopilot (MAV link down) so the
+     * replay-on-recovery path (todo/46) can be exercised. */
+    bool send_succeeds{ true };
 
     MockMAV () = default;
     MockMAV (const MockMAV &) = delete;
@@ -46,31 +52,37 @@ class MockMAV : public IMAV
     auto operator= (MockMAV &&) -> MockMAV & = delete;
     ~MockMAV () override = default;
 
-    void
-    setMode (flight_mode fm) override
+    auto
+    setMode (flight_mode fm) -> bool override
     {
         last_mode = fm;
         set_mode_calls++;
+        return send_succeeds;
     }
-    void
-    disarm () override
+    auto
+    disarm () -> bool override
     {
         disarmed = true;
+        disarm_calls++;
+        return send_succeeds;
     }
-    void
-    terminate () override
+    auto
+    terminate () -> bool override
     {
         terminated = true;
+        terminate_calls++;
+        return send_succeeds;
     }
     void
     gotoPosition (Point) override
     {
     }
-    void
-    setAltitude (uint16_t alt) override
+    auto
+    setAltitude (uint16_t alt) -> bool override
     {
         last_altitude = alt;
         set_altitude_calls++;
+        return send_succeeds;
     }
     auto
     getCurrentPosition () -> Point override
