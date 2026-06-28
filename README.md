@@ -78,8 +78,8 @@ block is absent entirely):
 
 | Key | Default | Description |
 |---|---|---|
-| `mav_address` | `127.0.0.1` | Host/IP of the MAVLink autopilot endpoint the FMU connects to (e.g. a mavproxy/SITL TCP endpoint). |
-| `mav_port` | `5760` | TCP port of the MAVLink autopilot endpoint. Range 1–65535. |
+| `mav_address` | `127.0.0.1` | Host/IP of the MAVLink autopilot endpoint the FMU connects to (e.g. a mavproxy/SITL TCP endpoint). Unlike the other keys (which warn and fall back to their default), a present-but-invalid value here is **fatal**: an empty/whitespace-only or non-string `mav_address` aborts startup, since silently using the default could connect to the wrong autopilot. Omit the key to use the default. |
+| `mav_port` | `5760` | TCP port of the MAVLink autopilot endpoint. Range 1–65535; a present-but-invalid value is **fatal** (see `mav_address`). |
 | `altitude_cap_m` | `122` | Regulatory ceiling for the derived search altitude, in metres AGL. |
 | `altitude_cap_ft` | – | The same ceiling expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
 | `altitude_floor_m` | `10` | Minimum search altitude, in metres AGL. The derived altitude is never flown below this, so a tiny or zero sweep width cannot put the aircraft at ground level. Clamped to be no greater than the altitude cap. |
