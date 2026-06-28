@@ -26,6 +26,12 @@ case "${MAVPROXY_PORT}" in
         exit 1
         ;;
 esac
+# Enforce the TCP port range here too (loadFmuConfig also rejects it), so a
+# misconfigured container fails fast rather than writing an out-of-range port.
+if [ "${MAVPROXY_PORT}" -lt 1 ] || [ "${MAVPROXY_PORT}" -gt 65535 ]; then
+    echo "Error: MAVPROXY_PORT must be between 1 and 65535 (got ${MAVPROXY_PORT})" >&2
+    exit 1
+fi
 
 CONFIG_FILE=/home/autopilot/config/fmu-client.json
 

@@ -1,13 +1,24 @@
 #include "fmu-config.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <json/json.h>
 #include <limits>
+#include <stdexcept>
 
 namespace
 {
+/* True for an empty string or one that is only whitespace. Used to reject a
+ * blank mav_address, which would otherwise be passed to the MAV connection as a
+ * "valid" host and fail later in a harder-to-diagnose way. */
+auto
+is_blank (const std::string &s) -> bool
+{
+    return std::all_of (s.begin (), s.end (), [] (unsigned char c) { return std::isspace (c) != 0; });
+}
 constexpr double feet_to_metres = 0.3048;
 
 /* Validate and store an altitude (metres) into `target`, scaled by `to_metres`
@@ -184,25 +195,39 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
                       fmu["smm_position_report_interval_ms"], 100, 60000);
     }
 
+    /* The MAV endpoint is safety-relevant: silently falling back to the default
+     * could connect the FMU to the wrong (or no) autopilot. So, unlike the other
+     * tunables, a present-but-invalid mav_address/mav_port fails hard (throws,
+     * caught by main() which reports "Fatal" and exits) rather than warning and
+     * keeping the default. An absent key still uses the default endpoint. */
     if (fmu.isMember ("mav_address"))
     {
         const Json::Value &addr = fmu["mav_address"];
         if (!addr.isString ())
         {
-            std::cerr << "Config: mav_address is not a string, using default " << cfg.mav_address << "\n";
+            throw std::runtime_error ("Config (" + config_file + "): mav_address must be a string");
         }
-        else if (std::string s = addr.asString (); s.empty ())
+        std::string s = addr.asString ();
+        if (is_blank (s))
         {
-            std::cerr << "Config: mav_address is empty, using default " << cfg.mav_address << "\n";
+            throw std::runtime_error ("Config (" + config_file + "): mav_address is empty or whitespace-only");
         }
-        else
-        {
-            cfg.mav_address = s;
-        }
+        cfg.mav_address = s;
     }
     if (fmu.isMember ("mav_port"))
     {
-        setRangedInt (cfg.mav_port, "mav_port", fmu["mav_port"], 1, 65535);
+        const Json::Value &port = fmu["mav_port"];
+        if (!port.isIntegral ())
+        {
+            throw std::runtime_error ("Config (" + config_file + "): mav_port must be an integer");
+        }
+        int v = port.asInt ();
+        if (v < 1 || v > 65535)
+        {
+            throw std::runtime_error ("Config (" + config_file + "): mav_port (" + std::to_string (v)
+                                      + ") out of range [1, 65535]");
+        }
+        cfg.mav_port = v;
     }
 
     if (fmu.isMember ("log_level"))

@@ -1675,21 +1675,27 @@ TEST_CASE ("loadFmuConfig reads a custom log_dir and rejects bad ones", "[config
     REQUIRE (wrong_type.log_dir == def.log_dir);
 }
 
-TEST_CASE ("loadFmuConfig reads the MAV endpoint and rejects bad values", "[config]")
+TEST_CASE ("loadFmuConfig reads the MAV endpoint and fails hard on bad values", "[config]")
 {
     FmuConfig cfg = load_config (R"({ "fmu": { "mav_address": "10.0.0.2", "mav_port": 5762 } })");
     REQUIRE (cfg.mav_address == "10.0.0.2");
     REQUIRE (cfg.mav_port == 5762);
 
-    /* An empty or non-string address keeps the default. */
-    FmuConfig empty = load_config (R"({ "fmu": { "mav_address": "" } })");
-    REQUIRE (empty.mav_address == def.mav_address);
-    FmuConfig wrong_type = load_config (R"({ "fmu": { "mav_address": 42 } })");
-    REQUIRE (wrong_type.mav_address == def.mav_address);
+    /* An absent endpoint keeps the (valid) defaults — only a present-but-invalid
+     * value is an error. */
+    FmuConfig absent = load_config (R"({ "fmu": { "lowbat_threshold": 25 } })");
+    REQUIRE (absent.mav_address == def.mav_address);
+    REQUIRE (absent.mav_port == def.mav_port);
 
-    /* A port outside [1, 65535] keeps the default. */
-    FmuConfig bad_port = load_config (R"({ "fmu": { "mav_port": 70000 } })");
-    REQUIRE (bad_port.mav_port == def.mav_port);
+    /* The MAV endpoint is safety-relevant, so a present-but-invalid value throws
+     * (fail hard) rather than silently using the default and connecting to the
+     * wrong/no autopilot. */
+    REQUIRE_THROWS (load_config (R"({ "fmu": { "mav_address": "" } })"));
+    REQUIRE_THROWS (load_config (R"({ "fmu": { "mav_address": "   " } })"));
+    REQUIRE_THROWS (load_config (R"({ "fmu": { "mav_address": 42 } })"));
+    REQUIRE_THROWS (load_config (R"({ "fmu": { "mav_port": 70000 } })"));
+    REQUIRE_THROWS (load_config (R"({ "fmu": { "mav_port": 0 } })"));
+    REQUIRE_THROWS (load_config (R"({ "fmu": { "mav_port": "5760" } })"));
 }
 
 TEST_CASE ("loadFmuConfig clamps the goto altitude into [floor, cap]", "[config]")
