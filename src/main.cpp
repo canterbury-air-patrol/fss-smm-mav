@@ -54,7 +54,8 @@ class App
                                                  static_cast<uint32_t> (cfg.position_stream_interval_ms) * 1000U,
                                                  static_cast<uint32_t> (cfg.battery_stream_interval_ms) * 1000U })),
           smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.altitude_floor_m, cfg.camera_fov_deg,
-                                      static_cast<uint64_t> (cfg.smm_position_report_interval_ms))),
+                                      static_cast<uint64_t> (cfg.smm_position_report_interval_ms),
+                                      cfg.smm_connect_timeout_s, cfg.smm_transfer_timeout_s)),
           aircraft{}, event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true },
           asset_name (fss->getAssetName ()), logger (t_logger), lowbat_threshold (cfg.lowbat_threshold),
           reconnect_interval_s (cfg.reconnect_interval_s)

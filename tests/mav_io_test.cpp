@@ -309,6 +309,8 @@ constexpr uint16_t test_altitude_cap_m = 120;
 constexpr uint32_t test_position_stream_interval_us = 200000;
 constexpr uint32_t test_battery_stream_interval_us = 1000000;
 constexpr uint64_t test_smm_report_interval_ms = 1000;
+constexpr long test_smm_connect_timeout_s = 5;
+constexpr long test_smm_transfer_timeout_s = 10;
 constexpr MavParams test_mav_params{ test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
                                      test_position_stream_interval_us, test_battery_stream_interval_us };
 constexpr auto io_timeout = std::chrono::seconds (8);
@@ -580,7 +582,8 @@ TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "
     mav.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
-    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms);
+    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+             test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
     /* Simulate a search acquired earlier and then paused by an interrupting hold/
      * rtl: still held locally, but no longer loaded on the autopilot. */
     SMMTestAccess::setSearch (smm, std::make_shared<SMMSearch> ());
@@ -623,7 +626,8 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
         },
         io_timeout));
 
-    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms);
+    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+             test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
     /* A search is active but not yet acquired, with no SMM asset (no connect
      * call). The acquire fallback in that state is a safe RTL; the resulting
      * SET_MODE is the observable that retryPendingSearch drove an acquire attempt

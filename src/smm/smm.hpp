@@ -41,6 +41,11 @@ class SMM : public ISMM
     uint64_t position_report_last_ts{ 0 };
     /* Minimum gap between SMM position reports, milliseconds (from config). */
     uint64_t position_report_interval_ms{ 1000 };
+    /* Connect / total-transfer timeouts applied to the SMM connection (seconds,
+     * from config) so a slow or hung endpoint cannot block a call for the full
+     * library-default TCP window. Applied after login in connect(). */
+    long connect_timeout_s{ 5 };
+    long transfer_timeout_s{ 10 };
     bool search_active{ false };
     uint64_t search_retry_ts{ 0 };
     static constexpr uint64_t search_retry_interval_ms{ 5000 };
@@ -49,11 +54,11 @@ class SMM : public ISMM
     void tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos);
 
   public:
-    /* position_report_interval_ms has no default: the value lives once in
-     * FmuConfig (its default), and every caller passes it through, so there is no
-     * duplicated literal to drift. */
+    /* The tuning parameters (report interval, connect/transfer timeouts) have no
+     * defaults here: each value lives once in FmuConfig (its default) and every
+     * caller passes it through, so there is no duplicated literal to drift. */
     SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
-         uint64_t t_position_report_interval_ms);
+         uint64_t t_position_report_interval_ms, long t_connect_timeout_s, long t_transfer_timeout_s);
     SMM (SMM &) = delete;
     SMM (SMM &&) = delete;
     auto operator= (SMM &) -> SMM & = delete;

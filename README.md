@@ -70,6 +70,8 @@ block is absent entirely):
                 "position_stream_interval_ms": 200,
                 "battery_stream_interval_ms": 1000,
                 "smm_position_report_interval_ms": 1000,
+                "smm_connect_timeout_s": 5,
+                "smm_transfer_timeout_s": 10,
                 "log_level": "info",
                 "log_dir": "/var/log/cap-fmu"
         }
@@ -92,6 +94,8 @@ block is absent entirely):
 | `position_stream_interval_ms` | `200` | Interval (milliseconds) the autopilot is asked to stream `GLOBAL_POSITION_INT` at (200ms = 5Hz). A fixed-wing may want faster updates than a slow rover. Range 50–60000. |
 | `battery_stream_interval_ms` | `1000` | Interval (milliseconds) the autopilot is asked to stream `BATTERY_STATUS` at. Range 50–60000. |
 | `smm_position_report_interval_ms` | `1000` | Minimum interval (milliseconds) between position reports to the SMM server, throttling them independently of the (faster) MAVLink position stream. Range 100–60000. |
+| `smm_connect_timeout_s` | `5` | Connect timeout (seconds) for SMM HTTP requests. SMM I/O runs on the event loop, so this bounds how long a slow or hung SMM endpoint can stall queued FSS commands. Range 1–30 (the smm-asset library default of 30s is the cap, since a larger value only loosens the bound). |
+| `smm_transfer_timeout_s` | `10` | Total transfer timeout (seconds) for SMM HTTP requests; see `smm_connect_timeout_s`. Range 1–60 (capped at the smm-asset library default of 60s). |
 | `log_level` | `info` | Logging verbosity: `error`, `info`, or `debug`. |
 | `log_dir` | `/var/log/cap-fmu` | Directory the rotating `fmu.log` is written to. The FMU normally runs as a non-root user, so set this to a path that user can write; the directory is created if missing, and logging is skipped with a warning if it cannot be. |
 
