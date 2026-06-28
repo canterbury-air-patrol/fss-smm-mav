@@ -859,13 +859,11 @@ mav_connection::disconnect_from_mav ()
     }
 }
 
-mav_connection::mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m,
-                                uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m,
-                                uint32_t t_position_stream_interval_us, uint32_t t_battery_stream_interval_us)
-    : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_goto_altitude_m),
-      altitude_floor_m (t_altitude_floor_m), altitude_cap_m (t_altitude_cap_m),
-      position_stream_interval_us (t_position_stream_interval_us),
-      battery_stream_interval_us (t_battery_stream_interval_us)
+mav_connection::mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params)
+    : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_params.goto_altitude_m),
+      altitude_floor_m (t_params.altitude_floor_m), altitude_cap_m (t_params.altitude_cap_m),
+      position_stream_interval_us (t_params.position_stream_interval_us),
+      battery_stream_interval_us (t_params.battery_stream_interval_us)
 {
 }
 

@@ -2,6 +2,7 @@
 #include "../fmu-types.hpp"
 #include "../smm/smm-types.hpp"
 #include "imav.hpp"
+#include "mav-params.hpp"
 #include <cstdint>
 #include <memory>
 
@@ -27,9 +28,7 @@ class MAV : public IMAV
     terminate_action action;
 
   public:
-    MAV (std::string t_addr, uint16_t t_port, terminate_action ta, uint16_t t_goto_altitude_m,
-         uint16_t t_altitude_floor_m, uint16_t t_altitude_cap_m, uint32_t t_position_stream_interval_us,
-         uint32_t t_battery_stream_interval_us);
+    MAV (std::string t_addr, uint16_t t_port, terminate_action ta, const MavParams &t_params);
     MAV (MAV &) = delete;
     MAV (MAV &&) = delete;
     auto operator= (MAV &) -> MAV & = delete;

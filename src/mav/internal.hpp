@@ -11,6 +11,7 @@
 #include "../fmu-types.hpp"
 #include "../smm/smm.hpp"
 #include "../util.hpp"
+#include "mav-params.hpp"
 #include "mode-resolve.hpp"
 
 class mav_comp
@@ -197,9 +198,7 @@ class mav_connection
     void heartbeat_loop ();
 
   public:
-    mav_connection (std::string t_addr, uint16_t t_port, uint16_t t_goto_altitude_m, uint16_t t_altitude_floor_m,
-                    uint16_t t_altitude_cap_m, uint32_t t_position_stream_interval_us,
-                    uint32_t t_battery_stream_interval_us);
+    mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params);
     ~mav_connection ();
     mav_connection (mav_connection &) = delete;
     mav_connection (mav_connection &&) = delete;
