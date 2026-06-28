@@ -194,6 +194,17 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         setRangedInt (cfg.smm_position_report_interval_ms, "smm_position_report_interval_ms",
                       fmu["smm_position_report_interval_ms"], 100, 60000);
     }
+    /* Upper bounds match the smm-asset library defaults (30s connect / 60s
+     * transfer): a configured value above them would only ever loosen the bound,
+     * which defeats the point, so they are capped there. */
+    if (fmu.isMember ("smm_connect_timeout_s"))
+    {
+        setRangedInt (cfg.smm_connect_timeout_s, "smm_connect_timeout_s", fmu["smm_connect_timeout_s"], 1, 30);
+    }
+    if (fmu.isMember ("smm_transfer_timeout_s"))
+    {
+        setRangedInt (cfg.smm_transfer_timeout_s, "smm_transfer_timeout_s", fmu["smm_transfer_timeout_s"], 1, 60);
+    }
 
     /* The MAV endpoint is safety-relevant: silently falling back to the default
      * could connect the FMU to the wrong (or no) autopilot. So, unlike the other

@@ -11,9 +11,10 @@
 #include <smm-asset.h>
 
 SMM::SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
-          uint64_t t_position_report_interval_ms)
+          uint64_t t_position_report_interval_ms, long t_connect_timeout_s, long t_transfer_timeout_s)
     : mav (t_mav), altitude_cap (t_altitude_cap), altitude_floor (t_altitude_floor), camera_fov_deg (t_camera_fov_deg),
-      position_report_interval_ms (t_position_report_interval_ms)
+      position_report_interval_ms (t_position_report_interval_ms), connect_timeout_s (t_connect_timeout_s),
+      transfer_timeout_s (t_transfer_timeout_s)
 {
     //    smm_asset_debugging_set (true);
 }
@@ -53,6 +54,13 @@ SMM::connect ()
         std::cout << "SMM: Connection failed (no connection)" << '\n';
         return;
     }
+
+    /* Bound how long any single SMM request can block. The library defaults
+     * (30s connect / 60s transfer) are far too long for a flight-safety loop:
+     * SMM I/O runs on the event-loop thread today, so a slow or hung endpoint
+     * would otherwise stall queued FSS commands (rtl/terminate) for the full TCP
+     * window. Set before the login below so even the login is bounded. */
+    smm_asset_connection_timeouts_set (this->conn, this->connect_timeout_s, this->transfer_timeout_s);
 
     /* smm_asset_connect() only validates the host; the library authenticates
      * lazily on the first request and reports SMM_CONNECTION_NEW until then.

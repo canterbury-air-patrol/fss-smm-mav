@@ -1644,6 +1644,8 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
             "position_stream_interval_ms": 100,
             "battery_stream_interval_ms": 2000,
             "smm_position_report_interval_ms": 500,
+            "smm_connect_timeout_s": 3,
+            "smm_transfer_timeout_s": 8,
             "mav_address": "192.168.1.50",
             "mav_port": 14550,
             "log_level": "debug"
@@ -1658,6 +1660,8 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
     REQUIRE (cfg.position_stream_interval_ms == 100);
     REQUIRE (cfg.battery_stream_interval_ms == 2000);
     REQUIRE (cfg.smm_position_report_interval_ms == 500);
+    REQUIRE (cfg.smm_connect_timeout_s == 3);
+    REQUIRE (cfg.smm_transfer_timeout_s == 8);
     REQUIRE (cfg.mav_address == "192.168.1.50");
     REQUIRE (cfg.mav_port == 14550);
     REQUIRE (cfg.log_level == LogLevel::debug);
@@ -1745,6 +1749,8 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
             "position_stream_interval_ms": 10,
             "battery_stream_interval_ms": 90000,
             "smm_position_report_interval_ms": 0,
+            "smm_connect_timeout_s": 0,
+            "smm_transfer_timeout_s": 120,
             "log_level": "verbose"
         }
     })");
@@ -1754,6 +1760,8 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
     REQUIRE (cfg.position_stream_interval_ms == def.position_stream_interval_ms);
     REQUIRE (cfg.battery_stream_interval_ms == def.battery_stream_interval_ms);
     REQUIRE (cfg.smm_position_report_interval_ms == def.smm_position_report_interval_ms);
+    REQUIRE (cfg.smm_connect_timeout_s == def.smm_connect_timeout_s);
+    REQUIRE (cfg.smm_transfer_timeout_s == def.smm_transfer_timeout_s);
     REQUIRE (cfg.log_level == def.log_level);
 }
 

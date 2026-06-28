@@ -47,6 +47,14 @@ struct FmuConfig
      * once-per-position HTTP report to the SMM server independently of the
      * (faster) MAVLink position stream above. */
     int smm_position_report_interval_ms{ 1000 };
+    /* Connect and total-transfer timeouts for SMM HTTP requests, seconds. The
+     * smm-asset library defaults (30s/60s) are far too long for a flight-safety
+     * loop: a single slow or hung SMM endpoint would otherwise block the call
+     * for the full TCP window. These bound that worst case so SMM latency cannot
+     * stall the FMU for tens of seconds (applied via
+     * smm_asset_connection_timeouts_set). Held <= the library defaults. */
+    int smm_connect_timeout_s{ 5 };
+    int smm_transfer_timeout_s{ 10 };
     /* MAVLink autopilot endpoint the FMU connects to (host/IP and TCP port).
      * Previously passed as command-line arguments; now part of the asset config
      * so a deployment is described by one file. Defaults suit a local SITL /
