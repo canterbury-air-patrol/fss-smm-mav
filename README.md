@@ -59,12 +59,17 @@ block is absent entirely):
 {
         "...": "... name / ssl / servers as above ...",
         "fmu": {
+                "mav_address": "127.0.0.1",
+                "mav_port": 5760,
                 "altitude_cap_ft": 400,
                 "altitude_floor_ft": 33,
                 "goto_altitude_ft": 165,
                 "camera_fov_deg": 90.0,
                 "lowbat_threshold": 20,
                 "reconnect_interval_s": 10,
+                "position_stream_interval_ms": 200,
+                "battery_stream_interval_ms": 1000,
+                "smm_position_report_interval_ms": 1000,
                 "log_level": "info",
                 "log_dir": "/var/log/cap-fmu"
         }
@@ -73,6 +78,8 @@ block is absent entirely):
 
 | Key | Default | Description |
 |---|---|---|
+| `mav_address` | `127.0.0.1` | Host/IP of the MAVLink autopilot endpoint the FMU connects to (e.g. a mavproxy/SITL TCP endpoint). |
+| `mav_port` | `5760` | TCP port of the MAVLink autopilot endpoint. Range 1–65535. |
 | `altitude_cap_m` | `122` | Regulatory ceiling for the derived search altitude, in metres AGL. |
 | `altitude_cap_ft` | – | The same ceiling expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
 | `altitude_floor_m` | `10` | Minimum search altitude, in metres AGL. The derived altitude is never flown below this, so a tiny or zero sweep width cannot put the aircraft at ground level. Clamped to be no greater than the altitude cap. |
@@ -82,13 +89,19 @@ block is absent entirely):
 | `camera_fov_deg` | `90.0` | Camera total cross-track (across-flight) field of view, in degrees. The flight altitude for a search is derived from its sweep width as `altitude = sweep_width / (2 * tan(fov / 2))`, then clamped to the [floor, cap] range. Must be in the open range (0, 180). |
 | `lowbat_threshold` | `20` | Battery percentage below which a low-battery RTL is triggered. Range 0–100. The trigger is debounced: the RTL latch only engages after four *consecutive* readings below the threshold, so a single noisy/spurious sample cannot ground the mission. Once latched, the RTL is held until the FMU is restarted — a later higher reading does not release it. |
 | `reconnect_interval_s` | `10` | Seconds between FSS/MAV reconnection attempts. Range 1–3600. |
+| `position_stream_interval_ms` | `200` | Interval (milliseconds) the autopilot is asked to stream `GLOBAL_POSITION_INT` at (200ms = 5Hz). A fixed-wing may want faster updates than a slow rover. Range 50–60000. |
+| `battery_stream_interval_ms` | `1000` | Interval (milliseconds) the autopilot is asked to stream `BATTERY_STATUS` at. Range 50–60000. |
+| `smm_position_report_interval_ms` | `1000` | Minimum interval (milliseconds) between position reports to the SMM server, throttling them independently of the (faster) MAVLink position stream. Range 100–60000. |
 | `log_level` | `info` | Logging verbosity: `error`, `info`, or `debug`. |
 | `log_dir` | `/var/log/cap-fmu` | Directory the rotating `fmu.log` is written to. The FMU normally runs as a non-root user, so set this to a path that user can write; the directory is created if missing, and logging is skipped with a warning if it cannot be. |
 
 Then start this client with:
 ```
-cap-fmu --terminate-action=<action> client.json 127.0.0.1 5760
+cap-fmu --terminate-action=<action> client.json
 ```
+
+The MAVLink endpoint is taken from the `mav_address` / `mav_port` keys in the
+`fmu` block above (defaulting to `127.0.0.1` / `5760`).
 
 `--terminate-action` is required. There is no default — the correct action is airframe-dependent and must be chosen explicitly:
 

@@ -184,6 +184,27 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
                       fmu["smm_position_report_interval_ms"], 100, 60000);
     }
 
+    if (fmu.isMember ("mav_address"))
+    {
+        const Json::Value &addr = fmu["mav_address"];
+        if (!addr.isString ())
+        {
+            std::cerr << "Config: mav_address is not a string, using default " << cfg.mav_address << "\n";
+        }
+        else if (std::string s = addr.asString (); s.empty ())
+        {
+            std::cerr << "Config: mav_address is empty, using default " << cfg.mav_address << "\n";
+        }
+        else
+        {
+            cfg.mav_address = s;
+        }
+    }
+    if (fmu.isMember ("mav_port"))
+    {
+        setRangedInt (cfg.mav_port, "mav_port", fmu["mav_port"], 1, 65535);
+    }
+
     if (fmu.isMember ("log_level"))
     {
         const Json::Value &lvl = fmu["log_level"];

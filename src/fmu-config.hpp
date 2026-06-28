@@ -47,6 +47,12 @@ struct FmuConfig
      * once-per-position HTTP report to the SMM server independently of the
      * (faster) MAVLink position stream above. */
     int smm_position_report_interval_ms{ 1000 };
+    /* MAVLink autopilot endpoint the FMU connects to (host/IP and TCP port).
+     * Previously passed as command-line arguments; now part of the asset config
+     * so a deployment is described by one file. Defaults suit a local SITL /
+     * mavproxy. */
+    std::string mav_address{ "127.0.0.1" };
+    int mav_port{ 5760 };
     /* Logging verbosity: error, info (default), or debug. */
     LogLevel log_level{ LogLevel::info };
     /* Directory the rotating fmu.log is written to. Defaults to the system
