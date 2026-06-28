@@ -184,7 +184,9 @@ FMUStateMachine::actionState (FMUState state) -> bool
             sent = this->mav.setMode (flight_mode_rtl);
             break;
         case fmu_state_goto:
-            /* Tell MAV to Goto the fss position */
+            /* Tell MAV to Goto the fss position. gotoPosition only stashes the
+             * target (it transmits nothing), so the goto's transmission result is
+             * entirely the following setMode(); that is what `sent` tracks. */
             this->mav.gotoPosition (this->fss.getGoto ());
             sent = this->mav.setMode (flight_mode_goto);
             break;
