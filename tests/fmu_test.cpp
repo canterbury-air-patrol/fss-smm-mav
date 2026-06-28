@@ -1625,6 +1625,8 @@ TEST_CASE ("loadFmuConfig returns defaults when the fmu block is absent", "[conf
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (def.camera_fov_deg));
     REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
     REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
+    REQUIRE (cfg.mav_address == def.mav_address);
+    REQUIRE (cfg.mav_port == def.mav_port);
     REQUIRE (cfg.log_level == def.log_level);
     REQUIRE (cfg.log_dir == def.log_dir);
 }
@@ -1642,6 +1644,8 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
             "position_stream_interval_ms": 100,
             "battery_stream_interval_ms": 2000,
             "smm_position_report_interval_ms": 500,
+            "mav_address": "192.168.1.50",
+            "mav_port": 14550,
             "log_level": "debug"
         }
     })");
@@ -1654,6 +1658,8 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
     REQUIRE (cfg.position_stream_interval_ms == 100);
     REQUIRE (cfg.battery_stream_interval_ms == 2000);
     REQUIRE (cfg.smm_position_report_interval_ms == 500);
+    REQUIRE (cfg.mav_address == "192.168.1.50");
+    REQUIRE (cfg.mav_port == 14550);
     REQUIRE (cfg.log_level == LogLevel::debug);
 }
 
@@ -1667,6 +1673,23 @@ TEST_CASE ("loadFmuConfig reads a custom log_dir and rejects bad ones", "[config
     REQUIRE (empty.log_dir == def.log_dir);
     FmuConfig wrong_type = load_config (R"({ "fmu": { "log_dir": 42 } })");
     REQUIRE (wrong_type.log_dir == def.log_dir);
+}
+
+TEST_CASE ("loadFmuConfig reads the MAV endpoint and rejects bad values", "[config]")
+{
+    FmuConfig cfg = load_config (R"({ "fmu": { "mav_address": "10.0.0.2", "mav_port": 5762 } })");
+    REQUIRE (cfg.mav_address == "10.0.0.2");
+    REQUIRE (cfg.mav_port == 5762);
+
+    /* An empty or non-string address keeps the default. */
+    FmuConfig empty = load_config (R"({ "fmu": { "mav_address": "" } })");
+    REQUIRE (empty.mav_address == def.mav_address);
+    FmuConfig wrong_type = load_config (R"({ "fmu": { "mav_address": 42 } })");
+    REQUIRE (wrong_type.mav_address == def.mav_address);
+
+    /* A port outside [1, 65535] keeps the default. */
+    FmuConfig bad_port = load_config (R"({ "fmu": { "mav_port": 70000 } })");
+    REQUIRE (bad_port.mav_port == def.mav_port);
 }
 
 TEST_CASE ("loadFmuConfig clamps the goto altitude into [floor, cap]", "[config]")

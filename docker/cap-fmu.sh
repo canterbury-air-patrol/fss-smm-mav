@@ -12,6 +12,21 @@ case "${TERMINATE_ACTION}" in
         ;;
 esac
 
+# The MAVLink endpoint used to be passed as command-line arguments; it now lives
+# in the generated config's "fmu" block. Validate it here so a misconfigured
+# container still fails loudly rather than silently falling back to defaults
+# (an empty/non-numeric value would otherwise yield malformed JSON).
+if [ -z "${MAVPROXY_HOST}" ]; then
+    echo "Error: MAVPROXY_HOST must be set (the MAVLink endpoint host)" >&2
+    exit 1
+fi
+case "${MAVPROXY_PORT}" in
+    '' | *[!0-9]*)
+        echo "Error: MAVPROXY_PORT must be set to a numeric port" >&2
+        exit 1
+        ;;
+esac
+
 CONFIG_FILE=/home/autopilot/config/fmu-client.json
 
 echo "{" > ${CONFIG_FILE}
@@ -26,7 +41,11 @@ echo "{" >> ${CONFIG_FILE}
 echo "\"address\": \"${SERVER1_ADDR}\"," >> ${CONFIG_FILE}
 echo "\"port\": ${SERVER1_PORT}" >> ${CONFIG_FILE}
 echo "}" >> ${CONFIG_FILE}
-echo "]" >> ${CONFIG_FILE}
+echo "]," >> ${CONFIG_FILE}
+echo "\"fmu\": {" >> ${CONFIG_FILE}
+echo "\"mav_address\": \"${MAVPROXY_HOST}\"," >> ${CONFIG_FILE}
+echo "\"mav_port\": ${MAVPROXY_PORT}" >> ${CONFIG_FILE}
+echo "}" >> ${CONFIG_FILE}
 echo "}" >> ${CONFIG_FILE}
 
 DEBUGGER=
@@ -35,4 +54,4 @@ then
     DEBUGGER=valgrind --leak-check=full -v
 fi
 
-${DEBUGGER} /src/src/cap-fmu --terminate-action="${TERMINATE_ACTION}" /home/autopilot/config/fmu-client.json $MAVPROXY_HOST $MAVPROXY_PORT
+${DEBUGGER} /src/src/cap-fmu --terminate-action="${TERMINATE_ACTION}" /home/autopilot/config/fmu-client.json

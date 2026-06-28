@@ -47,10 +47,10 @@ template <class... Ts> overloaded (Ts...) -> overloaded<Ts...>;
 class App
 {
   public:
-    App (const char *config_file, const char *addr, int port, terminate_action ta, const FmuConfig &cfg,
-         Logger &t_logger)
+    App (const char *config_file, terminate_action ta, const FmuConfig &cfg, Logger &t_logger)
         : fss (std::make_unique<FSS> (config_file)),
-          mav (std::make_unique<MAV> (addr, port, ta, cfg.goto_altitude_m, cfg.altitude_floor_m, cfg.altitude_cap_m,
+          mav (std::make_unique<MAV> (cfg.mav_address, static_cast<uint16_t> (cfg.mav_port), ta, cfg.goto_altitude_m,
+                                      cfg.altitude_floor_m, cfg.altitude_cap_m,
                                       static_cast<uint32_t> (cfg.position_stream_interval_ms) * 1000U,
                                       static_cast<uint32_t> (cfg.battery_stream_interval_ms) * 1000U)),
           smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.altitude_floor_m, cfg.camera_fov_deg,
@@ -280,7 +280,7 @@ class App
 static void
 print_usage (std::ostream &os, const char *progname)
 {
-    os << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json addr port\n";
+    os << "Usage: " << progname << " --terminate-action=none|disarm|terminate client.json\n";
 }
 
 static void
@@ -293,8 +293,9 @@ print_help (const char *progname)
               << "  --version                                 Print version and exit\n"
               << "  --help                                    Print this help and exit\n\n"
               << "Arguments:\n"
-              << "  client.json   FSS client configuration file\n"
-              << "  addr port     MAVLink endpoint (e.g. 127.0.0.1 5760)\n";
+              << "  client.json   FSS client configuration file. Its \"fmu\" block also\n"
+              << "                carries the MAVLink endpoint (mav_address / mav_port,\n"
+              << "                default 127.0.0.1 / 5760).\n";
 }
 
 static auto
@@ -359,7 +360,7 @@ main (int argc, char *argv[]) -> int
         return 1;
     }
 
-    if (argc - optind != 3)
+    if (argc - optind != 1)
     {
         print_usage (std::cerr, argv[0]);
         return 1;
@@ -377,30 +378,14 @@ main (int argc, char *argv[]) -> int
     /* Ignore SIGPIPE */
     signal (SIGPIPE, SIG_IGN);
 
-    const char *port_arg = argv[optind + 2];
     try
     {
-        int port = std::stoi (port_arg);
-        if (port <= 0 || port > 65535)
-        {
-            throw std::out_of_range ("port out of range");
-        }
+        /* The MAVLink endpoint and all other tunables come from the config file's
+         * "fmu" block (mav_address / mav_port, validated in loadFmuConfig). */
         FmuConfig cfg = loadFmuConfig (argv[optind]);
         Logger logger (cfg.log_dir, cfg.log_level);
-        App app (argv[optind], argv[optind + 1], static_cast<uint16_t> (port), ta.value (), cfg, logger);
+        App app (argv[optind], ta.value (), cfg, logger);
         app.run ();
-    }
-    catch (const std::invalid_argument &e)
-    {
-        std::cerr << "Error: invalid port '" << port_arg << "'\n";
-        print_usage (std::cerr, argv[0]);
-        return 1;
-    }
-    catch (const std::out_of_range &e)
-    {
-        std::cerr << "Error: port '" << port_arg << "' is out of range (1-65535)\n";
-        print_usage (std::cerr, argv[0]);
-        return 1;
     }
     catch (const std::exception &e)
     {
