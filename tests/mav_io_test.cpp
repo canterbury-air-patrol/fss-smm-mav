@@ -308,6 +308,9 @@ constexpr uint16_t test_altitude_floor_m = 10;
 constexpr uint16_t test_altitude_cap_m = 120;
 constexpr uint32_t test_position_stream_interval_us = 200000;
 constexpr uint32_t test_battery_stream_interval_us = 1000000;
+constexpr uint64_t test_smm_report_interval_ms = 1000;
+constexpr MavParams test_mav_params{ test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
+                                     test_position_stream_interval_us, test_battery_stream_interval_us };
 constexpr auto io_timeout = std::chrono::seconds (8);
 
 /* mav_connection parses on the single global channel MAVLINK_COMM_0. In the real
@@ -355,8 +358,7 @@ TEST_CASE ("mav_connection reports the link down at cold start, then up once a h
     MavLoopbackServer server;
     CommsRecorder recorder;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
-                         test_position_stream_interval_us, test_battery_stream_interval_us);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
     conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
     conn.start ();
 
@@ -385,8 +387,7 @@ TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconne
     MavLoopbackServer server;
     PositionRecorder positions;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
-                         test_position_stream_interval_us, test_battery_stream_interval_us);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
     conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
     conn.start ();
 
@@ -433,8 +434,7 @@ TEST_CASE ("mav_connection survives repeated drop/reconnect cycles", "[mav_io]")
     MavLoopbackServer server;
     PositionRecorder positions;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
-                         test_position_stream_interval_us, test_battery_stream_interval_us);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
     conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
     conn.start ();
 
@@ -517,8 +517,7 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
     reset_mav_parser ();
     MavLoopbackServer server;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
-                         test_position_stream_interval_us, test_battery_stream_interval_us);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -537,8 +536,7 @@ TEST_CASE ("a search mission resume sets current past the setup items (todo/48)"
     reset_mav_parser ();
     MavLoopbackServer server;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
-                         test_position_stream_interval_us, test_battery_stream_interval_us);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -578,12 +576,11 @@ TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "
     reset_mav_parser ();
     MavLoopbackServer server;
 
-    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_goto_altitude_m, test_altitude_floor_m,
-             test_altitude_cap_m, test_position_stream_interval_us, test_battery_stream_interval_us);
+    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_mav_params);
     mav.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
-    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0);
+    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms);
     /* Simulate a search acquired earlier and then paused by an interrupting hold/
      * rtl: still held locally, but no longer loaded on the autopilot. */
     SMMTestAccess::setSearch (smm, std::make_shared<SMMSearch> ());
@@ -604,8 +601,7 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
     MavLoopbackServer server;
     CommsRecorder recorder;
 
-    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_goto_altitude_m, test_altitude_floor_m,
-             test_altitude_cap_m, test_position_stream_interval_us, test_battery_stream_interval_us);
+    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_mav_params);
     mav.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
     mav.start ();
     REQUIRE (server.waitForClient (io_timeout));
@@ -627,7 +623,7 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
         },
         io_timeout));
 
-    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0);
+    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms);
     /* A search is active but not yet acquired, with no SMM asset (no connect
      * call). The acquire fallback in that state is a safe RTL; the resulting
      * SET_MODE is the observable that retryPendingSearch drove an acquire attempt
