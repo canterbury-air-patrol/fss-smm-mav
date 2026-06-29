@@ -71,4 +71,11 @@ class FMUStateMachine
     void setLowBattery (bool low);
     void setCommsFailure (bool failed);
     void setMavCommsFailure (bool failed);
+    /* True while the FMU is in the searching state. The event loop uses this to
+     * gate SMM worker outcomes (load-search / RTL-fallback): an outcome that
+     * raced a higher-priority transition out of searching is dropped rather than
+     * commanding the autopilot. Reads current_state under this->lock; since every
+     * transition runs on the event loop too, the guard sees a consistent value
+     * (todo/33). */
+    auto isSearching () -> bool;
 };

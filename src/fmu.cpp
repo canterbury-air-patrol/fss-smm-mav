@@ -350,6 +350,13 @@ FMUStateMachine::setMavCommsFailure (bool failed)
     }
 }
 
+auto
+FMUStateMachine::isSearching () -> bool
+{
+    std::lock_guard<std::mutex> lk (this->lock);
+    return this->current_state == fmu_state_searching;
+}
+
 FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm, IFSS &t_fss)
     : mav (t_mav), smm (t_smm), fss (t_fss), state_change_cb{}
 {
