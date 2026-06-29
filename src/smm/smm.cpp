@@ -1,7 +1,8 @@
-#include <cassert>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <utility>
 
 #include "connection-state.hpp"
 #include "search-acquire.hpp"
@@ -10,6 +11,15 @@
 #include "util.hpp"
 #include <smm-asset.h>
 
+namespace
+{
+template <class... Ts> struct overloaded : Ts...
+{
+    using Ts::operator()...;
+};
+template <class... Ts> overloaded (Ts...) -> overloaded<Ts...>;
+} // namespace
+
 SMM::SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
           uint64_t t_position_report_interval_ms, long t_connect_timeout_s, long t_transfer_timeout_s)
     : mav (t_mav), altitude_cap (t_altitude_cap), altitude_floor (t_altitude_floor), camera_fov_deg (t_camera_fov_deg),
@@ -17,13 +27,115 @@ SMM::SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double
       transfer_timeout_s (t_transfer_timeout_s)
 {
     //    smm_asset_debugging_set (true);
+    /* Start the worker now: no tasks are enqueued until the App wires up events,
+     * so the worker simply waits on an empty queue until then. */
+    this->worker_thread = std::thread (&SMM::workerLoop, this);
 }
 
 SMM::~SMM ()
 {
-    std::lock_guard<std::mutex> lk (this->search_lock);
+    /* Stop and join the worker before tearing down the connection: once joined,
+     * no thread can touch conn / current_search, so the disconnect is race-free
+     * and no in-flight outcome callback can fire into a half-destroyed App. */
+    {
+        std::lock_guard<std::mutex> lk (this->queue_lock);
+        this->worker_running = false;
+    }
+    this->queue_cv.notify_one ();
+    if (this->worker_thread.joinable ())
+    {
+        this->worker_thread.join ();
+    }
     this->disconnect ();
     this->current_search = nullptr;
+}
+
+void
+SMM::registerLoadSearchCB (std::function<void (std::shared_ptr<SMMSearch>)> cb)
+{
+    this->load_search_cb = std::move (cb);
+}
+
+void
+SMM::registerRtlCB (std::function<void ()> cb)
+{
+    this->rtl_cb = std::move (cb);
+}
+
+auto
+SMM::fetchSearch (double lat, double lon) -> smm_search
+{
+    return smm_asset_get_search (this->asset, lat, lon);
+}
+
+auto
+SMM::commitSearch (SMMSearch &candidate) -> bool
+{
+    return candidate.accept ();
+}
+
+void
+SMM::reportPositionToSmm (double lat, double lon, int32_t alt, int heading)
+{
+    smm_asset_report_position (this->asset, lat, lon, alt, heading, 3);
+}
+
+void
+SMM::enqueue (SmmTask task)
+{
+    {
+        std::lock_guard<std::mutex> lk (this->queue_lock);
+        if (std::holds_alternative<ReportPositionTask> (task))
+        {
+            /* Coalesce: a newer position supersedes any queued (unsent) report, so
+             * a backlog cannot build while the worker is in a slow call. Reporting
+             * the latest position is all that matters. */
+            for (auto it = this->task_queue.begin (); it != this->task_queue.end ();)
+            {
+                it = std::holds_alternative<ReportPositionTask> (*it) ? this->task_queue.erase (it) : std::next (it);
+            }
+        }
+        else if (std::holds_alternative<RetryPendingTask> (task))
+        {
+            /* Dedupe: at most one pending-search retry queued — they are idempotent
+             * and the backoff timestamp rate-limits the actual fetch anyway. */
+            if (std::any_of (this->task_queue.begin (), this->task_queue.end (),
+                             [] (const SmmTask &queued) { return std::holds_alternative<RetryPendingTask> (queued); }))
+            {
+                return;
+            }
+        }
+        this->task_queue.push_back (std::move (task));
+    }
+    this->queue_cv.notify_one ();
+}
+
+void
+SMM::workerLoop ()
+{
+    while (true)
+    {
+        SmmTask task;
+        {
+            std::unique_lock<std::mutex> lk (this->queue_lock);
+            this->queue_cv.wait (lk, [this] { return !this->task_queue.empty () || !this->worker_running; });
+            if (!this->worker_running && this->task_queue.empty ())
+            {
+                return;
+            }
+            task = std::move (this->task_queue.front ());
+            this->task_queue.pop_front ();
+        }
+        std::visit (
+            overloaded{
+                [this] (const ConnectTask &t) { this->doConnect (t); },
+                [this] (const ReportPositionTask &t) { this->doReportPosition (t.pd); },
+                [this] (const ReachedPointTask &t) { this->doReachedPoint (t.point); },
+                [this] (const SearchTask &t) { this->doSearch (t.pos); },
+                [this] (const RetryPendingTask &t) { this->maybeAcquire (t.pos); },
+            },
+            task);
+    }
 }
 
 void
@@ -104,12 +216,19 @@ void
 SMM::connect (const std::string &t_host, const flight_safety_system::secure_string &t_user,
               const flight_safety_system::secure_string &t_pass, const std::string &t_asset_name)
 {
-    std::lock_guard<std::mutex> lk (this->search_lock);
+    /* Connect/login/get-assets all block on the network, so run them on the
+     * worker rather than the event-loop thread that called us. */
+    this->enqueue (ConnectTask{ t_host, t_user, t_pass, t_asset_name });
+}
+
+void
+SMM::doConnect (const ConnectTask &t)
+{
     if (this->conn != nullptr)
     {
         /* If the details have changed, or the connection has failed, disconnect */
-        if (this->smm_host != t_host || this->smm_user != t_user || this->smm_pass != t_pass
-            || this->asset_name != t_asset_name
+        if (this->smm_host != t.host || this->smm_user != t.user || this->smm_pass != t.pass
+            || this->asset_name != t.asset_name
             || smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
         {
             std::cout << "SMM: Details have changed" << '\n';
@@ -119,10 +238,10 @@ SMM::connect (const std::string &t_host, const flight_safety_system::secure_stri
     /* If there is no connection, store the details and connect */
     if (this->conn == nullptr)
     {
-        this->smm_host = t_host;
-        this->smm_user = t_user;
-        this->smm_pass = t_pass;
-        this->asset_name = t_asset_name;
+        this->smm_host = t.host;
+        this->smm_user = t.user;
+        this->smm_pass = t.pass;
+        this->asset_name = t.asset_name;
 
         std::cout << "SMM: Connecting (" << this->smm_host << "," << this->asset_name << ")" << '\n';
         this->connect ();
@@ -132,7 +251,14 @@ SMM::connect (const std::string &t_host, const flight_safety_system::secure_stri
 void
 SMM::reportPosition (PositionData t_pd)
 {
-    std::unique_lock<std::mutex> lk (this->search_lock);
+    /* Position reporting is unconditional (it keeps SMM updated during RTL/hold/
+     * terminate too) but it is an HTTP call, so it runs on the worker. */
+    this->enqueue (ReportPositionTask{ std::move (t_pd) });
+}
+
+void
+SMM::doReportPosition (PositionData t_pd)
+{
     if (this->asset)
     {
         uint64_t curr_ts = current_timestamp_ms ();
@@ -145,19 +271,15 @@ SMM::reportPosition (PositionData t_pd)
              * range, so a finiteness guard (reporting 0 otherwise) is enough. */
             double alt_m = t_pd.getAltitudeMetres ();
             int32_t alt = std::isfinite (alt_m) ? static_cast<int32_t> (std::lround (alt_m)) : 0;
-            smm_asset_report_position (this->asset, p.getLatitude (), p.getLongitude (), alt, t_pd.getHeading () / 100,
-                                       3);
+            this->reportPositionToSmm (p.getLatitude (), p.getLongitude (), alt, t_pd.getHeading () / 100);
             this->position_report_last_ts = curr_ts;
         }
     }
-    if (this->search_active && this->current_search == nullptr)
-    {
-        /* Opportunistic retry: a fresh position arrived, so use it to (re)attempt
-         * acquisition. This is one of two retry triggers; retryPendingSearch()
-         * drives the other off the reconnect timer so a search is still retried
-         * when position reports stop (see todo/41). */
-        this->tryAcquireSearch (lk, t_pd.getP ());
-    }
+    /* Opportunistic retry: a fresh position arrived, so use it to (re)attempt
+     * acquisition. This is one of two retry triggers; retryPendingSearch() drives
+     * the other off the reconnect timer so a search is still retried when position
+     * reports stop (see todo/41). */
+    this->maybeAcquire (t_pd.getP ());
 }
 
 void
@@ -168,33 +290,57 @@ SMM::retryPendingSearch ()
      * that is active but not yet acquired even when MAV position reports have
      * stopped (a GPS/telemetry gap) — without it, an incoming position report was
      * the only retry trigger, so acquisition (or the disconnected-RTL fallback in
-     * tryAcquireSearch) could stall indefinitely after an SMM reconnect. The
-     * last known MAV position is used for the fetch. The search_retry_ts backoff
-     * still rate-limits the actual fetches, so calling this every reconnect tick
-     * is cheap when a retry is not yet due. */
-    std::unique_lock<std::mutex> lk (this->search_lock);
-    if (this->search_active && this->current_search == nullptr)
+     * tryAcquireSearch) could stall indefinitely after an SMM reconnect. The last
+     * known MAV position is read here, on the caller (reconnect) thread, and
+     * carried to the worker so the worker never touches MAV. The search_retry_ts
+     * backoff still rate-limits the actual fetches. */
+    this->enqueue (RetryPendingTask{ this->mav.getCurrentPosition () });
+}
+
+auto
+SMM::hasHeldSearch () -> bool
+{
+    std::lock_guard<std::mutex> lk (this->state_lock);
+    return this->current_search != nullptr;
+}
+
+void
+SMM::maybeAcquire (Point current_pos)
+{
+    if (this->search_active.load () && !this->hasHeldSearch ())
     {
-        this->tryAcquireSearch (lk, this->mav.getCurrentPosition ());
+        this->tryAcquireSearch (current_pos);
     }
 }
 
-/* Tries to acquire a search from SMM. On failure, sets a retry timestamp so
- * periodic calls back off. Reached from both retry triggers — reportPosition()
- * (on a fresh position) and retryPendingSearch() (off the reconnect timer).
- *
- * Locking contract: `lock` is the caller's lock on search_lock and must be held
- * (owns_lock()) on entry. The blocking smm_asset_get_search() fetch runs with
- * the lock released so other threads are not stalled; ownership stays explicit
- * through `lock` rather than this function toggling search_lock behind the
- * caller's guard. The lock is always re-acquired before returning, so the
- * caller's lock is held again on every exit. */
+/* Publishes an acquired search as the held search and updates the lock-free
+ * point-count cache the event loop reads. Worker-only. */
 void
-SMM::tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos)
+SMM::publishSearch (std::shared_ptr<SMMSearch> acquired)
 {
-    /* Enforce the locking contract: the caller must hold the lock on entry, or the
-     * lock.unlock() around the blocking fetch below would be undefined. */
-    assert (lock.owns_lock ());
+    int points = acquired != nullptr ? acquired->getPointsCount () : 0;
+    {
+        std::lock_guard<std::mutex> lk (this->state_lock);
+        this->current_search = std::move (acquired);
+    }
+    this->current_search_points.store (points);
+}
+
+/* Tries to acquire a search from SMM. On failure, sets a retry timestamp so
+ * periodic calls back off. Runs entirely on the worker thread, reached from both
+ * retry triggers — doReportPosition() (on a fresh position) and the reconnect
+ * timer (RetryPendingTask) — only when a search is wanted and none is held.
+ *
+ * The blocking fetch runs lock-free (the worker is the sole mutator of the
+ * acquire state); a resulting flight action is reported via the rtl_cb /
+ * load_search_cb callbacks, which the App applies on the event loop only while
+ * still searching. search_active is re-checked right before the committing
+ * accept: a command/latch that revoked the searching role during the fetch
+ * aborts the accept, so nothing is committed on the SMM server when the FMU is no
+ * longer searching (todo/33). */
+void
+SMM::tryAcquireSearch (Point current_pos)
+{
     uint64_t curr_ts = current_timestamp_ms ();
     switch (search_acquire_action (this->asset != nullptr, this->search_retry_ts, curr_ts))
     {
@@ -205,35 +351,23 @@ SMM::tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos)
              * active. smm_asset_get_search() must never run with a null asset, so
              * fall back to a safe RTL and back off; search_active stays set, so the
              * search is retried once the asset is rediscovered after reconnect. */
-            this->mav.setMode (flight_mode_rtl);
+            if (this->rtl_cb)
+            {
+                this->rtl_cb ();
+            }
             this->search_retry_ts = curr_ts + search_retry_interval_ms;
             return;
         case SearchAcquireAction::fetch:
             break;
     }
     int retries = 0;
-    while (this->current_search == nullptr)
+    while (true)
     {
-        /* Release lock during blocking network call to avoid stalling other threads. */
-        lock.unlock ();
-        auto new_search = smm_asset_get_search (this->asset, current_pos.getLatitude (), current_pos.getLongitude ());
-        lock.lock ();
+        auto new_search = this->fetchSearch (current_pos.getLatitude (), current_pos.getLongitude ());
 
-        /* If the search was cancelled while we were waiting, clean up and exit. */
-        if (!this->search_active)
-        {
-            if (new_search != nullptr)
-            {
-                smm_search_destroy (new_search);
-            }
-            return;
-        }
-
-        /* Another caller may have populated current_search while the lock was
-         * released; if so, discard the one we just fetched rather than
-         * overwriting (and leaking) the committed search. That caller has
-         * already loaded it and reset the retry timer, so just exit. */
-        if (this->current_search != nullptr)
+        /* If the searching role was revoked while we were fetching, clean up and
+         * exit before committing anything on the server. */
+        if (!this->search_active.load ())
         {
             if (new_search != nullptr)
             {
@@ -244,7 +378,10 @@ SMM::tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos)
 
         if (new_search == nullptr)
         {
-            this->mav.setMode (flight_mode_rtl);
+            if (this->rtl_cb)
+            {
+                this->rtl_cb ();
+            }
             this->search_retry_ts = current_timestamp_ms () + search_retry_interval_ms;
             return;
         }
@@ -252,81 +389,115 @@ SMM::tryAcquireSearch (std::unique_lock<std::mutex> &lock, Point current_pos)
          * un-loadable search is never committed to on the server. */
         auto candidate
             = std::make_shared<SMMSearch> (new_search, this->altitude_cap, this->altitude_floor, this->camera_fov_deg);
-        if (candidate->isValid () && candidate->accept ())
+        /* Re-check search_active immediately before accept: this is the
+         * load-bearing guard — accept() commits on the SMM server and the
+         * event-loop guard cannot undo it. */
+        if (this->search_active.load () && candidate->isValid () && this->commitSearch (*candidate))
         {
-            this->current_search = candidate;
-            break;
+            this->publishSearch (candidate);
+            if (this->load_search_cb)
+            {
+                this->load_search_cb (candidate);
+            }
+            this->search_retry_ts = 0;
+            return;
         }
-        /* candidate's destructor destroys the search; it was not accepted. */
+        /* candidate's destructor destroys the search; it was not accepted. If the
+         * role was revoked, stop without an RTL fallback. */
+        if (!this->search_active.load ())
+        {
+            return;
+        }
         if (++retries >= 3)
         {
-            this->mav.setMode (flight_mode_rtl);
+            if (this->rtl_cb)
+            {
+                this->rtl_cb ();
+            }
             this->search_retry_ts = current_timestamp_ms () + search_retry_interval_ms;
             return;
         }
     }
-    this->mav.loadSearch (this->current_search);
-    this->search_retry_ts = 0;
 }
 
 void
 SMM::search (Point current_pos)
 {
-    std::unique_lock<std::mutex> lk (this->search_lock);
-    this->search_active = true;
-    if (this->current_search != nullptr)
+    /* Grant the searching role synchronously (so an in-flight worker acquire that
+     * was about to abort sees it set), then do the acquire/resume on the worker. */
+    this->search_active.store (true);
+    this->enqueue (SearchTask{ current_pos });
+}
+
+void
+SMM::doSearch (Point current_pos)
+{
+    /* A user-initiated search must not inherit a prior failed-acquire backoff. */
+    this->search_retry_ts = 0;
+    auto held = std::shared_ptr<SMMSearch>{};
+    {
+        std::lock_guard<std::mutex> lk (this->state_lock);
+        held = this->current_search;
+    }
+    if (held != nullptr)
     {
         /* We already hold a search that was paused by an interrupting command
          * (hold/rtl, which cancelSearch()'d without dropping current_search and
          * cleared search_loaded on the MAV side). Re-issue it so `continue`
-         * resumes it from the last point: mav.loadSearch() re-uploads and jumps to
-         * the current point when the mission is no longer loaded, and is a no-op if
-         * it still is. */
-        this->mav.loadSearch (this->current_search);
+         * resumes it from the last point: loadSearch re-uploads and jumps to the
+         * current point when the mission is no longer loaded, and is a no-op if it
+         * still is. */
+        if (this->load_search_cb)
+        {
+            this->load_search_cb (held);
+        }
         return;
     }
     /* tryAcquireSearch() guards the null-asset case itself (RTL + back off, then
      * retry after reconnect), so the disconnected path no longer needs a special
      * case here and both entry points share one rule. */
-    this->tryAcquireSearch (lk, current_pos);
+    this->tryAcquireSearch (current_pos);
 }
 
 void
 SMM::cancelSearch ()
 {
-    /* Pause, not abandon: deactivate the search but deliberately retain
-     * current_search so a later `continue` (which re-enters SMM::search) can
-     * resume it from the last reached point rather than re-acquiring a fresh one
-     * from the server. The search is only truly dropped on completion
+    /* Revoke the searching role synchronously (no I/O): this is the arbitration
+     * token the worker re-checks before committing a search, so a command/latch
+     * that fires during a blocking acquire aborts the accept. Pause, not abandon:
+     * current_search is deliberately retained so a later `continue` resumes it
+     * from the last reached point. The search is only truly dropped on completion
      * (reachedPoint) or a failed (re)acquire. */
-    std::lock_guard<std::mutex> lk (this->search_lock);
-    this->search_active = false;
-    this->search_retry_ts = 0;
+    this->search_active.store (false);
 }
 
 void
 SMM::reachedPoint (int point)
 {
+    this->enqueue (ReachedPointTask{ point });
+}
+
+void
+SMM::doReachedPoint (int point)
+{
     /* See if we have completed this search or not */
-    std::lock_guard<std::mutex> lk (this->search_lock);
-    if (this->current_search != nullptr)
+    auto held = std::shared_ptr<SMMSearch>{};
     {
-        if (this->current_search->reachedPoint (point))
-        {
-            this->current_search = nullptr;
-        }
+        std::lock_guard<std::mutex> lk (this->state_lock);
+        held = this->current_search;
+    }
+    if (held != nullptr && held->reachedPoint (point))
+    {
+        this->publishSearch (nullptr);
     }
 }
 
 auto
 SMM::currentSearchPoints () -> int
 {
-    std::lock_guard<std::mutex> lk (this->search_lock);
-    if (this->current_search != nullptr)
-    {
-        return this->current_search->getPointsCount ();
-    }
-    return 0;
+    /* Lock-free read of the cached count so the event loop never waits on the
+     * worker (which may be mid-HTTP-call). */
+    return this->current_search_points.load ();
 }
 
 SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altitude_floor, double camera_fov_deg)

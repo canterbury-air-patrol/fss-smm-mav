@@ -11,7 +11,9 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <netinet/in.h>
 #include <optional>
@@ -559,9 +561,11 @@ TEST_CASE ("a search mission resume sets current past the setup items (todo/48)"
 struct SMMTestAccess
 {
     static void
-    setSearch (SMM &smm, std::shared_ptr<SMMSearch> search)
+    setSearch (SMM &smm, const std::shared_ptr<SMMSearch> &search)
     {
-        smm.current_search = std::move (search);
+        std::lock_guard<std::mutex> lk (smm.state_lock);
+        smm.current_search = search;
+        smm.current_search_points.store (search != nullptr ? search->getPointsCount () : 0);
     }
     /* Mark a search active without a held search, as if one had been requested
      * but not yet acquired (no SMM connection in these tests, so the production
@@ -569,8 +573,72 @@ struct SMMTestAccess
     static void
     setSearchActive (SMM &smm, bool active)
     {
-        smm.search_active = active;
+        smm.search_active.store (active);
     }
+    /* Inject a sentinel non-null asset so the worker takes the "connected"
+     * acquire/report path without a real SMM connection. The sentinel is never
+     * dereferenced: the tests that use it override the smm_asset_* seams. */
+    static void
+    setAsset (SMM &smm, smm_asset asset)
+    {
+        std::lock_guard<std::mutex> lk (smm.state_lock);
+        smm.asset = asset;
+    }
+};
+
+/* SMM test double exposing the I/O seams so a test can make a blocking SMM call
+ * controllable (block_fetch + releaseFetch) and observable (the call counters)
+ * without a real SMM server. */
+class TestSMM : public SMM
+{
+  public:
+    using SMM::SMM;
+
+    std::atomic<int> fetch_calls{ 0 };
+    std::atomic<int> commit_calls{ 0 };
+    std::atomic<int> report_calls{ 0 };
+    std::atomic<bool> fetch_entered{ false };
+    std::atomic<bool> block_fetch{ false };
+
+    void
+    releaseFetch ()
+    {
+        {
+            std::lock_guard<std::mutex> lk (this->fetch_mtx);
+            this->fetch_released = true;
+        }
+        this->fetch_cv.notify_all ();
+    }
+
+  protected:
+    auto
+    fetchSearch (double /*lat*/, double /*lon*/) -> smm_search override
+    {
+        this->fetch_calls++;
+        this->fetch_entered = true;
+        if (this->block_fetch.load ())
+        {
+            std::unique_lock<std::mutex> lk (this->fetch_mtx);
+            this->fetch_cv.wait (lk, [this] { return this->fetch_released; });
+        }
+        return nullptr;
+    }
+    auto
+    commitSearch (SMMSearch & /*candidate*/) -> bool override
+    {
+        this->commit_calls++;
+        return false;
+    }
+    void
+    reportPositionToSmm (double /*lat*/, double /*lon*/, int32_t /*alt*/, int /*heading*/) override
+    {
+        this->report_calls++;
+    }
+
+  private:
+    std::mutex fetch_mtx{};
+    std::condition_variable fetch_cv{};
+    bool fetch_released{ false };
 };
 
 TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "[mav_io]")
@@ -584,6 +652,11 @@ TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "
 
     SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
              test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
+    /* SMM now feeds its flight actions back through callbacks (the App routes
+     * these through the event queue); wire them straight to MAV here, as the
+     * event-loop handlers do once the FMU is searching. */
+    smm.registerLoadSearchCB ([&mav] (const std::shared_ptr<SMMSearch> &s) { mav.loadSearch (s); });
+    smm.registerRtlCB ([&mav] { mav.setMode (flight_mode_rtl); });
     /* Simulate a search acquired earlier and then paused by an interrupting hold/
      * rtl: still held locally, but no longer loaded on the autopilot. */
     SMMTestAccess::setSearch (smm, std::make_shared<SMMSearch> ());
@@ -628,6 +701,8 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
 
     SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
              test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
+    smm.registerLoadSearchCB ([&mav] (const std::shared_ptr<SMMSearch> &s) { mav.loadSearch (s); });
+    smm.registerRtlCB ([&mav] { mav.setMode (flight_mode_rtl); });
     /* A search is active but not yet acquired, with no SMM asset (no connect
      * call). The acquire fallback in that state is a safe RTL; the resulting
      * SET_MODE is the observable that retryPendingSearch drove an acquire attempt
@@ -638,4 +713,104 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
 
     mavlink_message_t msg;
     REQUIRE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, io_timeout));
+}
+
+TEST_CASE ("SMM public methods stay responsive while the worker is in a slow SMM call (todo/33)", "[mav_io]")
+{
+    reset_mav_parser ();
+    /* No loopback server / start(): the SMM worker never touches MAV on the
+     * search path, so a bare MAV object is enough. */
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params);
+
+    int dummy = 0;
+    TestSMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+                 test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
+    smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});
+    smm.registerRtlCB ([] {});
+    smm.block_fetch = true;
+    /* Sentinel asset so the worker takes the connected acquire path into the
+     * (now blocking) fetchSearch seam. */
+    SMMTestAccess::setAsset (smm, reinterpret_cast<smm_asset> (&dummy));
+
+    smm.search (Point (-43.5, 172.6));
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.fetch_entered.load (); }, io_timeout));
+
+    /* With the worker stuck in fetchSearch, every event-loop-facing SMM call must
+     * still return promptly — the event loop is never blocked by SMM I/O. The
+     * fetch stays blocked for far longer than this bound, so a call that waited on
+     * the worker would blow it. */
+    constexpr auto limit = std::chrono::seconds (2);
+    auto bounded = [&limit] (const std::function<void ()> &fn) -> bool
+    {
+        auto start = std::chrono::steady_clock::now ();
+        fn ();
+        return (std::chrono::steady_clock::now () - start) < limit;
+    };
+    REQUIRE (bounded ([&] { (void)smm.currentSearchPoints (); }));
+    REQUIRE (bounded ([&] { smm.reportPosition (PositionData (-43.5, 172.6, 50.0, 0, 0, 0)); }));
+    REQUIRE (bounded ([&] { smm.reachedPoint (0); }));
+    REQUIRE (bounded ([&] { smm.cancelSearch (); }));
+
+    /* Unblock so the worker leaves fetchSearch, then wait until it has drained the
+     * queued report. This must happen before the object is destroyed: the worker
+     * (joined in ~SMM) calls TestSMM's seams, so it must not still be parked in
+     * fetchSearch when ~TestSMM tears down the seam's sync primitives. */
+    smm.releaseFetch ();
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 1; }, io_timeout));
+}
+
+TEST_CASE ("SMM keeps reporting position even when not searching (todo/33)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params);
+
+    int dummy = 0;
+    TestSMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+                 test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
+    smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});
+    smm.registerRtlCB ([] {});
+    SMMTestAccess::setAsset (smm, reinterpret_cast<smm_asset> (&dummy));
+    /* Not searching (a command/latch is in control). */
+    SMMTestAccess::setSearchActive (smm, false);
+
+    smm.reportPosition (PositionData (-43.5, 172.6, 50.0, 0, 0, 0));
+
+    /* Position is still reported to SMM, and no acquire/accept is attempted while
+     * not searching. */
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 1; }, io_timeout));
+    REQUIRE (smm.commit_calls.load () == 0);
+}
+
+TEST_CASE ("SMM does not accept a search if the searching role is revoked mid-fetch (todo/33)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params);
+
+    int dummy = 0;
+    TestSMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+                 test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
+    std::atomic<int> rtl{ 0 };
+    smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});
+    smm.registerRtlCB ([&rtl] { rtl++; });
+    smm.block_fetch = true;
+    SMMTestAccess::setAsset (smm, reinterpret_cast<smm_asset> (&dummy));
+
+    /* Begin acquiring; the worker blocks in the fetch. */
+    smm.search (Point (-43.5, 172.6));
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.fetch_entered.load (); }, io_timeout));
+
+    /* A command takes over (revoking the searching role) while the fetch is in
+     * flight, then the fetch completes. */
+    smm.cancelSearch ();
+    smm.releaseFetch ();
+
+    /* Enqueue a follow-up report: the single FIFO worker processes it only after
+     * the search task has fully resolved, so once report_calls ticks the accept
+     * decision is final. The worker must have aborted without committing a search
+     * on the server and without an RTL fallback (a clean revoke, not a failure). */
+    SMMTestAccess::setAsset (smm, reinterpret_cast<smm_asset> (&dummy));
+    smm.reportPosition (PositionData (-43.5, 172.6, 50.0, 0, 0, 0));
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 1; }, io_timeout));
+    REQUIRE (smm.commit_calls.load () == 0);
+    REQUIRE (rtl.load () == 0);
 }

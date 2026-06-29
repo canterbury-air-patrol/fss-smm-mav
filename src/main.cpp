@@ -97,6 +97,13 @@ class App
         mav->registerMavCommsStatusCB ([this] (MavCommsStatus status)
                                        { enqueue_event (std::make_shared<event> (status)); });
 
+        /* SMM I/O runs on its own worker thread; its flight outcomes come back
+         * through the event queue so they are applied on the event-loop thread,
+         * where the state machine arbitrates priority (todo/33). */
+        smm->registerLoadSearchCB ([this] (const std::shared_ptr<SMMSearch> &search)
+                                   { enqueue_event (std::make_shared<event> (SmmLoadSearch{ search })); });
+        smm->registerRtlCB ([this] { enqueue_event (std::make_shared<event> (SmmRtl{})); });
+
         /* All callbacks are now registered; only now open the MAV connection and
          * start its recv/heartbeat threads, so those threads cannot race the
          * registration above. (FSS connects lazily via the reconnector below,
@@ -161,6 +168,28 @@ class App
                             logger.log ("WAYPOINT " + std::to_string (rp.point));
                             fss->reachedPoint (rp.point, smm->currentSearchPoints ());
                             smm->reachedPoint (rp.point);
+                        },
+                        [&] (const SmmLoadSearch &ls)
+                        {
+                            /* The SMM worker acquired/resumed a search. Only load it
+                             * onto the autopilot if the FMU is still searching: a
+                             * command/latch that took over since the acquire started
+                             * (rtl/terminate/etc.) must win, and this outcome is
+                             * dropped rather than overriding it (todo/33). */
+                            if (state_machine.isSearching ())
+                            {
+                                mav->loadSearch (ls.search);
+                            }
+                        },
+                        [&] (const SmmRtl &)
+                        {
+                            /* SMM could not acquire/accept a search and wants to fly
+                             * home. Same guard as SmmLoadSearch: suppress it if a
+                             * higher-priority command/latch already took over. */
+                            if (state_machine.isSearching ())
+                            {
+                                mav->setMode (flight_mode_rtl);
+                            }
                         },
                         [&] (BatteryData bd)
                         {
