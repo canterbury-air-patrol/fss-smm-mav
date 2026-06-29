@@ -23,7 +23,7 @@ PKG_INSTALLDIR
 # Check for required pkg-config
 PKG_CHECK_MODULES([FSS_CLIENT_SSL], [fss-client-ssl >= 1.1.0])
 PKG_CHECK_MODULES([FSS_TRANSPORT], [fss-transport >= 1.1.0])
-PKG_CHECK_MODULES([SMM_ASSET], [smm-asset])
+PKG_CHECK_MODULES([SMM_ASSET], [smm-asset >= 1.1.0])
 PKG_CHECK_MODULES([JSONCPP], [jsoncpp])
 
 AC_CHECK_LIB([pthread], [pthread_create], [
