@@ -134,10 +134,13 @@ class App
                             FSSCommandResolution res = state_machine.FSSNewCommand (ce.command);
                             /* Acknowledge the resolved outcome back to FSS (no-op
                              * unless the originating connection negotiated the
-                             * command-ack feature). */
+                             * command-ack feature). Routed through the FSS send
+                             * worker rather than sent inline: the ack ends in a
+                             * blocking send() and must not stall the event loop
+                             * behind a hung FSS peer. */
                             if (ce.ack)
                             {
-                                ce.ack (res);
+                                fss->postAck (ce.ack, res);
                             }
                         },
                         [&] (FSSCommsStatus status)
