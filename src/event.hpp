@@ -37,6 +37,10 @@ struct SmmRtl
 struct FSSCommandEvent
 {
     FSSCommand command{ fss_cmd_unknown };
+    /* The goto/altitude target this command carries (default for commands that
+     * carry none), delivered with the command so the state machine actions it
+     * from the event rather than an FSS side-channel (todo/53). */
+    FSSCommandTarget target{};
     fss_command_ack_responder ack;
 };
 

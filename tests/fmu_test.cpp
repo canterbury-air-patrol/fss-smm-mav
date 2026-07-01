@@ -40,6 +40,8 @@ class MockMAV : public IMAV
     int terminate_calls{ 0 };
     uint16_t last_altitude{ 0 };
     int set_altitude_calls{ 0 };
+    Point last_goto{};
+    int goto_calls{ 0 };
     /* Controls the transmission result the action methods report. Set false to
      * simulate a send that did not reach the autopilot (MAV link down) so the
      * replay-on-recovery path (todo/46) can be exercised. */
@@ -74,8 +76,10 @@ class MockMAV : public IMAV
         return send_succeeds;
     }
     void
-    gotoPosition (Point) override
+    gotoPosition (Point p) override
     {
+        last_goto = p;
+        goto_calls++;
     }
     auto
     setAltitude (uint16_t alt) -> bool override
@@ -120,42 +124,15 @@ class MockSMM : public ISMM
     }
 };
 
-class MockFSS : public IFSS
-{
-  public:
-    Point goto_point{};
-    uint16_t altitude_val{ 0 };
-
-    MockFSS () = default;
-    MockFSS (const MockFSS &) = delete;
-    MockFSS (MockFSS &&) = delete;
-    auto operator= (const MockFSS &) -> MockFSS & = delete;
-    auto operator= (MockFSS &&) -> MockFSS & = delete;
-    ~MockFSS () override = default;
-
-    auto
-    getGoto () -> Point override
-    {
-        return goto_point;
-    }
-    auto
-    getAltitude () -> uint16_t override
-    {
-        return altitude_val;
-    }
-};
-
-using SM = std::tuple<std::shared_ptr<MockMAV>, std::shared_ptr<MockSMM>, std::shared_ptr<MockFSS>,
-                      std::shared_ptr<FMUStateMachine>>;
+using SM = std::tuple<std::shared_ptr<MockMAV>, std::shared_ptr<MockSMM>, std::shared_ptr<FMUStateMachine>>;
 
 static auto
 make_sm () -> SM
 {
     auto mav = std::make_shared<MockMAV> ();
     auto smm = std::make_shared<MockSMM> ();
-    auto fss = std::make_shared<MockFSS> ();
-    auto sm = std::make_shared<FMUStateMachine> (*mav, *smm, *fss);
-    return { mav, smm, fss, sm };
+    auto sm = std::make_shared<FMUStateMachine> (*mav, *smm);
+    return { mav, smm, sm };
 }
 
 /* The state machine debounces low-battery readings: the RTL latch only engages
@@ -172,7 +149,7 @@ latch_low_battery (const std::shared_ptr<FMUStateMachine> &sm)
 
 TEST_CASE ("low battery latches RTL regardless of subsequent FSS commands", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -189,7 +166,7 @@ TEST_CASE ("low battery latches RTL regardless of subsequent FSS commands", "[st
 
 TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->setCommsFailure (true);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -204,7 +181,7 @@ TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machin
 TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms recover (todo/46)",
            "[state_machine][replay]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     /* MAV link is down: action sends do not reach the autopilot. */
     mav->send_succeeds = false;
@@ -226,7 +203,7 @@ TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms rec
 
 TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (todo/46)", "[state_machine][replay]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     mav->send_succeeds = false;
     sm->setMavCommsFailure (true);
@@ -245,7 +222,7 @@ TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (
 TEST_CASE ("a safety action that was transmitted is not replayed on a later MAV recovery (todo/46)",
            "[state_machine][replay]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     /* send_succeeds stays true: the RTL reaches the autopilot first time. */
     latch_low_battery (sm);
@@ -259,7 +236,7 @@ TEST_CASE ("a safety action that was transmitted is not replayed on a later MAV 
 
 TEST_CASE ("fss_cmd_continue with smm_cmd_none leads to searching", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
     int calls_before = smm->search_calls;
 
     sm->FSSNewCommand (fss_cmd_continue);
@@ -269,7 +246,7 @@ TEST_CASE ("fss_cmd_continue with smm_cmd_none leads to searching", "[state_mach
 
 TEST_CASE ("fss_cmd_continue with smm_cmd_abandon_search leads to searching", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->SMMNewCommand (smm_cmd_abandon_search);
     sm->FSSNewCommand (fss_cmd_continue);
@@ -283,7 +260,7 @@ TEST_CASE ("fss_cmd_continue with smm_cmd_abandon_search leads to searching", "[
  * is covered in mav_io_test. */
 TEST_CASE ("continue after a hold re-invokes the search so it can resume", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_continue);
     REQUIRE (smm->search_calls == 1);
@@ -303,7 +280,7 @@ TEST_CASE ("continue after a hold re-invokes the search so it can resume", "[sta
  * pause/resume behaviour of the search itself is tracked separately (todo/50). */
 TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_continue);
     REQUIRE (smm->search_calls == 1);
@@ -315,7 +292,7 @@ TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL", "[sta
 
 TEST_CASE ("an explicit FSS command overrides an active SMM search", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_continue);
     REQUIRE (smm->search_calls == 1);
@@ -334,7 +311,7 @@ TEST_CASE ("an explicit FSS command overrides an active SMM search", "[state_mac
 
 TEST_CASE ("low battery forces RTL out of an active search", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_continue);
     REQUIRE (smm->search_calls == 1);
@@ -345,7 +322,7 @@ TEST_CASE ("low battery forces RTL out of an active search", "[state_machine]")
 
 TEST_CASE ("comms failure forces RTL out of an active search", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_continue);
     REQUIRE (smm->search_calls == 1);
@@ -359,7 +336,7 @@ TEST_CASE ("comms failure forces RTL out of an active search", "[state_machine]"
  * halt the aircraft, even during an emergency RTL. */
 TEST_CASE ("terminate overrides low battery", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -371,7 +348,7 @@ TEST_CASE ("terminate overrides low battery", "[state_machine]")
 
 TEST_CASE ("terminate overrides comms failure", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->setCommsFailure (true);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -386,7 +363,7 @@ TEST_CASE ("terminate overrides comms failure", "[state_machine]")
  * release the aircraft from RTL while the battery is still low. */
 TEST_CASE ("low battery outranks comms failure", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->setCommsFailure (true);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -406,7 +383,7 @@ TEST_CASE ("low battery outranks comms failure", "[state_machine]")
  * of the aircraft; RTL is the safe action. */
 TEST_CASE ("manual blocked when low battery is set", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     sm->FSSNewCommand (fss_cmd_manual);
@@ -416,7 +393,7 @@ TEST_CASE ("manual blocked when low battery is set", "[state_machine]")
 
 TEST_CASE ("manual allowed when battery OK", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     /* The machine starts in fmu_state_manual, so move away first to make the
      * transition back to manual observable. */
@@ -429,7 +406,7 @@ TEST_CASE ("manual allowed when battery OK", "[state_machine]")
 
 TEST_CASE ("disarm allowed when battery OK", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_disarm);
 
@@ -438,7 +415,7 @@ TEST_CASE ("disarm allowed when battery OK", "[state_machine]")
 
 TEST_CASE ("disarm blocked when low battery is set", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     sm->FSSNewCommand (fss_cmd_disarm);
@@ -449,7 +426,7 @@ TEST_CASE ("disarm blocked when low battery is set", "[state_machine]")
 
 TEST_CASE ("same non-searching state does not re-action", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
     int calls = mav->set_mode_calls;
@@ -460,7 +437,7 @@ TEST_CASE ("same non-searching state does not re-action", "[state_machine]")
 
 TEST_CASE ("searching does not re-action on repeated state update", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_continue);
     int calls = smm->search_calls;
@@ -471,7 +448,7 @@ TEST_CASE ("searching does not re-action on repeated state update", "[state_mach
 
 TEST_CASE ("goto does not re-action on repeated FSS goto", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_goto);
     int calls = mav->set_mode_calls;
@@ -480,25 +457,36 @@ TEST_CASE ("goto does not re-action on repeated FSS goto", "[state_machine]")
     REQUIRE (mav->set_mode_calls == calls);
 }
 
+TEST_CASE ("goto command passes its carried target to mav gotoPosition", "[state_machine]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    /* The target travels inside the command (todo/53), not via an FSS
+     * side-channel; actionState must goto exactly the point the command carried. */
+    sm->FSSNewCommand (fss_cmd_goto, FSSCommandTarget{ Point{ -43.5, 172.6 }, 0 });
+
+    REQUIRE (mav->goto_calls == 1);
+    REQUIRE (mav->last_goto == Point{ -43.5, 172.6 });
+    REQUIRE (mav->last_mode == flight_mode_goto);
+}
+
 TEST_CASE ("altitude adjust command calls mav setAltitude", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
-    fss->altitude_val = 150;
-    sm->FSSNewCommand (fss_cmd_altitude);
+    sm->FSSNewCommand (fss_cmd_altitude, FSSCommandTarget{ Point{}, 150 });
 
     REQUIRE (mav->last_altitude == 150);
 }
 
 TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
-    fss->altitude_val = 150;
-    sm->FSSNewCommand (fss_cmd_altitude);
+    sm->FSSNewCommand (fss_cmd_altitude, FSSCommandTarget{ Point{}, 150 });
     int calls = mav->set_altitude_calls;
 
-    sm->FSSNewCommand (fss_cmd_altitude);
+    sm->FSSNewCommand (fss_cmd_altitude, FSSCommandTarget{ Point{}, 150 });
     REQUIRE (mav->set_altitude_calls == calls);
 }
 
@@ -507,7 +495,7 @@ TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[stat
  * after low_battery_latch_count consecutive low samples. */
 TEST_CASE ("low battery does not latch before the debounce count", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (mav->last_mode == flight_mode_hold);
@@ -526,7 +514,7 @@ TEST_CASE ("low battery does not latch before the debounce count", "[state_machi
 
 TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
 
@@ -551,7 +539,7 @@ TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_
  * recovery from a critically low battery requires a restart. */
 TEST_CASE ("low battery latch is not cleared by a healthy reading", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -566,7 +554,7 @@ TEST_CASE ("low battery latch is not cleared by a healthy reading", "[state_mach
  * exactly once and stay engaged no matter how many more low readings arrive. */
 TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     /* Far more readings than the latch count, to exercise counter saturation. */
     for (int i = 0; i < 1000; i++)
@@ -586,7 +574,7 @@ TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[st
 
 TEST_CASE ("mav comms failure triggers failsafe RTL", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (mav->last_mode == flight_mode_hold);
@@ -601,7 +589,7 @@ TEST_CASE ("mav comms failure triggers failsafe RTL", "[state_machine]")
  * not just the mav side effect. */
 TEST_CASE ("repeated mav comms failures do not re-action the failsafe", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     FMUState last_state = fmu_state_manual;
     sm->setStateChangeCB ([&] (FMUState s) { last_state = s; });
@@ -623,7 +611,7 @@ TEST_CASE ("repeated mav comms failures do not re-action the failsafe", "[state_
 
 TEST_CASE ("mav comms failure clears and restores prior FSS command", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (mav->last_mode == flight_mode_hold);
@@ -637,7 +625,7 @@ TEST_CASE ("mav comms failure clears and restores prior FSS command", "[state_ma
 
 TEST_CASE ("terminate overrides mav comms failure", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->setMavCommsFailure (true);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -649,7 +637,7 @@ TEST_CASE ("terminate overrides mav comms failure", "[state_machine]")
 
 TEST_CASE ("mav comms failure does not displace an active terminate", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_terminate);
     REQUIRE (mav->terminated);
@@ -663,7 +651,7 @@ TEST_CASE ("mav comms failure does not displace an active terminate", "[state_ma
 
 TEST_CASE ("disarm command is actioned when no emergency", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_disarm);
     REQUIRE (mav->disarmed);
@@ -671,7 +659,7 @@ TEST_CASE ("disarm command is actioned when no emergency", "[state_machine]")
 
 TEST_CASE ("state_change_cb fires once per state change, not on no-op transitions", "[state_machine]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     int transitions = 0;
     FMUState last_seen = fmu_state_manual;
@@ -698,7 +686,7 @@ TEST_CASE ("state_change_cb fires once per state change, not on no-op transition
  * higher-priority latch is superseded (and names the blocking state). */
 TEST_CASE ("FSS command that transitions resolves as actioned", "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     auto res = sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (res.outcome == fss_command_actioned);
@@ -707,7 +695,7 @@ TEST_CASE ("FSS command that transitions resolves as actioned", "[state_machine]
 
 TEST_CASE ("FSS command already in the target state resolves as actioned no-op", "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
     auto res = sm->FSSNewCommand (fss_cmd_hold);
@@ -718,7 +706,7 @@ TEST_CASE ("FSS command already in the target state resolves as actioned no-op",
 
 TEST_CASE ("FSS command superseded by low battery names the latch", "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     auto res = sm->FSSNewCommand (fss_cmd_hold);
@@ -728,7 +716,7 @@ TEST_CASE ("FSS command superseded by low battery names the latch", "[state_mach
 
 TEST_CASE ("FSS command superseded by comms failsafe names the latch", "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->setCommsFailure (true);
     auto res = sm->FSSNewCommand (fss_cmd_goto);
@@ -742,7 +730,7 @@ TEST_CASE ("FSS command superseded by comms failsafe names the latch", "[state_m
  * effect. These tests pin that decision so it cannot silently regress. */
 TEST_CASE ("an explicit RTL during the low-battery latch is reported superseded", "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
@@ -758,7 +746,7 @@ TEST_CASE ("an explicit RTL during the low-battery latch is reported superseded"
 TEST_CASE ("an RTL superseded by a recoverable comms failure still applies once comms clears",
            "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     /* Baseline so "the commanded RTL applied on recovery" is observable: without
      * the RTL below, recovery would restore this hold. */
@@ -788,7 +776,7 @@ TEST_CASE ("an RTL superseded by a recoverable comms failure still applies once 
  * latches — low battery and comms failure — not against a newer FSS command.) */
 TEST_CASE ("FSS command after terminate replaces it and resolves as actioned", "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_terminate);
     auto res = sm->FSSNewCommand (fss_cmd_hold);
@@ -798,7 +786,7 @@ TEST_CASE ("FSS command after terminate replaces it and resolves as actioned", "
 
 TEST_CASE ("terminate command itself resolves as actioned", "[state_machine][command_ack]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     auto res = sm->FSSNewCommand (fss_cmd_terminate);
     REQUIRE (res.outcome == fss_command_actioned);
@@ -813,7 +801,7 @@ namespace fsst = flight_safety_system::transport;
 
 TEST_CASE ("ack mapping: a transitioning command is actioned with no reason", "[command_ack][mapping]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     auto res = sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (fss_command_ack_outcome_for (res) == fsst::command_ack_actioned);
@@ -822,7 +810,7 @@ TEST_CASE ("ack mapping: a transitioning command is actioned with no reason", "[
 
 TEST_CASE ("ack mapping: an already-in-state command is noop", "[command_ack][mapping]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_hold);
     auto res = sm->FSSNewCommand (fss_cmd_hold);
@@ -832,7 +820,7 @@ TEST_CASE ("ack mapping: an already-in-state command is noop", "[command_ack][ma
 
 TEST_CASE ("ack mapping: low-battery supersede carries the low-battery reason", "[command_ack][mapping]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     latch_low_battery (sm);
     auto res = sm->FSSNewCommand (fss_cmd_hold);
@@ -842,7 +830,7 @@ TEST_CASE ("ack mapping: low-battery supersede carries the low-battery reason", 
 
 TEST_CASE ("ack mapping: comms-loss supersede carries the comms-loss reason", "[command_ack][mapping]")
 {
-    auto [mav, smm, fss, sm] = make_sm ();
+    auto [mav, smm, sm] = make_sm ();
 
     sm->setCommsFailure (true);
     auto res = sm->FSSNewCommand (fss_cmd_goto);

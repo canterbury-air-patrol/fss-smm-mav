@@ -6,7 +6,6 @@
 
 #include "fmu-state-types.hpp"
 #include "fss/fmu-fss-types.hpp"
-#include "fss/ifss.hpp"
 #include "mav/imav.hpp"
 #include "smm/ismm.hpp"
 #include "smm/smm-command.hpp"
@@ -67,6 +66,14 @@ class FMUStateMachine
      * recover; empty once delivered or superseded. Guarded by this->lock. */
     std::optional<FMUState> pending_replay_state{};
     FSSCommand fss_command{ fss_cmd_unknown };
+    /* Target of the most recent goto/altitude FSS command, retained so
+     * actionState can command the MAV whenever the goto/altitude state is
+     * (re-)entered — including a later transition (e.g. a comms latch clearing)
+     * that re-applies the stored fss_command. Set alongside fss_command in
+     * FSSNewCommand; the command carries its own target through the event queue
+     * rather than the state machine reading it back from FSS (todo/53). Only the
+     * field matching fss_command is meaningful. */
+    FSSCommandTarget fss_command_target{};
     SMMCommand smm_command{ smm_cmd_none };
     int low_battery_count{ 0 };
     bool low_battery{ false };
@@ -74,7 +81,6 @@ class FMUStateMachine
     bool mav_comms_lost{ false };
     IMAV &mav;
     ISMM &smm;
-    IFSS &fss;
     std::mutex lock{};
     std::function<void (FMUState)> state_change_cb;
 
@@ -85,12 +91,13 @@ class FMUStateMachine
      * reading in between resets the run. Public so tests stay in step with it. */
     static constexpr int low_battery_latch_count = 4;
 
-    FMUStateMachine (IMAV &t_mav, ISMM &t_smm, IFSS &t_fss);
+    FMUStateMachine (IMAV &t_mav, ISMM &t_smm);
 
     void setStateChangeCB (std::function<void (FMUState)> cb);
-    /* Apply an FSS command and report how it resolved (actioned vs superseded
-     * by a higher-priority latch), so the caller can acknowledge it to FSS. */
-    auto FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution;
+    /* Apply an FSS command (carrying its own goto/altitude target, default for
+     * commands with none) and report how it resolved (actioned vs superseded by a
+     * higher-priority latch), so the caller can acknowledge it to FSS. */
+    auto FSSNewCommand (FSSCommand cmd, const FSSCommandTarget &target = {}) -> FSSCommandResolution;
     void SMMNewCommand (SMMCommand cmd);
     /* Report the latest battery reading's low/not-low state. Called for *every*
      * reading (not only low ones) so the consecutive-low run can be tracked:

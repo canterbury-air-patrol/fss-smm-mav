@@ -189,17 +189,23 @@ fss_client_ssl::handleCommandFrom (
         }
     };
 
-    /* goto and altitude carry a payload (target position / altitude) that must be
-     * reported before the command is actioned. */
+    /* goto and altitude carry a target (position / altitude). Deliver it with the
+     * command so it and the command travel as one unit through the event queue,
+     * rather than reporting it up a separate side-channel the state machine would
+     * re-read at action time (todo/53). */
+    FSSCommandTarget target;
     if (raw_command == flight_safety_system::transport::asset_command_goto)
     {
-        this->report_goto_update (Point (msg->getLatitude (), msg->getLongitude ()));
+        target.position = Point (msg->getLatitude (), msg->getLongitude ());
     }
     else if (raw_command == flight_safety_system::transport::asset_command_altitude)
     {
-        this->report_altitude_update (msg->getAltitude ());
+        /* The wire altitude is uint32_t; the target is uint16_t. Altitudes are in
+         * feet, so the value always fits well within 16 bits (65535ft is far above
+         * any operating ceiling) and the narrowing cast cannot lose data. */
+        target.altitude = static_cast<uint16_t> (msg->getAltitude ());
     }
-    this->report_command (fss_command, ack);
+    this->report_command (fss_command, target, ack);
 }
 
 void
@@ -291,11 +297,11 @@ fss_client_ssl::sendBatteryStatus (int8_t remaining, int32_t consumed, double vo
 }
 
 void
-fss_client_ssl::report_command (FSSCommand cmd, const fss_command_ack_responder &ack)
+fss_client_ssl::report_command (FSSCommand cmd, const FSSCommandTarget &target, const fss_command_ack_responder &ack)
 {
     if (this->command_cb)
     {
-        this->command_cb (cmd, ack);
+        this->command_cb (cmd, target, ack);
     }
 }
 
@@ -305,24 +311,6 @@ fss_client_ssl::report_comms_status (FSSCommsStatus status)
     if (this->comms_status_cb)
     {
         this->comms_status_cb (status);
-    }
-}
-
-void
-fss_client_ssl::report_goto_update (Point p)
-{
-    if (this->goto_cb)
-    {
-        this->goto_cb (p);
-    }
-}
-
-void
-fss_client_ssl::report_altitude_update (uint32_t alt)
-{
-    if (this->altitude_cb)
-    {
-        this->altitude_cb (alt);
     }
 }
 

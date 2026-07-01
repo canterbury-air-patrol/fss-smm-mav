@@ -65,13 +65,14 @@ class App
     void
     run ()
     {
-        FMUStateMachine state_machine{ *mav, *smm, *fss };
+        FMUStateMachine state_machine{ *mav, *smm };
         state_machine.setStateChangeCB ([this] (FMUState s)
                                         { logger.log (std::string ("STATE ") + fmu_state_name (s)); });
         logger.log ("START " + asset_name);
 
-        fss->registerCommandCB ([this] (FSSCommand command, const fss_command_ack_responder &ack)
-                                { enqueue_event (std::make_shared<event> (FSSCommandEvent{ command, ack })); });
+        fss->registerCommandCB (
+            [this] (FSSCommand command, const FSSCommandTarget &target, const fss_command_ack_responder &ack)
+            { enqueue_event (std::make_shared<event> (FSSCommandEvent{ command, target, ack })); });
         fss->registerCommsStatusCB ([this] (FSSCommsStatus status)
                                     { enqueue_event (std::make_shared<event> (status)); });
         fss->registerSMMSettingsCB ([this] (const SMMSettings &settings)
@@ -131,7 +132,7 @@ class App
                         [&] (const FSSCommandEvent &ce)
                         {
                             logger.log (std::string ("CMD fss ") + fss_cmd_name (ce.command));
-                            FSSCommandResolution res = state_machine.FSSNewCommand (ce.command);
+                            FSSCommandResolution res = state_machine.FSSNewCommand (ce.command, ce.target);
                             /* Acknowledge the resolved outcome back to FSS (no-op
                              * unless the originating connection negotiated the
                              * command-ack feature). Routed through the FSS send

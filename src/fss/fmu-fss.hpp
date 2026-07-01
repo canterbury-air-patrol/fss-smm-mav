@@ -1,6 +1,5 @@
 #pragma once
 #include "fmu-fss-types.hpp"
-#include "ifss.hpp"
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -13,13 +12,10 @@
 #include "../fmu-types.hpp"
 #include "internal.hpp"
 
-class FSS : public IFSS
+class FSS
 {
   private:
     std::shared_ptr<fss_client_ssl> ssl_client{ nullptr };
-    std::mutex state_lock{};
-    uint16_t assigned_altitude{ 0 };
-    Point goto_point{};
 
     /* Every outbound FSS send the event loop makes (position/reached/battery
      * reports and the second-phase command ack) bottoms out in a blocking send()
@@ -77,12 +73,8 @@ class FSS : public IFSS
     FSS (FSS &&) = delete;
     auto operator= (FSS &) -> FSS & = delete;
     auto operator= (FSS &&) -> FSS & = delete;
-    ~FSS () override;
+    ~FSS ();
     auto getAssetName () -> std::string;
-    auto getGoto () -> Point override;
-    void setGoto (Point);
-    auto getAltitude () -> uint16_t override;
-    void setAltitude (uint16_t);
     void reportPosition (PositionData pd);
     void registerCommandCB (notify_fss_command_cb cb);
     void registerCommsStatusCB (notify_fss_comms_cb cb);
