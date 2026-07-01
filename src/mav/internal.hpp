@@ -219,7 +219,7 @@ class mav_connection
     auto commandGoto (Point p) -> bool;
     auto commandHold () -> bool;
     void commandAuto ();
-    auto commandAltitude (uint16_t alt) -> bool;
+    auto commandAltitude (uint32_t alt) -> bool;
     auto commandDisARM () -> bool;
     auto commandForceDisARM () -> bool;
     auto commandManual () -> bool;

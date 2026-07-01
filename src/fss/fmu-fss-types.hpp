@@ -25,7 +25,12 @@ enum FSSCommand
 struct FSSCommandTarget
 {
     Point position{};
-    uint16_t altitude{ 0 };
+    /* Feet, as delivered on the FSS wire (fss_message_asset_command::getAltitude
+     * is uint32_t). Kept full-width here so the value is narrowed only by the
+     * regulatory [floor, cap] clamp in clamp_command_altitude(), never by a lossy
+     * cast that could wrap a large altitude down to a low one before the clamp
+     * ever sees it (todo/55). */
+    uint32_t altitude{ 0 };
 };
 
 enum FSSCommsStatus

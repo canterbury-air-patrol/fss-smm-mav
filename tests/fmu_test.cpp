@@ -38,7 +38,7 @@ class MockMAV : public IMAV
     int disarm_calls{ 0 };
     bool terminated{ false };
     int terminate_calls{ 0 };
-    uint16_t last_altitude{ 0 };
+    uint32_t last_altitude{ 0 };
     int set_altitude_calls{ 0 };
     Point last_goto{};
     int goto_calls{ 0 };
@@ -82,7 +82,7 @@ class MockMAV : public IMAV
         goto_calls++;
     }
     auto
-    setAltitude (uint16_t alt) -> bool override
+    setAltitude (uint32_t alt) -> bool override
     {
         last_altitude = alt;
         set_altitude_calls++;
@@ -500,6 +500,20 @@ TEST_CASE ("altitude adjust command calls mav setAltitude", "[state_machine]")
     sm->FSSNewCommand (fss_cmd_altitude, FSSCommandTarget{ Point{}, 150 });
 
     REQUIRE (mav->last_altitude == 150);
+}
+
+TEST_CASE ("altitude adjust carries a full-width altitude through to setAltitude", "[state_machine]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    /* An altitude that does not fit in 16 bits must reach the MAV layer intact so
+     * the [floor, cap] clamp there is the only thing that narrows it. If the
+     * target were still uint16_t this would wrap (70000 & 0xFFFF == 4464) and the
+     * state machine would command a low altitude instead (todo/55). */
+    constexpr uint32_t oversized_ft = 70000;
+    sm->FSSNewCommand (fss_cmd_altitude, FSSCommandTarget{ Point{}, oversized_ft });
+
+    REQUIRE (mav->last_altitude == oversized_ft);
 }
 
 TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[state_machine]")
@@ -1221,6 +1235,16 @@ TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor,
 
     /* Exactly at the cap in feet: 400 ft == 121.92 m, within (122) -> 121. */
     REQUIRE (clamp_command_altitude (400, floor, cap) == 121);
+
+    /* Regression (todo/55): an altitude that does not fit in 16 bits must pin to
+     * the cap, never wrap. 65536 ft (0x10000) truncates to 0 as a uint16_t, which
+     * would have clamped up to the floor -- i.e. a "far too high" command would
+     * have become "as low as allowed". Taken full-width it is ~19974 m -> cap. */
+    REQUIRE (clamp_command_altitude (65536, floor, cap) == cap);
+    /* 65536 + 33: low 16 bits == 33 ft (~10 m, the floor). Full-width -> cap. */
+    REQUIRE (clamp_command_altitude (65569, floor, cap) == cap);
+    /* The maximum wire value stays pinned to the cap. */
+    REQUIRE (clamp_command_altitude (UINT32_MAX, floor, cap) == cap);
 }
 
 TEST_CASE ("resolve_mav_mode returns no mode until the autopilot type is known", "[mav]")

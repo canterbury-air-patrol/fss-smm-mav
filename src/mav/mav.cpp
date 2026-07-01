@@ -73,7 +73,7 @@ MAV::gotoPosition (Point to)
 }
 
 auto
-MAV::setAltitude (uint16_t alt) -> bool
+MAV::setAltitude (uint32_t alt) -> bool
 {
     this->target_altitude = alt;
     return this->connection->commandAltitude (alt);

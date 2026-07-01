@@ -242,7 +242,7 @@ mav_connection::commandAuto ()
 }
 
 auto
-mav_connection::commandAltitude (uint16_t alt) -> bool
+mav_connection::commandAltitude (uint32_t alt) -> bool
 {
     mavlink_message_t msg;
     /* alt is feet (the FSS wire unit). Convert to metres and clamp into the

@@ -200,10 +200,12 @@ fss_client_ssl::handleCommandFrom (
     }
     else if (raw_command == flight_safety_system::transport::asset_command_altitude)
     {
-        /* The wire altitude is uint32_t; the target is uint16_t. Altitudes are in
-         * feet, so the value always fits well within 16 bits (65535ft is far above
-         * any operating ceiling) and the narrowing cast cannot lose data. */
-        target.altitude = static_cast<uint16_t> (msg->getAltitude ());
+        /* Carry the wire altitude (uint32_t feet) through at full width. Do NOT
+         * narrow it here: a malformed/oversized value would wrap to a smaller
+         * altitude, and the [floor, cap] clamp downstream could then accept the
+         * wrapped value as legitimate. clamp_command_altitude() is the single
+         * narrowing authority (todo/55). */
+        target.altitude = msg->getAltitude ();
     }
     this->report_command (fss_command, target, ack);
 }
