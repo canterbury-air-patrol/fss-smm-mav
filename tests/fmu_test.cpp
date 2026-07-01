@@ -470,6 +470,29 @@ TEST_CASE ("goto command passes its carried target to mav gotoPosition", "[state
     REQUIRE (mav->last_mode == flight_mode_goto);
 }
 
+/* The carried goto target is retained across a higher-priority latch: a comms
+ * failsafe takes over goto, and when comms recover the goto is re-applied with
+ * the SAME target the original command carried (fss_command and its target are
+ * written together and only a new FSS command overwrites them). */
+TEST_CASE ("goto target survives a comms-loss latch and is re-applied on recovery", "[state_machine]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_goto, FSSCommandTarget{ Point{ -43.5, 172.6 }, 0 });
+    REQUIRE (mav->last_goto == Point{ -43.5, 172.6 });
+
+    /* Comms drop: the failsafe RTL supersedes the goto. */
+    sm->setCommsFailure (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    /* Comms restored: goto is re-entered and the original target flown again,
+     * even though no new goto command arrived to re-supply it. */
+    sm->setCommsFailure (false);
+    REQUIRE (mav->last_mode == flight_mode_goto);
+    REQUIRE (mav->goto_calls == 2);
+    REQUIRE (mav->last_goto == Point{ -43.5, 172.6 });
+}
+
 TEST_CASE ("altitude adjust command calls mav setAltitude", "[state_machine]")
 {
     auto [mav, smm, sm] = make_sm ();
