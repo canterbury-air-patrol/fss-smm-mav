@@ -195,10 +195,11 @@ FMUStateMachine::actionState (FMUState state) -> bool
             sent = this->mav.setMode (flight_mode_rtl);
             break;
         case fmu_state_goto:
-            /* Tell MAV to Goto the fss position. gotoPosition only stashes the
+            /* Tell MAV to Goto the commanded position (carried in with the goto
+             * command, see fss_command_target). gotoPosition only stashes the
              * target (it transmits nothing), so the goto's transmission result is
              * entirely the following setMode(); that is what `sent` tracks. */
-            this->mav.gotoPosition (this->fss.getGoto ());
+            this->mav.gotoPosition (this->fss_command_target.position);
             sent = this->mav.setMode (flight_mode_goto);
             break;
         case fmu_state_hold:
@@ -206,8 +207,9 @@ FMUStateMachine::actionState (FMUState state) -> bool
             sent = this->mav.setMode (flight_mode_hold);
             break;
         case fmu_state_altitude_adjust:
-            /* Tell MAV to adjust the altitude */
-            sent = this->mav.setAltitude (this->fss.getAltitude ());
+            /* Tell MAV to adjust to the commanded altitude (carried in with the
+             * altitude command, see fss_command_target). */
+            sent = this->mav.setAltitude (this->fss_command_target.altitude);
             break;
         case fmu_state_disarmed:
             /* Tell MAV to disarm the aircraft */
@@ -243,7 +245,7 @@ FMUStateMachine::actionState (FMUState state) -> bool
 }
 
 auto
-FMUStateMachine::FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution
+FMUStateMachine::FSSNewCommand (FSSCommand cmd, const FSSCommandTarget &target) -> FSSCommandResolution
 {
     this->assert_event_loop_thread ();
     std::optional<FMUState> changed_to;
@@ -251,6 +253,10 @@ FMUStateMachine::FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution
     {
         std::lock_guard<std::mutex> lk (this->lock);
         this->fss_command = cmd;
+        /* Retain the command's target atomically with the command itself, so a
+         * later re-entry into goto/altitude (e.g. a comms latch clearing) actions
+         * the target this command carried. */
+        this->fss_command_target = target;
         /* What the command alone maps to, ignoring the priority latches; shared
          * with updateState()'s comms-okay branch so the two cannot diverge. */
         FMUState desired = this->commandedState ();
@@ -373,10 +379,7 @@ FMUStateMachine::isSearching () -> bool
     return this->current_state == fmu_state_searching;
 }
 
-FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm, IFSS &t_fss)
-    : mav (t_mav), smm (t_smm), fss (t_fss), state_change_cb{}
-{
-}
+FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm) : mav (t_mav), smm (t_smm), state_change_cb{} {}
 
 void
 FMUStateMachine::setStateChangeCB (std::function<void (FMUState)> cb)

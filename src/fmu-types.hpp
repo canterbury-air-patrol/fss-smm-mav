@@ -14,7 +14,8 @@
  * the event loop needing to know any transport detail. */
 using fss_command_ack_responder = std::function<void (const FSSCommandResolution &)>;
 
-using notify_fss_command_cb = std::function<void (FSSCommand, const fss_command_ack_responder &)>;
+using notify_fss_command_cb
+    = std::function<void (FSSCommand, const FSSCommandTarget &, const fss_command_ack_responder &)>;
 using notify_fss_comms_cb = std::function<void (FSSCommsStatus)>;
 using notify_mav_comms_cb = std::function<void (MavCommsStatus)>;
 

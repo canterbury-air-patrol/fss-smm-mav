@@ -9,19 +9,14 @@
 #include <cstdint>
 #include <memory>
 
-using notify_goto_update_cb = std::function<void (Point)>;
-using notify_altitude_update_cb = std::function<void (uint32_t)>;
-
 class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
 {
   private:
     notify_fss_command_cb command_cb{};
     notify_fss_comms_cb comms_status_cb{};
-    notify_goto_update_cb goto_cb{};
-    notify_altitude_update_cb altitude_cb{};
     notify_smm_settings_cb smm_settings_cb{};
     notify_position_cb position_data_cb{};
-    void report_command (FSSCommand cmd, const fss_command_ack_responder &ack);
+    void report_command (FSSCommand cmd, const FSSCommandTarget &target, const fss_command_ack_responder &ack);
     /* Send a command acknowledgement on the originating connection, gated on
      * that connection having negotiated FSS_FEATURE_COMMAND_ACK. acked_id is the
      * received command's header id (echoed back); raw_command is the
@@ -35,8 +30,6 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
                          uint64_t acked_id, flight_safety_system::transport::fss_asset_command raw_command,
                          flight_safety_system::transport::fss_command_ack_outcome outcome,
                          flight_safety_system::transport::fss_command_ack_reason reason);
-    void report_goto_update (Point);
-    void report_altitude_update (uint32_t);
     void report_comms_status (FSSCommsStatus);
     void report_smm_settings (const SMMSettings &);
     void report_position_data (const PositionData &);
@@ -99,16 +92,6 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     registerCommsStatusCB (notify_fss_comms_cb cb)
     {
         this->comms_status_cb = cb;
-    };
-    void
-    registerGotoUpdateCB (notify_goto_update_cb cb)
-    {
-        this->goto_cb = cb;
-    };
-    void
-    registerAltitudeUpdateCB (notify_altitude_update_cb cb)
-    {
-        this->altitude_cb = cb;
     };
     void
     registerSMMSettingsCB (notify_smm_settings_cb cb)
