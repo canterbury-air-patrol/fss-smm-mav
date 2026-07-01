@@ -169,9 +169,11 @@ SMM::connect ()
 
     /* Bound how long any single SMM request can block. The library defaults
      * (30s connect / 60s transfer) are far too long for a flight-safety loop:
-     * SMM I/O runs on the event-loop thread today, so a slow or hung endpoint
-     * would otherwise stall queued FSS commands (rtl/terminate) for the full TCP
-     * window. Set before the login below so even the login is bounded. */
+     * SMM I/O runs on the worker thread (public methods enqueue and return, so
+     * queued FSS commands are never blocked on SMM HTTP — todo/33), but an
+     * unbounded call would still pin the worker for the full TCP window, delaying
+     * shutdown, the search-acquire retry, and any SMM work queued behind it. Set
+     * before the login below so even the login is bounded. */
     smm_asset_connection_timeouts_set (this->conn, this->connect_timeout_s, this->transfer_timeout_s);
 
     /* smm_asset_connect() only validates the host; the library authenticates
