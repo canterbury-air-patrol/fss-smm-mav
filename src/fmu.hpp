@@ -49,13 +49,17 @@ class FMUStateMachine
     auto actionState (FMUState state) -> bool;
     /* Debug-only guard for the single-event-loop-thread invariant documented
      * above the class: assert this call runs on the event-loop thread that owns
-     * the state machine (the first caller establishes it). Compiled to a no-op
-     * under NDEBUG so flight builds carry zero overhead; the point is to trip
-     * tests / CI / TSan the instant a state-machine method is called off the
-     * event-loop thread. */
+     * the state machine. Compiled to a no-op under NDEBUG so flight builds carry
+     * zero overhead; the point is to trip tests / CI / TSan the instant a
+     * state-machine method is called off the event-loop thread. */
     void assert_event_loop_thread ();
 #ifndef NDEBUG
-    std::optional<std::thread::id> event_loop_thread_id{};
+    /* The owning event-loop thread, captured at construction (the state machine
+     * is always constructed on that thread, before it is published to any other).
+     * Write-once here and read-only in assert_event_loop_thread(), so the guard
+     * cannot itself race — a lazy first-write would be a data race under the very
+     * cross-thread misuse it is meant to detect. */
+    const std::thread::id event_loop_thread_id{ std::this_thread::get_id () };
 #endif
     FMUState current_state{ fmu_state_manual };
     /* A safety-critical state (RTL / failsafe / low-battery / terminate) whose MAV

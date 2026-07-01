@@ -62,14 +62,8 @@ void
 FMUStateMachine::assert_event_loop_thread ()
 {
 #ifndef NDEBUG
-    auto this_id = std::this_thread::get_id ();
-    if (!this->event_loop_thread_id.has_value ())
-    {
-        /* First state-machine call establishes the owning event-loop thread. */
-        this->event_loop_thread_id = this_id;
-        return;
-    }
-    assert (this_id == *this->event_loop_thread_id && "FMUStateMachine method called off the event-loop thread");
+    assert (std::this_thread::get_id () == this->event_loop_thread_id
+            && "FMUStateMachine method called off the event-loop thread");
 #endif
 }
 
