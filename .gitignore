@@ -31,3 +31,6 @@ tests/mav_io_test
 # Static-analysis artefacts (see check-code.sh)
 compile_commands.json
 clang-tidy.log
+
+# Distribution tarball (make dist / make distcheck)
+/cap-fmu-*.tar.gz
