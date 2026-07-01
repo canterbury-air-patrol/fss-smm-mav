@@ -47,8 +47,16 @@ template <class... Ts> overloaded (Ts...) -> overloaded<Ts...>;
 class App
 {
   public:
+    /* Member init order follows declaration order (below), not this list. The list
+     * is written to match so it does not trip -Wreorder: the queue and its sync
+     * primitives are constructed first, then the callback producers (fss, mav, smm)
+     * last — so at destruction the producers (and their threads) are torn down
+     * before the queue they enqueue onto (todo/65). mav precedes smm (SMM holds a
+     * MAV&); fss precedes asset_name (initialised from fss->getAssetName()). */
     App (const char *config_file, terminate_action ta, const FmuConfig &cfg, Logger &t_logger)
-        : fss (std::make_unique<FSS> (config_file)),
+        : event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, logger (t_logger),
+          lowbat_threshold (cfg.lowbat_threshold), reconnect_interval_s (cfg.reconnect_interval_s), aircraft{},
+          fss (std::make_unique<FSS> (config_file)),
           mav (std::make_unique<MAV> (cfg.mav_address, static_cast<uint16_t> (cfg.mav_port), ta,
                                       MavParams{ cfg.goto_altitude_m, cfg.altitude_floor_m, cfg.altitude_cap_m,
                                                  static_cast<uint32_t> (cfg.position_stream_interval_ms) * 1000U,
@@ -56,9 +64,7 @@ class App
           smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.altitude_floor_m, cfg.camera_fov_deg,
                                       static_cast<uint64_t> (cfg.smm_position_report_interval_ms),
                                       cfg.smm_connect_timeout_s, cfg.smm_transfer_timeout_s)),
-          aircraft{}, event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true },
-          asset_name (fss->getAssetName ()), logger (t_logger), lowbat_threshold (cfg.lowbat_threshold),
-          reconnect_interval_s (cfg.reconnect_interval_s)
+          asset_name (fss->getAssetName ())
     {
     }
 
@@ -233,9 +239,17 @@ class App
             sig_thread.join ();
         }
 
-        while (!event_queue.empty ())
+        /* Drain under main_lock: the mav/smm/fss worker threads are not joined
+         * until those objects are destroyed (after run() returns), so one could
+         * still enqueue here. Holding the lock keeps this drain consistent with a
+         * concurrent enqueue_event(); any event enqueued after it is discarded when
+         * the queue is destroyed, which now happens after the producers (todo/65). */
         {
-            event_queue.pop ();
+            std::lock_guard<std::mutex> lk (main_lock);
+            while (!event_queue.empty ())
+            {
+                event_queue.pop ();
+            }
         }
 
         logger.log ("STOP");
@@ -292,11 +306,9 @@ class App
         enqueue_event (std::make_shared<event> (Nudge{}));
     }
 
-    std::unique_ptr<FSS> fss;
-    std::unique_ptr<MAV> mav;
-    std::unique_ptr<SMM> smm;
-    known_aircraft aircraft;
-
+    /* The event queue and its sync primitives are declared first so they are
+     * destroyed LAST — after the callback producers below, whose worker/recv
+     * threads enqueue onto this queue and touch main_lock/main_cv. */
     std::queue<std::shared_ptr<event>> event_queue;
     std::mutex main_lock;
     std::condition_variable main_cv;
@@ -305,10 +317,21 @@ class App
     std::condition_variable reconnect_cv;
 
     std::atomic<bool> running{ true };
-    std::string asset_name;
     Logger &logger;
     int lowbat_threshold;
     int reconnect_interval_s;
+    known_aircraft aircraft;
+
+    /* Callback producers, declared last so they are destroyed FIRST: each joins
+     * its worker/recv threads in its destructor, so those threads stop enqueuing
+     * before the queue and locks above are torn down (todo/65). Order within the
+     * group: mav before smm (SMM holds a MAV&), and asset_name after fss (it is
+     * initialised from fss->getAssetName()). aircraft is declared just above so it
+     * outlives fss, whose position callback touches it. */
+    std::unique_ptr<FSS> fss;
+    std::unique_ptr<MAV> mav;
+    std::unique_ptr<SMM> smm;
+    std::string asset_name;
 };
 
 static void
