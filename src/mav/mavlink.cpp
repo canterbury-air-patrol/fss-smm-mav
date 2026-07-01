@@ -6,6 +6,7 @@
 #include "mission-plan.hpp"
 #include "smm/search-altitude.hpp"
 #include "util.hpp"
+#include "velocity.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -568,7 +569,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             int16_t vx = mavlink_msg_global_position_int_get_vx (msg);
             int16_t vy = mavlink_msg_global_position_int_get_vy (msg);
             int16_t vz = mavlink_msg_global_position_int_get_vz (msg);
-            uint16_t vh = static_cast<uint16_t> (sqrt ((vx * vx) + (vy * vy)));
+            uint16_t vh = horizontal_velocity (vx, vy);
             {
                 std::lock_guard<std::mutex> lk (this->state_lock);
                 this->last_position = Point (latd, lngd);

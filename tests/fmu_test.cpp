@@ -12,6 +12,7 @@
 #include "mav/mav-comms.hpp"
 #include "mav/mission-plan.hpp"
 #include "mav/mode-resolve.hpp"
+#include "mav/velocity.hpp"
 #include "smm/connection-state.hpp"
 #include "smm/search-acquire.hpp"
 #include "smm/search-altitude.hpp"
@@ -1245,6 +1246,23 @@ TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor,
     REQUIRE (clamp_command_altitude (65569, floor, cap) == cap);
     /* The maximum wire value stays pinned to the cap. */
     REQUIRE (clamp_command_altitude (UINT32_MAX, floor, cap) == cap);
+}
+
+TEST_CASE ("horizontal_velocity is a Pythagorean magnitude with no int overflow", "[mav][velocity]")
+{
+    /* 3-4-5 triangle, and sign-independence. */
+    REQUIRE (horizontal_velocity (300, 400) == 500);
+    REQUIRE (horizontal_velocity (-300, -400) == 500);
+    REQUIRE (horizontal_velocity (0, 0) == 0);
+    REQUIRE (horizontal_velocity (0, 250) == 250);
+
+    /* Regression (todo/57): the extreme inputs. sqrt((vx*vx)+(vy*vy)) does the
+     * squares in int and overflows signed int at INT16_MIN (UB / UBSan trip);
+     * hypot in double does not. hypot(32768,32768) ~= 46340.95 -> 46340, and the
+     * magnitude of two int16_t components always fits in uint16_t. */
+    REQUIRE (horizontal_velocity (INT16_MIN, INT16_MIN) == 46340);
+    REQUIRE (horizontal_velocity (INT16_MAX, INT16_MAX) == 46339);
+    REQUIRE (horizontal_velocity (INT16_MIN, 0) == 32768);
 }
 
 TEST_CASE ("resolve_mav_mode returns no mode until the autopilot type is known", "[mav]")
