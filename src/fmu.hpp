@@ -2,6 +2,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <thread>
 
 #include "fmu-state-types.hpp"
 #include "fss/fmu-fss-types.hpp"
@@ -10,6 +11,19 @@
 #include "smm/ismm.hpp"
 #include "smm/smm-command.hpp"
 
+/* Single-event-loop-thread invariant
+ * -----------------------------------
+ * Every state-mutating method below (FSSNewCommand, SMMNewCommand,
+ * setLowBattery, setCommsFailure, setMavCommsFailure) and the work they drive
+ * (updateState / actionState, which touch mav, smm and state_change_cb) run on
+ * the ONE event-loop thread. All external inputs — FSS/SMM/MAV callbacks — are
+ * funnelled through the App event queue and applied here on that thread, which
+ * is what makes the priority arbitration and the state fields safe to reason
+ * about without locking beyond the small guarded region that publishes to worker
+ * threads (pending_replay_state). Calling any of these methods from another
+ * thread (e.g. directly from a MAV/SMM/FSS callback instead of enqueuing an
+ * event) would introduce a silent data race on the state fields.
+ * assert_event_loop_thread() defends this in debug builds (todo/52). */
 class FMUStateMachine
 {
   private:
@@ -33,6 +47,16 @@ class FMUStateMachine
      * pending_replay_state so it is re-sent once the MAV link recovers (todo/46).
      * Must be called WITHOUT this->lock held (it locks internally). */
     auto actionState (FMUState state) -> bool;
+    /* Debug-only guard for the single-event-loop-thread invariant documented
+     * above the class: assert this call runs on the event-loop thread that owns
+     * the state machine (the first caller establishes it). Compiled to a no-op
+     * under NDEBUG so flight builds carry zero overhead; the point is to trip
+     * tests / CI / TSan the instant a state-machine method is called off the
+     * event-loop thread. */
+    void assert_event_loop_thread ();
+#ifndef NDEBUG
+    std::optional<std::thread::id> event_loop_thread_id{};
+#endif
     FMUState current_state{ fmu_state_manual };
     /* A safety-critical state (RTL / failsafe / low-battery / terminate) whose MAV
      * command could not be transmitted (link down). Replayed when MAV comms

@@ -1,6 +1,8 @@
 #include "fmu.hpp"
+#include <cassert>
 #include <iostream>
 #include <mutex>
+#include <thread>
 
 auto
 map_smm_state (SMMCommand cmd) -> FMUState
@@ -54,6 +56,21 @@ map_fss_state (FSSCommand cmd) -> FMUState
             break;
     }
     return new_state;
+}
+
+void
+FMUStateMachine::assert_event_loop_thread ()
+{
+#ifndef NDEBUG
+    auto this_id = std::this_thread::get_id ();
+    if (!this->event_loop_thread_id.has_value ())
+    {
+        /* First state-machine call establishes the owning event-loop thread. */
+        this->event_loop_thread_id = this_id;
+        return;
+    }
+    assert (this_id == *this->event_loop_thread_id && "FMUStateMachine method called off the event-loop thread");
+#endif
 }
 
 auto
@@ -234,6 +251,7 @@ FMUStateMachine::actionState (FMUState state) -> bool
 auto
 FMUStateMachine::FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution
 {
+    this->assert_event_loop_thread ();
     std::optional<FMUState> changed_to;
     FSSCommandResolution resolution;
     {
@@ -255,6 +273,7 @@ FMUStateMachine::FSSNewCommand (FSSCommand cmd) -> FSSCommandResolution
 void
 FMUStateMachine::SMMNewCommand (SMMCommand cmd)
 {
+    this->assert_event_loop_thread ();
     std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
@@ -270,6 +289,7 @@ FMUStateMachine::SMMNewCommand (SMMCommand cmd)
 void
 FMUStateMachine::setLowBattery (bool low)
 {
+    this->assert_event_loop_thread ();
     std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
@@ -307,6 +327,7 @@ FMUStateMachine::setLowBattery (bool low)
 void
 FMUStateMachine::setCommsFailure (bool failed)
 {
+    this->assert_event_loop_thread ();
     std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
@@ -322,6 +343,7 @@ FMUStateMachine::setCommsFailure (bool failed)
 void
 FMUStateMachine::setMavCommsFailure (bool failed)
 {
+    this->assert_event_loop_thread ();
     std::optional<FMUState> changed_to;
     std::optional<FMUState> replay;
     {
