@@ -64,6 +64,54 @@ jobs:
         bash -n docker/build.sh
         bash -n docker/install.sh
 
+  distcheck:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+
+    steps:
+    - name: Install git
+      run: |
+        apt-get update
+        apt-get install -y git
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Add CAP apt repository
+      run: |
+        apt-get update
+        apt-get install -y lsb-release ca-certificates curl gnupg
+        echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+          > /etc/apt/sources.list.d/cap.list
+        curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
+          | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
+        apt-get update
+
+    - name: Install dependencies
+      run: |
+        apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          catch2 \
+          libfss-client-ssl \
+          libsmm-asset-dev \
+          libjsoncpp-dev
+
+    # make distcheck builds the release tarball, then configures/builds/tests it
+    # in a clean out-of-tree (VPATH) directory and checks install/uninstall. This
+    # catches a source or header that the build uses but a Makefile.am forgets to
+    # distribute (a _SOURCES/EXTRA_DIST omission) -- an in-tree `make check` finds
+    # the file in the working tree and so passes even when the tarball is broken.
+    - name: Distcheck (tarball builds out-of-tree)
+      run: |
+        autoreconf -fi
+        ./configure
+        make distcheck
+
   sanitizers:
     runs-on: ubuntu-latest
     container: debian:trixie
