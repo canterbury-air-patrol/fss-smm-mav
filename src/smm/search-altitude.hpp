@@ -52,13 +52,18 @@ clamp_search_altitude (double altitude, uint16_t altitude_floor, uint16_t altitu
     return static_cast<uint16_t> (altitude);
 }
 
-/* Convert an FSS altitude command (feet — the FSS wire unit) to metres AGL and
- * clamp it into the regulatory [floor, cap] range, so a direct operator
- * altitude command can no more exceed the ceiling (or drop below the floor)
- * than the search/goto altitudes can. Returns whole metres, ready for the
- * MAV_CMD_DO_CHANGE_ALTITUDE that the autopilot expects in metres. */
+/* Convert an FSS altitude command (feet — the FSS wire unit, uint32_t) to metres
+ * AGL and clamp it into the regulatory [floor, cap] range, so a direct operator
+ * altitude command can no more exceed the ceiling (or drop below the floor) than
+ * the search/goto altitudes can. Returns whole metres, ready for the
+ * MAV_CMD_DO_CHANGE_ALTITUDE that the autopilot expects in metres.
+ *
+ * altitude_ft is taken full-width (uint32_t): this clamp is the single narrowing
+ * authority for a commanded altitude. An oversized value converts to a large
+ * metre count and is pinned to the cap, so it can never wrap to a low altitude
+ * that the [floor, cap] range would then wave through (todo/55). */
 inline auto
-clamp_command_altitude (uint16_t altitude_ft, uint16_t altitude_floor, uint16_t altitude_cap) -> uint16_t
+clamp_command_altitude (uint32_t altitude_ft, uint16_t altitude_floor, uint16_t altitude_cap) -> uint16_t
 {
     return clamp_search_altitude (feet_to_metres (static_cast<double> (altitude_ft)), altitude_floor, altitude_cap);
 }

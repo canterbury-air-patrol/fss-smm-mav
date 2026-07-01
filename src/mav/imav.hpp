@@ -34,7 +34,7 @@ class IMAV
     virtual auto disarm () -> bool = 0;
     virtual auto terminate () -> bool = 0;
     virtual void gotoPosition (Point to) = 0;
-    virtual auto setAltitude (uint16_t alt) -> bool = 0;
+    virtual auto setAltitude (uint32_t alt) -> bool = 0;
     virtual auto getCurrentPosition () -> Point = 0;
     virtual void registerMavCommsStatusCB (notify_mav_comms_cb cb) = 0;
 };

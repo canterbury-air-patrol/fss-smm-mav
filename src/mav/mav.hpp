@@ -24,7 +24,7 @@ class MAV : public IMAV
     flight_mode mode{ flight_mode_unknown };
     bool armed{ false };
     Point goto_position{};
-    uint16_t target_altitude{ 0 };
+    uint32_t target_altitude{ 0 };
     terminate_action action;
 
   public:
@@ -52,7 +52,7 @@ class MAV : public IMAV
     auto disarm () -> bool override;
     auto terminate () -> bool override;
     void gotoPosition (Point to) override;
-    auto setAltitude (uint16_t alt) -> bool override;
+    auto setAltitude (uint32_t alt) -> bool override;
     auto getCurrentPosition () -> Point override;
     void loadSearch (const std::shared_ptr<SMMSearch> &);
     void sendADSB (PositionData pd);
