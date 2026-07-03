@@ -7,10 +7,11 @@
 #include <iostream>
 #include <sstream>
 
-Logger::Logger (std::string_view dir, LogLevel t_level) : file{}, lock{}, level (t_level)
+Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes)
+    : log_path{}, file{}, lock{}, level (t_level), max_log_bytes (max_bytes)
 {
     std::string log_dir (dir);
-    std::string log_path = log_dir + "/fmu.log";
+    log_path = log_dir + "/fmu.log";
 
     std::error_code ec;
     std::filesystem::create_directories (log_dir, ec);
@@ -20,9 +21,19 @@ Logger::Logger (std::string_view dir, LogLevel t_level) : file{}, lock{}, level 
         return;
     }
 
-    rotate (log_path, 5);
+    openFresh ();
+}
 
+void
+Logger::openFresh ()
+{
+    if (file.is_open ())
+    {
+        file.close ();
+    }
+    rotate (log_path, max_rotations);
     file.open (log_path, std::ios::out | std::ios::trunc);
+    bytes_written = 0;
     if (!file.is_open ())
     {
         std::cerr << "logger: cannot open " << log_path << '\n';
@@ -30,10 +41,10 @@ Logger::Logger (std::string_view dir, LogLevel t_level) : file{}, lock{}, level 
 }
 
 void
-Logger::rotate (const std::string &base, int max_rotations)
+Logger::rotate (const std::string &base, int rotation_count)
 {
     std::error_code ec;
-    for (int i = max_rotations - 1; i >= 1; --i)
+    for (int i = rotation_count - 1; i >= 1; --i)
     {
         std::string src = base + "." + std::to_string (i);
         std::string dst = base + "." + std::to_string (i + 1);
@@ -84,6 +95,17 @@ Logger::log (LogLevel msg_level, std::string_view msg)
     {
         return;
     }
-    file << timestamp () << ' ' << msg << '\n';
+    std::string line = timestamp () + ' ' + std::string (msg) + '\n';
+    file << line;
     file.flush ();
+    bytes_written += line.size ();
+    /* A long-running process previously rotated only at startup (so "5
+     * rotations" retention was really "5 process starts"). Rotate here too
+     * once the current file crosses the size threshold, same as a restart
+     * would, so a long flight or a chatty debug level cannot grow the file
+     * without bound. */
+    if (bytes_written >= max_log_bytes)
+    {
+        openFresh ();
+    }
 }
