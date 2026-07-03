@@ -51,9 +51,12 @@ Create a client.json file that refers to your server(s):
 
 #### Optional FMU configuration
 
-An optional `fmu` block configures asset-specific behaviour. Every key is
-optional and falls back to the default shown below if omitted (or if the
-block is absent entirely):
+The `client.json` file itself is required and must be a valid, openable JSON
+file — it is also the FSS client's own config, so a missing or malformed
+file is a fatal startup error regardless of anything below. Within that
+file, the `fmu` block is optional, and every key inside it is optional too,
+falling back to the default shown below if omitted (or if the block is
+absent entirely):
 
 ```
 {
