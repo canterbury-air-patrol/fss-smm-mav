@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -68,7 +69,12 @@ fss_cmd_name (FSSCommand cmd)
 class Logger
 {
   public:
-    explicit Logger (std::string_view dir, LogLevel level = LogLevel::info);
+    /* Default size threshold (bytes) at which log() rotates the file
+     * in-flight; overridable (e.g. by tests) via the constructor. */
+    static constexpr std::size_t default_max_log_bytes = 10UL * 1024 * 1024;
+
+    explicit Logger (std::string_view dir, LogLevel level = LogLevel::info,
+                     std::size_t max_bytes = default_max_log_bytes);
 
     /* Log at info level. */
     void log (std::string_view msg);
@@ -78,9 +84,25 @@ class Logger
 
   private:
     static std::string timestamp ();
-    static void rotate (const std::string &base, int max_rotations);
+    static void rotate (const std::string &base, int rotation_count);
+    /* Close, rotate, and reopen the log file, resetting the byte counter.
+     * Shared by the constructor's startup rotation and log()'s in-flight
+     * rotation once max_log_bytes is exceeded. */
+    void openFresh ();
 
+    static constexpr int max_rotations = 5;
+
+    std::string log_path;
     std::ofstream file;
     std::mutex lock;
     LogLevel level;
+    /* A long-running process would otherwise append to a single file
+     * forever (rotation previously only ran at startup, so the "5
+     * rotations" retention was really "5 process starts", not a size or
+     * time bound). Once the current file reaches this many bytes, log()
+     * rotates it like a restart would. */
+    std::size_t max_log_bytes;
+    /* Bytes written to the current file, tracked incrementally rather than
+     * stat-ing the file on every log() call. */
+    std::size_t bytes_written{ 0 };
 };

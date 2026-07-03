@@ -7,6 +7,7 @@
 #include "fmu.hpp"
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
+#include "logger.hpp"
 #include "mav/battery-voltage.hpp"
 #include "mav/internal.hpp"
 #include "mav/mav-comms.hpp"
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -1848,4 +1850,87 @@ TEST_CASE ("loadFmuConfig fails hard on malformed JSON", "[config]")
 TEST_CASE ("loadFmuConfig fails hard when the file is missing", "[config]")
 {
     REQUIRE_THROWS_AS (loadFmuConfig ("/nonexistent/cap-fmu-no-such-config.json"), std::runtime_error);
+}
+
+/* Logger writes to a real directory, so tests get a unique temp one and clean
+ * it up afterwards, mirroring TempConfigFile above. */
+namespace
+{
+class TempLogDir
+{
+  public:
+    TempLogDir () : path{}
+    {
+        std::string tmpl = (std::filesystem::temp_directory_path () / "cap-fmu-logger-test-XXXXXX").string ();
+        std::vector<char> buf (tmpl.begin (), tmpl.end ());
+        buf.push_back ('\0');
+        REQUIRE (mkdtemp (buf.data ()) != nullptr);
+        path = buf.data ();
+    }
+    TempLogDir (const TempLogDir &) = delete;
+    TempLogDir (TempLogDir &&) = delete;
+    auto operator= (const TempLogDir &) -> TempLogDir & = delete;
+    auto operator= (TempLogDir &&) -> TempLogDir & = delete;
+    ~TempLogDir ()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all (path, ec);
+    }
+    [[nodiscard]] auto
+    str () const -> const std::string &
+    {
+        return path;
+    }
+    [[nodiscard]] auto
+    logFile () const -> std::string
+    {
+        return path + "/fmu.log";
+    }
+
+  private:
+    std::string path;
+};
+} // namespace
+
+TEST_CASE ("Logger rotates in-flight once the size threshold is exceeded", "[logger]")
+{
+    TempLogDir dir;
+    /* A tiny threshold so the test writes only a handful of lines rather than
+     * megabytes (todo/75: production default is 10MB, overridable here via
+     * the constructor's max_bytes parameter). */
+    Logger logger (dir.str (), LogLevel::info, 100);
+
+    REQUIRE (std::filesystem::exists (dir.logFile ()));
+    REQUIRE_FALSE (std::filesystem::exists (dir.logFile () + ".1"));
+
+    /* Each line is well under 100 bytes, so several are needed to cross the
+     * threshold and trigger the in-flight rotation. */
+    for (int i = 0; i < 10; i++)
+    {
+        logger.log ("line " + std::to_string (i));
+    }
+
+    /* The pre-rotation content moved to .1; the live file is fresh (small). */
+    REQUIRE (std::filesystem::exists (dir.logFile ()));
+    REQUIRE (std::filesystem::exists (dir.logFile () + ".1"));
+    REQUIRE (std::filesystem::file_size (dir.logFile ()) < 100);
+}
+
+TEST_CASE ("Logger in-flight rotation keeps writing after rotating", "[logger]")
+{
+    TempLogDir dir;
+    Logger logger (dir.str (), LogLevel::info, 50);
+
+    for (int i = 0; i < 30; i++)
+    {
+        logger.log ("line " + std::to_string (i));
+    }
+
+    /* Several rotations should have occurred; the live file must still be
+     * open and accepting writes (not left closed after a failed reopen). */
+    REQUIRE (std::filesystem::exists (dir.logFile ()));
+    logger.log ("still alive");
+    std::ifstream check (dir.logFile ());
+    std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
+    REQUIRE (content.find ("still alive") != std::string::npos);
 }
