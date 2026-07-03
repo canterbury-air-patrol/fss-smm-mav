@@ -34,6 +34,12 @@ struct FmuConfig
      * reading equal to the threshold is not low — see the `< lowbat_threshold`
      * test in main.cpp). */
     int lowbat_threshold{ 20 };
+    /* Number of consecutive low-battery readings required to engage the
+     * low-battery RTL latch (see FMUStateMachine::setLowBattery). A single
+     * noisy/spurious sample must not ground the mission; airframe-dependent
+     * battery/sensor noise may want a different debounce. Note the real-world
+     * duration this represents scales with battery_stream_interval_ms. */
+    int low_battery_latch_count{ 4 };
     /* Interval between FSS/MAV reconnection attempts, seconds. */
     int reconnect_interval_s{ 10 };
     /* Rate at which the autopilot is asked to stream GLOBAL_POSITION_INT,

@@ -66,6 +66,7 @@ block is absent entirely):
                 "goto_altitude_ft": 165,
                 "camera_fov_deg": 90.0,
                 "lowbat_threshold": 20,
+                "low_battery_latch_count": 4,
                 "reconnect_interval_s": 10,
                 "position_stream_interval_ms": 200,
                 "battery_stream_interval_ms": 1000,
@@ -89,7 +90,8 @@ block is absent entirely):
 | `goto_altitude_m` | `50` | Altitude (metres AGL, relative to home) a `goto` command is flown at. A goto carries only a target position, so the FMU supplies this altitude. Clamped into the `[floor, cap]` range, so a goto can never be flown above the ceiling or into the ground. |
 | `goto_altitude_ft` | – | The goto altitude expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
 | `camera_fov_deg` | `90.0` | Camera total cross-track (across-flight) field of view, in degrees. The flight altitude for a search is derived from its sweep width as `altitude = sweep_width / (2 * tan(fov / 2))`, then clamped to the [floor, cap] range. Must be in the open range (0, 180). |
-| `lowbat_threshold` | `20` | Battery percentage below which a low-battery RTL is triggered. Range 0–100. The trigger is debounced: the RTL latch only engages after four *consecutive* readings below the threshold, so a single noisy/spurious sample cannot ground the mission. Once latched, the RTL is held until the FMU is restarted — a later higher reading does not release it. |
+| `lowbat_threshold` | `20` | Battery percentage below which a low-battery RTL is triggered. Range 0–100. The trigger is debounced: the RTL latch only engages after `low_battery_latch_count` *consecutive* readings below the threshold, so a single noisy/spurious sample cannot ground the mission. **This is a deliberate, one-way fail-safe policy, not a defect**: once latched, the RTL is held until the FMU is restarted — a later higher reading, however many, does not release it. A stuck-low or noisy single battery sensor can therefore ground the mission for the rest of the flight with no operator override; that is the intended conservative behaviour (a real low battery must never be waved off by an optimistic post-sag reading), so treat a nuisance latch as an airframe/sensor tuning problem (`lowbat_threshold`, `low_battery_latch_count`, `battery_stream_interval_ms`) rather than something to bypass in flight. |
+| `low_battery_latch_count` | `4` | Number of consecutive sub-threshold `BATTERY_STATUS` readings required to engage the low-battery RTL latch (see `lowbat_threshold`). Range 1–100. Its real-world duration is `low_battery_latch_count * battery_stream_interval_ms`, so raising the battery stream rate silently shortens the debounce window unless this is raised to compensate. |
 | `reconnect_interval_s` | `10` | Seconds between FSS/MAV reconnection attempts. Range 1–3600. |
 | `position_stream_interval_ms` | `200` | Interval (milliseconds) the autopilot is asked to stream `GLOBAL_POSITION_INT` at (200ms = 5Hz). A fixed-wing may want faster updates than a slow rover. Range 50–60000. |
 | `battery_stream_interval_ms` | `1000` | Interval (milliseconds) the autopilot is asked to stream `BATTERY_STATUS` at. Range 50–60000. |

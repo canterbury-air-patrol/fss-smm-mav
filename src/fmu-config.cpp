@@ -175,6 +175,10 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
     {
         setRangedInt (cfg.lowbat_threshold, "lowbat_threshold", fmu["lowbat_threshold"], 0, 100);
     }
+    if (fmu.isMember ("low_battery_latch_count"))
+    {
+        setRangedInt (cfg.low_battery_latch_count, "low_battery_latch_count", fmu["low_battery_latch_count"], 1, 100);
+    }
     if (fmu.isMember ("reconnect_interval_s"))
     {
         setRangedInt (cfg.reconnect_interval_s, "reconnect_interval_s", fmu["reconnect_interval_s"], 1, 3600);

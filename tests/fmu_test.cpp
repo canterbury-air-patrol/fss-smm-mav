@@ -128,11 +128,11 @@ class MockSMM : public ISMM
 using SM = std::tuple<std::shared_ptr<MockMAV>, std::shared_ptr<MockSMM>, std::shared_ptr<FMUStateMachine>>;
 
 static auto
-make_sm () -> SM
+make_sm (int low_battery_latch_count = FMUStateMachine::default_low_battery_latch_count) -> SM
 {
     auto mav = std::make_shared<MockMAV> ();
     auto smm = std::make_shared<MockSMM> ();
-    auto sm = std::make_shared<FMUStateMachine> (*mav, *smm);
+    auto sm = std::make_shared<FMUStateMachine> (*mav, *smm, low_battery_latch_count);
     return { mav, smm, sm };
 }
 
@@ -142,7 +142,7 @@ make_sm () -> SM
 static void
 latch_low_battery (const std::shared_ptr<FMUStateMachine> &sm)
 {
-    for (int i = 0; i < FMUStateMachine::low_battery_latch_count; i++)
+    for (int i = 0; i < FMUStateMachine::default_low_battery_latch_count; i++)
     {
         sm->setLowBattery (true);
     }
@@ -539,13 +539,27 @@ TEST_CASE ("low battery does not latch before the debounce count", "[state_machi
     REQUIRE (mav->last_mode == flight_mode_hold);
 
     /* One short of the count is not enough to latch. */
-    for (int i = 0; i < FMUStateMachine::low_battery_latch_count - 1; i++)
+    for (int i = 0; i < FMUStateMachine::default_low_battery_latch_count - 1; i++)
     {
         sm->setLowBattery (true);
     }
     REQUIRE (mav->last_mode == flight_mode_hold);
 
     /* The final consecutive reading trips the latch. */
+    sm->setLowBattery (true);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+/* low_battery_latch_count is configurable (todo/54): a non-default count must
+ * actually change the debounce, not just be accepted and ignored. */
+TEST_CASE ("a configured low_battery_latch_count changes the debounce", "[state_machine]")
+{
+    auto [mav, smm, sm] = make_sm (2);
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    sm->setLowBattery (true);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
     sm->setLowBattery (true);
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
@@ -557,13 +571,13 @@ TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_
     sm->FSSNewCommand (fss_cmd_hold);
 
     /* Almost enough to latch... */
-    for (int i = 0; i < FMUStateMachine::low_battery_latch_count - 1; i++)
+    for (int i = 0; i < FMUStateMachine::default_low_battery_latch_count - 1; i++)
     {
         sm->setLowBattery (true);
     }
     /* ...but a healthy reading clears the run, so the count restarts from zero. */
     sm->setLowBattery (false);
-    for (int i = 0; i < FMUStateMachine::low_battery_latch_count - 1; i++)
+    for (int i = 0; i < FMUStateMachine::default_low_battery_latch_count - 1; i++)
     {
         sm->setLowBattery (true);
     }
@@ -1677,6 +1691,7 @@ TEST_CASE ("loadFmuConfig returns defaults when the fmu block is absent", "[conf
     REQUIRE (cfg.goto_altitude_m == def.goto_altitude_m);
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (def.camera_fov_deg));
     REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
+    REQUIRE (cfg.low_battery_latch_count == def.low_battery_latch_count);
     REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
     REQUIRE (cfg.mav_address == def.mav_address);
     REQUIRE (cfg.mav_port == def.mav_port);
@@ -1693,6 +1708,7 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
             "goto_altitude_m": 60,
             "camera_fov_deg": 60.0,
             "lowbat_threshold": 25,
+            "low_battery_latch_count": 6,
             "reconnect_interval_s": 30,
             "position_stream_interval_ms": 100,
             "battery_stream_interval_ms": 2000,
@@ -1709,6 +1725,7 @@ TEST_CASE ("loadFmuConfig reads valid fmu values", "[config]")
     REQUIRE (cfg.goto_altitude_m == 60);
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (60.0));
     REQUIRE (cfg.lowbat_threshold == 25);
+    REQUIRE (cfg.low_battery_latch_count == 6);
     REQUIRE (cfg.reconnect_interval_s == 30);
     REQUIRE (cfg.position_stream_interval_ms == 100);
     REQUIRE (cfg.battery_stream_interval_ms == 2000);
@@ -1798,6 +1815,7 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
         "fmu": {
             "camera_fov_deg": 200.0,
             "lowbat_threshold": 150,
+            "low_battery_latch_count": 0,
             "reconnect_interval_s": 0,
             "position_stream_interval_ms": 10,
             "battery_stream_interval_ms": 90000,
@@ -1809,6 +1827,7 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
     })");
     REQUIRE (cfg.camera_fov_deg == Catch::Approx (def.camera_fov_deg));
     REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
+    REQUIRE (cfg.low_battery_latch_count == def.low_battery_latch_count);
     REQUIRE (cfg.reconnect_interval_s == def.reconnect_interval_s);
     REQUIRE (cfg.position_stream_interval_ms == def.position_stream_interval_ms);
     REQUIRE (cfg.battery_stream_interval_ms == def.battery_stream_interval_ms);

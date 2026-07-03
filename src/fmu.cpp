@@ -379,7 +379,10 @@ FMUStateMachine::isSearching () -> bool
     return this->current_state == fmu_state_searching;
 }
 
-FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm) : mav (t_mav), smm (t_smm), state_change_cb{} {}
+FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm, int t_low_battery_latch_count)
+    : low_battery_latch_count (t_low_battery_latch_count), mav (t_mav), smm (t_smm), state_change_cb{}
+{
+}
 
 void
 FMUStateMachine::setStateChangeCB (std::function<void (FMUState)> cb)

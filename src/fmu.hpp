@@ -76,6 +76,7 @@ class FMUStateMachine
     FSSCommandTarget fss_command_target{};
     SMMCommand smm_command{ smm_cmd_none };
     int low_battery_count{ 0 };
+    int low_battery_latch_count;
     bool low_battery{ false };
     bool fss_comms_lost{ false };
     bool mav_comms_lost{ false };
@@ -85,13 +86,15 @@ class FMUStateMachine
     std::function<void (FMUState)> state_change_cb;
 
   public:
-    /* Number of consecutive low-battery readings that engage the RTL latch. A
-     * single noisy/spurious sample must not ground the mission, so the latch
-     * only trips once this many low readings arrive in a row; one healthy
-     * reading in between resets the run. Public so tests stay in step with it. */
-    static constexpr int low_battery_latch_count = 4;
+    /* Default number of consecutive low-battery readings that engage the RTL
+     * latch, used unless the constructor is given a different value (from
+     * FmuConfig::low_battery_latch_count). A single noisy/spurious sample must
+     * not ground the mission, so the latch only trips once this many low
+     * readings arrive in a row; one healthy reading in between resets the run.
+     * Public so tests stay in step with it. */
+    static constexpr int default_low_battery_latch_count = 4;
 
-    FMUStateMachine (IMAV &t_mav, ISMM &t_smm);
+    FMUStateMachine (IMAV &t_mav, ISMM &t_smm, int t_low_battery_latch_count = default_low_battery_latch_count);
 
     void setStateChangeCB (std::function<void (FMUState)> cb);
     /* Apply an FSS command (carrying its own goto/altitude target, default for

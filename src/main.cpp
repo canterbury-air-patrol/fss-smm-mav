@@ -55,8 +55,8 @@ class App
      * MAV&); fss precedes asset_name (initialised from fss->getAssetName()). */
     App (const char *config_file, terminate_action ta, const FmuConfig &cfg, Logger &t_logger)
         : event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, logger (t_logger),
-          lowbat_threshold (cfg.lowbat_threshold), reconnect_interval_s (cfg.reconnect_interval_s), aircraft{},
-          fss (std::make_unique<FSS> (config_file)),
+          lowbat_threshold (cfg.lowbat_threshold), low_battery_latch_count (cfg.low_battery_latch_count),
+          reconnect_interval_s (cfg.reconnect_interval_s), aircraft{}, fss (std::make_unique<FSS> (config_file)),
           mav (std::make_unique<MAV> (cfg.mav_address, static_cast<uint16_t> (cfg.mav_port), ta,
                                       MavParams{ cfg.goto_altitude_m, cfg.altitude_floor_m, cfg.altitude_cap_m,
                                                  static_cast<uint32_t> (cfg.position_stream_interval_ms) * 1000U,
@@ -71,7 +71,7 @@ class App
     void
     run ()
     {
-        FMUStateMachine state_machine{ *mav, *smm };
+        FMUStateMachine state_machine{ *mav, *smm, low_battery_latch_count };
         state_machine.setStateChangeCB ([this] (FMUState s)
                                         { logger.log (std::string ("STATE ") + fmu_state_name (s)); });
         logger.log ("START " + asset_name);
@@ -329,6 +329,7 @@ class App
     std::atomic<bool> running{ true };
     Logger &logger;
     int lowbat_threshold;
+    int low_battery_latch_count;
     int reconnect_interval_s;
     known_aircraft aircraft;
 
