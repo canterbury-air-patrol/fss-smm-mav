@@ -90,24 +90,26 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
 {
     FmuConfig cfg{};
 
+    /* The config file is load-bearing for the FSS client (name/SSL/server
+     * config constructed from the same file, see App's FSS member), which
+     * fails fatally without it regardless of what this function does. So an
+     * unopenable or unparsable file fails hard here too, rather than warning
+     * "using defaults" and then failing fatally moments later on the FSS
+     * side for the same underlying cause. Per-key fallbacks below (for the
+     * optional "fmu" block once the file itself is known-good) are
+     * unaffected. */
     std::ifstream f (config_file);
     if (!f.is_open ())
     {
-        std::cerr << "Config: unable to open " << config_file << ", using defaults\n";
-        return cfg;
+        throw std::runtime_error ("Config: unable to open " + config_file);
     }
 
-    /* Parse explicitly so a malformed file is reported (and ignored) rather
-     * than throwing; each field below is then type-checked individually so a
-     * single bad value falls back to its default instead of discarding the
-     * whole block. */
     Json::Value root;
     Json::CharReaderBuilder builder;
     std::string errs;
     if (!Json::parseFromStream (builder, f, &root, &errs))
     {
-        std::cerr << "Config: failed to parse " << config_file << ": " << errs << ", using defaults\n";
-        return cfg;
+        throw std::runtime_error ("Config: failed to parse " + config_file + ": " + errs);
     }
 
     const Json::Value &fmu = root["fmu"];

@@ -1837,16 +1837,15 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
     REQUIRE (cfg.log_level == def.log_level);
 }
 
-TEST_CASE ("loadFmuConfig falls back to defaults on malformed JSON", "[config]")
+TEST_CASE ("loadFmuConfig fails hard on malformed JSON", "[config]")
 {
-    FmuConfig cfg = load_config ("{ this is not valid json ");
-    REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
-    REQUIRE (cfg.lowbat_threshold == def.lowbat_threshold);
+    /* The file is load-bearing for FSS regardless (todo/74), so a malformed
+     * file throws rather than silently falling back to defaults and then
+     * failing fatally moments later on the FSS side. */
+    REQUIRE_THROWS_AS (load_config ("{ this is not valid json "), std::runtime_error);
 }
 
-TEST_CASE ("loadFmuConfig falls back to defaults when the file is missing", "[config]")
+TEST_CASE ("loadFmuConfig fails hard when the file is missing", "[config]")
 {
-    FmuConfig cfg = loadFmuConfig ("/nonexistent/cap-fmu-no-such-config.json");
-    REQUIRE (cfg.altitude_cap_m == def.altitude_cap_m);
-    REQUIRE (cfg.log_level == def.log_level);
+    REQUIRE_THROWS_AS (loadFmuConfig ("/nonexistent/cap-fmu-no-such-config.json"), std::runtime_error);
 }
