@@ -56,7 +56,8 @@ class App
     App (const char *config_file, terminate_action ta, const FmuConfig &cfg, Logger &t_logger)
         : event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, logger (t_logger),
           lowbat_threshold (cfg.lowbat_threshold), low_battery_latch_count (cfg.low_battery_latch_count),
-          reconnect_interval_s (cfg.reconnect_interval_s), aircraft{}, fss (std::make_unique<FSS> (config_file)),
+          reconnect_interval_s (cfg.reconnect_interval_s), aircraft{}, smm_rtl_replay_pending{ false },
+          fss (std::make_unique<FSS> (config_file)),
           mav (std::make_unique<MAV> (cfg.mav_address, static_cast<uint16_t> (cfg.mav_port), ta,
                                       MavParams{ cfg.goto_altitude_m, cfg.altitude_floor_m, cfg.altitude_cap_m,
                                                  static_cast<uint32_t> (cfg.position_stream_interval_ms) * 1000U,
@@ -72,8 +73,15 @@ class App
     run ()
     {
         FMUStateMachine state_machine{ *mav, *smm, low_battery_latch_count };
-        state_machine.setStateChangeCB ([this] (FMUState s)
-                                        { logger.log (std::string ("STATE ") + fmu_state_name (s)); });
+        state_machine.setStateChangeCB (
+            [this] (FMUState s)
+            {
+                logger.log (std::string ("STATE ") + fmu_state_name (s));
+                if (s != fmu_state_searching)
+                {
+                    smm_rtl_replay_pending = false;
+                }
+            });
         logger.log ("START " + asset_name);
 
         fss->registerCommandCB (
@@ -161,6 +169,14 @@ class App
                             logger.log (std::string ("COMMS mav ")
                                         + (status == MavCommsStatus::failure ? "failure" : "okay"));
                             state_machine.setMavCommsFailure (status == MavCommsStatus::failure);
+                            /* Replay an SmmRtl whose send failed while the link was
+                             * down (todo/71), the same recovery point the state
+                             * machine's own pending_replay_state uses (todo/46). */
+                            if (status == MavCommsStatus::ok && smm_rtl_replay_pending && state_machine.isSearching ())
+                            {
+                                logger.log ("CMD smm rtl (replay)");
+                                smm_rtl_replay_pending = !mav->setMode (flight_mode_rtl);
+                            }
                         },
                         [&] (SMMSettings settings)
                         {
@@ -205,10 +221,23 @@ class App
                         {
                             /* SMM could not acquire/accept a search and wants to fly
                              * home. Same guard as SmmLoadSearch: suppress it if a
-                             * higher-priority command/latch already took over. */
+                             * higher-priority command/latch already took over. This
+                             * commands the MAV directly rather than going through the
+                             * state machine (todo/70 tracks folding it in); current_state
+                             * intentionally stays fmu_state_searching for the duration
+                             * — same as the mission's own RTL terminator flying home
+                             * after a completed search (README: continue mode
+                             * auto-acquires the next search) — so this is a deliberate
+                             * choice, not an oversight. */
                             if (state_machine.isSearching ())
                             {
-                                mav->setMode (flight_mode_rtl);
+                                logger.log ("CMD smm rtl");
+                                bool sent = mav->setMode (flight_mode_rtl);
+                                if (!sent)
+                                {
+                                    logger.log ("COMMS mav rtl send failed, will replay on link recovery");
+                                }
+                                smm_rtl_replay_pending = !sent;
                             }
                         },
                         [&] (BatteryData bd)
@@ -332,6 +361,13 @@ class App
     int low_battery_latch_count;
     int reconnect_interval_s;
     known_aircraft aircraft;
+    /* Set when an SmmRtl-driven mav->setMode(flight_mode_rtl) fails to send
+     * (MAV link down); retried when MavCommsStatus reports the link okay
+     * again, mirroring FMUStateMachine's pending_replay_state (todo/46) for
+     * this one action that bypasses the state machine (todo/71/todo/70).
+     * Cleared whenever the FMU leaves fmu_state_searching so a stale RTL
+     * intent cannot fire after later, unrelated command has taken over. */
+    bool smm_rtl_replay_pending{ false };
 
     /* Callback producers, declared last so they are destroyed FIRST: each joins
      * its worker/recv threads in its destructor, so those threads stop enqueuing
