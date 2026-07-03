@@ -2,7 +2,9 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <strings.h>
 #include <utility>
+#include <vector>
 
 #include "connection-state.hpp"
 #include "search-acquire.hpp"
@@ -158,9 +160,20 @@ SMM::disconnect ()
 void
 SMM::connect ()
 {
-    std::string user_cstr (this->smm_user.data (), this->smm_user.size ());
-    std::string pass_cstr (this->smm_pass.data (), this->smm_pass.size ());
-    this->conn = smm_asset_connect (this->smm_host.c_str (), user_cstr.c_str (), pass_cstr.c_str ());
+    /* smm_asset_connect() needs NUL-terminated C strings, but
+     * secure_string::data() is not NUL-terminated (it is an exact-length
+     * byte buffer, see secure-string.hpp) and std::string does not scrub its
+     * buffer on destruction (and may reallocate) — either alone would leave
+     * the credentials in non-zeroed heap memory. Build local NUL-terminated
+     * buffers (zero-initialised, so the trailing byte is already '\0') and
+     * scrub them explicitly once the call returns. */
+    std::vector<char> user_cstr (this->smm_user.size () + 1, '\0');
+    std::memcpy (user_cstr.data (), this->smm_user.data (), this->smm_user.size ());
+    std::vector<char> pass_cstr (this->smm_pass.size () + 1, '\0');
+    std::memcpy (pass_cstr.data (), this->smm_pass.data (), this->smm_pass.size ());
+    this->conn = smm_asset_connect (this->smm_host.c_str (), user_cstr.data (), pass_cstr.data ());
+    explicit_bzero (user_cstr.data (), user_cstr.size ());
+    explicit_bzero (pass_cstr.data (), pass_cstr.size ());
     if (this->conn == nullptr)
     {
         std::cout << "SMM: Connection failed (no connection)" << '\n';
