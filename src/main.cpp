@@ -175,9 +175,19 @@ class App
                         },
                         [&] (const ReachedPoint &rp)
                         {
-                            logger.log ("WAYPOINT " + std::to_string (rp.point));
-                            fss->reachedPoint (rp.point, smm->currentSearchPoints ());
-                            smm->reachedPoint (rp.point);
+                            /* A MISSION_ITEM_REACHED is only meaningful as search
+                             * progress when the search mission is what is actually
+                             * loaded on the autopilot. A goto (or its RTL terminator)
+                             * can also produce a reached event while a search is only
+                             * paused (todo/69); without this guard that would rewrite
+                             * the held search's current_point and report bogus search
+                             * status to FSS. Same guard as SmmLoadSearch/SmmRtl. */
+                            if (state_machine.isSearching ())
+                            {
+                                logger.log ("WAYPOINT " + std::to_string (rp.point));
+                                fss->reachedPoint (rp.point, smm->currentSearchPoints ());
+                                smm->reachedPoint (rp.point);
+                            }
                         },
                         [&] (const SmmLoadSearch &ls)
                         {
