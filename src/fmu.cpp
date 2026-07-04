@@ -90,6 +90,12 @@ FMUStateMachine::updateState () -> std::optional<FMUState>
     FMUState new_state = fmu_state_failsafe;
     if (this->fss_command == fss_cmd_terminate)
     {
+        /* Engage the latch (todo/63); never cleared here, so a later command
+         * moving fss_command away from fss_cmd_terminate cannot release it. */
+        this->terminated = true;
+    }
+    if (this->terminated)
+    {
         new_state = fmu_state_terminate;
     }
     else if (this->low_battery)
