@@ -931,18 +931,40 @@ TEST_CASE ("an RTL superseded by a recoverable comms failure still applies once 
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-/* terminate is an FSS command occupying the same input slot as every other FSS
- * command, so a later FSS command replaces it rather than being superseded by
- * it. (The terminate priority in updateState() guards against the *concurrent*
- * latches — low battery and comms failure — not against a newer FSS command.) */
-TEST_CASE ("FSS command after terminate replaces it and resolves as actioned", "[state_machine][command_ack]")
+/* terminate latches (todo/63): the flight-termination action (motor cut /
+ * parachute / force-disarm) is physically irreversible, so a later FSS
+ * command must not silently move the FMU's own state back out of terminate —
+ * it is superseded by the latch, the same as low-battery/comms-failsafe. */
+TEST_CASE ("FSS command after terminate is superseded, not actioned", "[state_machine][command_ack]")
 {
     auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_terminate);
     auto res = sm->FSSNewCommand (fss_cmd_hold);
-    REQUIRE (res.outcome == fss_command_actioned);
-    REQUIRE (res.transitioned);
+    REQUIRE (res.outcome == fss_command_superseded);
+    REQUIRE (res.superseding_state == fmu_state_terminate);
+    REQUIRE_FALSE (res.transitioned);
+    /* hold's own MAV command must never have been sent: the latch, not the
+     * command, is in control. */
+    REQUIRE (mav->set_mode_calls == 0);
+}
+
+TEST_CASE ("terminate latch survives further commands and cannot be un-terminated", "[state_machine]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_terminate);
+    REQUIRE (mav->terminated);
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    sm->FSSNewCommand (fss_cmd_hold);
+    sm->FSSNewCommand (fss_cmd_manual);
+
+    /* None of the later commands may have re-armed/moved the aircraft: the
+     * only MAV call ever made is the original terminate. */
+    REQUIRE (mav->set_mode_calls == 0);
+    REQUIRE (mav->disarm_calls == 0);
+    REQUIRE (mav->terminate_calls == 1);
 }
 
 TEST_CASE ("terminate command itself resolves as actioned", "[state_machine][command_ack]")

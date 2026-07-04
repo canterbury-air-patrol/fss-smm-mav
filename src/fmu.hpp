@@ -78,6 +78,15 @@ class FMUStateMachine
     int low_battery_count{ 0 };
     int low_battery_latch_count;
     bool low_battery{ false };
+    /* Latches true the first time fss_command is seen as fss_cmd_terminate and
+     * is never cleared (todo/63): the flight-termination action (motor cut /
+     * parachute / force-disarm) is physically irreversible, so a later FSS
+     * command silently moving the FMU's own state back out of terminate would
+     * be misleading (FSS telemetry would claim e.g. "searching" for an
+     * aircraft that already terminated) even though it cannot undo the
+     * airframe action. Recovery requires an FMU restart, matching the
+     * low_battery latch. */
+    bool terminated{ false };
     bool fss_comms_lost{ false };
     bool mav_comms_lost{ false };
     IMAV &mav;
