@@ -158,7 +158,7 @@ class SMM : public ISMM
     void registerLoadSearchCB (std::function<void (std::shared_ptr<SMMSearch>)> cb);
     void registerRtlCB (std::function<void ()> cb);
     void connect (const std::string &host, const flight_safety_system::secure_string &user,
-                  const flight_safety_system::secure_string &pass, const std::string &asset_name);
+                  const flight_safety_system::secure_string &pass, const std::string &asset_name) override;
     void search (Point current_pos) override;
     void cancelSearch () override;
     /* Timer-driven retry of a pending (active but not yet acquired) search.
@@ -167,7 +167,7 @@ class SMM : public ISMM
      * MAV position is read here, on the caller (reconnect) thread, and carried to
      * the worker so the worker never touches MAV. */
     void retryPendingSearch ();
-    void reportPosition (PositionData t_pd);
-    void reachedPoint (int point);
-    auto currentSearchPoints () -> int;
+    void reportPosition (PositionData t_pd) override;
+    void reachedPoint (int point) override;
+    auto currentSearchPoints () -> int override;
 };

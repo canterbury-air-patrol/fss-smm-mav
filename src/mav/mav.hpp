@@ -54,8 +54,8 @@ class MAV : public IMAV
     void gotoPosition (Point to) override;
     auto setAltitude (uint32_t alt) -> bool override;
     auto getCurrentPosition () -> Point override;
-    void loadSearch (const std::shared_ptr<SMMSearch> &);
-    void sendADSB (PositionData pd);
+    void loadSearch (const std::shared_ptr<SMMSearch> &search) override;
+    void sendADSB (PositionData pd) override;
     void registerPositionCB (notify_position_cb cb);
     void registerReachedCB (notify_reached_cb);
     void registerBatteryCB (notify_battery_status_cb cb);
