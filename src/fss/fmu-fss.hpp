@@ -10,9 +10,10 @@
 #include <variant>
 
 #include "../fmu-types.hpp"
+#include "ifss.hpp"
 #include "internal.hpp"
 
-class FSS
+class FSS : public IFSSReporter
 {
   private:
     std::shared_ptr<fss_client_ssl> ssl_client{ nullptr };
@@ -73,16 +74,16 @@ class FSS
     FSS (FSS &&) = delete;
     auto operator= (FSS &) -> FSS & = delete;
     auto operator= (FSS &&) -> FSS & = delete;
-    ~FSS ();
+    ~FSS () override;
     auto getAssetName () -> std::string;
-    void reportPosition (PositionData pd);
+    void reportPosition (PositionData pd) override;
     void registerCommandCB (notify_fss_command_cb cb);
     void registerCommsStatusCB (notify_fss_comms_cb cb);
     void registerSMMSettingsCB (notify_smm_settings_cb cb);
     void registerPositionDataCB (notify_position_cb cb);
-    void reachedPoint (int point, int total_points);
-    void reportBatteryStatus (BatteryData bd);
+    void reachedPoint (int point, int total_points) override;
+    void reportBatteryStatus (BatteryData bd) override;
     /* Enqueue the resolved second-phase command ack for the worker to send. */
-    void postAck (const fss_command_ack_responder &ack, const FSSCommandResolution &res);
+    void postAck (const fss_command_ack_responder &ack, const FSSCommandResolution &res) override;
     void reconnectAll ();
 };

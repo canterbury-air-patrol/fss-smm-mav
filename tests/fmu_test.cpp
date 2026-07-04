@@ -3,10 +3,12 @@
 
 #include "aircraft.hpp"
 #include "altitude-units.hpp"
+#include "event-dispatcher.hpp"
 #include "fmu-config.hpp"
 #include "fmu.hpp"
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
+#include "fss/ifss.hpp"
 #include "logger.hpp"
 #include "mav/battery-voltage.hpp"
 #include "mav/internal.hpp"
@@ -49,6 +51,10 @@ class MockMAV : public IMAV
      * simulate a send that did not reach the autopilot (MAV link down) so the
      * replay-on-recovery path (todo/46) can be exercised. */
     bool send_succeeds{ true };
+    std::shared_ptr<SMMSearch> last_loaded_search{ nullptr };
+    int load_search_calls{ 0 };
+    PositionData last_adsb{};
+    int send_adsb_calls{ 0 };
 
     MockMAV () = default;
     MockMAV (const MockMAV &) = delete;
@@ -100,6 +106,18 @@ class MockMAV : public IMAV
     registerMavCommsStatusCB (notify_mav_comms_cb) override
     {
     }
+    void
+    loadSearch (const std::shared_ptr<SMMSearch> &search) override
+    {
+        last_loaded_search = search;
+        load_search_calls++;
+    }
+    void
+    sendADSB (PositionData pd) override
+    {
+        last_adsb = pd;
+        send_adsb_calls++;
+    }
 };
 
 class MockSMM : public ISMM
@@ -107,6 +125,14 @@ class MockSMM : public ISMM
   public:
     int search_calls{ 0 };
     int cancel_calls{ 0 };
+    int connect_calls{ 0 };
+    std::string last_connect_host{};
+    std::string last_connect_asset_name{};
+    PositionData last_reported_position{};
+    int report_position_calls{ 0 };
+    int last_reached_point{ 0 };
+    int reached_point_calls{ 0 };
+    int current_search_points{ 0 };
 
     MockSMM () = default;
     MockSMM (const MockSMM &) = delete;
@@ -124,6 +150,76 @@ class MockSMM : public ISMM
     cancelSearch () override
     {
         cancel_calls++;
+    }
+    void
+    connect (const std::string &host, const flight_safety_system::secure_string &,
+             const flight_safety_system::secure_string &, const std::string &asset_name) override
+    {
+        last_connect_host = host;
+        last_connect_asset_name = asset_name;
+        connect_calls++;
+    }
+    void
+    reportPosition (PositionData pd) override
+    {
+        last_reported_position = pd;
+        report_position_calls++;
+    }
+    void
+    reachedPoint (int point) override
+    {
+        last_reached_point = point;
+        reached_point_calls++;
+    }
+    auto
+    currentSearchPoints () -> int override
+    {
+        return current_search_points;
+    }
+};
+
+class MockFSSReporter : public IFSSReporter
+{
+  public:
+    PositionData last_reported_position{};
+    int report_position_calls{ 0 };
+    int last_reached_point{ 0 };
+    int last_reached_total{ 0 };
+    int reached_point_calls{ 0 };
+    BatteryData last_battery_status{};
+    int report_battery_status_calls{ 0 };
+    int post_ack_calls{ 0 };
+
+    MockFSSReporter () = default;
+    MockFSSReporter (const MockFSSReporter &) = delete;
+    MockFSSReporter (MockFSSReporter &&) = delete;
+    auto operator= (const MockFSSReporter &) -> MockFSSReporter & = delete;
+    auto operator= (MockFSSReporter &&) -> MockFSSReporter & = delete;
+    ~MockFSSReporter () override = default;
+
+    void
+    reportPosition (PositionData pd) override
+    {
+        last_reported_position = pd;
+        report_position_calls++;
+    }
+    void
+    reachedPoint (int point, int total_points) override
+    {
+        last_reached_point = point;
+        last_reached_total = total_points;
+        reached_point_calls++;
+    }
+    void
+    reportBatteryStatus (BatteryData bd) override
+    {
+        last_battery_status = bd;
+        report_battery_status_calls++;
+    }
+    void
+    postAck (const fss_command_ack_responder &, const FSSCommandResolution &) override
+    {
+        post_ack_calls++;
     }
 };
 
@@ -1933,4 +2029,138 @@ TEST_CASE ("Logger in-flight rotation keeps writing after rotating", "[logger]")
     std::ifstream check (dir.logFile ());
     std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
     REQUIRE (content.find ("still alive") != std::string::npos);
+}
+
+/* EventDispatcher (todo/76) is App::run()'s std::visit dispatch policy,
+ * extracted so it can be driven here with the same MockMAV/MockSMM used
+ * above, plus a MockFSSReporter, instead of needing real sockets. */
+namespace
+{
+struct DispatcherFixture
+{
+    std::shared_ptr<MockMAV> mav;
+    std::shared_ptr<MockSMM> smm;
+    std::shared_ptr<MockFSSReporter> fss;
+    std::shared_ptr<FMUStateMachine> sm;
+    std::unique_ptr<TempLogDir> log_dir;
+    std::unique_ptr<Logger> logger;
+    std::unique_ptr<EventDispatcher> dispatcher;
+
+    DispatcherFixture () : mav{}, smm{}, fss{}, sm{}, log_dir{}, logger{}, dispatcher{} {}
+};
+
+auto
+make_dispatcher (const std::string &asset_name = "test-asset", int lowbat_threshold = 20) -> DispatcherFixture
+{
+    DispatcherFixture f;
+    f.mav = std::make_shared<MockMAV> ();
+    f.smm = std::make_shared<MockSMM> ();
+    f.fss = std::make_shared<MockFSSReporter> ();
+    f.sm = std::make_shared<FMUStateMachine> (*f.mav, *f.smm);
+    f.log_dir = std::make_unique<TempLogDir> ();
+    f.logger = std::make_unique<Logger> (f.log_dir->str ());
+    f.dispatcher
+        = std::make_unique<EventDispatcher> (*f.sm, *f.mav, *f.smm, *f.fss, *f.logger, asset_name, lowbat_threshold);
+    return f;
+}
+} // namespace
+
+TEST_CASE ("EventDispatcher gates SmmLoadSearch on isSearching()", "[event_dispatcher]")
+{
+    auto f = make_dispatcher ();
+
+    /* FMUStateMachine starts in fmu_state_manual, not searching: a raced
+     * SmmLoadSearch outcome must be dropped (todo/33), not applied. */
+    event not_searching = SmmLoadSearch{ nullptr };
+    f.dispatcher->dispatch (not_searching);
+    REQUIRE (f.mav->load_search_calls == 0);
+
+    f.sm->FSSNewCommand (fss_cmd_continue);
+    event while_searching = SmmLoadSearch{ nullptr };
+    f.dispatcher->dispatch (while_searching);
+    REQUIRE (f.mav->load_search_calls == 1);
+}
+
+TEST_CASE ("EventDispatcher gates SmmRtl on isSearching()", "[event_dispatcher]")
+{
+    auto f = make_dispatcher ();
+
+    event not_searching = SmmRtl{};
+    f.dispatcher->dispatch (not_searching);
+    REQUIRE (f.mav->set_mode_calls == 0);
+
+    f.sm->FSSNewCommand (fss_cmd_continue);
+    event while_searching = SmmRtl{};
+    f.dispatcher->dispatch (while_searching);
+    REQUIRE (f.mav->set_mode_calls == 1);
+    REQUIRE (f.mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("EventDispatcher never classifies an unknown battery reading as low, but still feeds the debounce",
+           "[event_dispatcher]")
+{
+    auto f = make_dispatcher ("asset", 20);
+    f.sm->FSSNewCommand (fss_cmd_continue);
+
+    /* One short of the latch count of real low readings... */
+    for (int i = 0; i < FMUStateMachine::default_low_battery_latch_count - 1; i++)
+    {
+        event e = BatteryData{ 10, 1000, 3.5 };
+        f.dispatcher->dispatch (e);
+    }
+    REQUIRE (f.mav->last_mode != flight_mode_rtl);
+
+    /* ...an unknown (-1) reading in between must not be silently dropped nor
+     * misclassified as low: it is still fed to the state machine (as
+     * not-low), which resets the consecutive-low run exactly like a genuine
+     * healthy reading would. */
+    event unknown = BatteryData{ -1, -1, 0.0 };
+    f.dispatcher->dispatch (unknown);
+    REQUIRE (f.fss->report_battery_status_calls == FMUStateMachine::default_low_battery_latch_count);
+
+    for (int i = 0; i < FMUStateMachine::default_low_battery_latch_count - 1; i++)
+    {
+        event e = BatteryData{ 10, 1000, 3.5 };
+        f.dispatcher->dispatch (e);
+    }
+    REQUIRE (f.mav->last_mode != flight_mode_rtl);
+
+    event last_low = BatteryData{ 10, 1000, 3.5 };
+    f.dispatcher->dispatch (last_low);
+    REQUIRE (f.mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("EventDispatcher routes ReachedPoint only while searching (todo/69)", "[event_dispatcher]")
+{
+    auto f = make_dispatcher ();
+
+    /* Not searching (e.g. paused for a goto): a reached event must not move
+     * the held search's point nor report bogus search status to FSS. */
+    event not_searching = ReachedPoint{ 3 };
+    f.dispatcher->dispatch (not_searching);
+    REQUIRE (f.smm->reached_point_calls == 0);
+    REQUIRE (f.fss->reached_point_calls == 0);
+
+    f.sm->FSSNewCommand (fss_cmd_continue);
+    event while_searching = ReachedPoint{ 3 };
+    f.dispatcher->dispatch (while_searching);
+    REQUIRE (f.smm->reached_point_calls == 1);
+    REQUIRE (f.smm->last_reached_point == 3);
+    REQUIRE (f.fss->reached_point_calls == 1);
+    REQUIRE (f.fss->last_reached_point == 3);
+}
+
+TEST_CASE ("EventDispatcher filters own-callsign OtherAircraftReport before ADS-B rebroadcast", "[event_dispatcher]")
+{
+    auto f = make_dispatcher ("MYCALL", 20);
+
+    PositionData own (0.0, 0.0, 100.0, 0, 0, 0, "MYCALL", 0, 0, 0, 0, 0, 0);
+    event own_report = OtherAircraftReport{ own };
+    f.dispatcher->dispatch (own_report);
+    REQUIRE (f.mav->send_adsb_calls == 0);
+
+    PositionData other (0.0, 0.0, 100.0, 0, 0, 0, "OTHER", 0, 0, 0, 0, 0, 0);
+    event other_report = OtherAircraftReport{ other };
+    f.dispatcher->dispatch (other_report);
+    REQUIRE (f.mav->send_adsb_calls == 1);
 }

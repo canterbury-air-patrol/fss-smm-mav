@@ -2,7 +2,9 @@
 
 #include "../fmu-core-types.hpp"
 #include "../fmu-types.hpp"
+#include "../smm/smm-types.hpp"
 #include <cstdint>
+#include <memory>
 
 enum flight_mode
 {
@@ -37,4 +39,11 @@ class IMAV
     virtual auto setAltitude (uint32_t alt) -> bool = 0;
     virtual auto getCurrentPosition () -> Point = 0;
     virtual void registerMavCommsStatusCB (notify_mav_comms_cb cb) = 0;
+    /* Load an SMM-acquired search mission onto the autopilot, and forward
+     * another aircraft's position report for ADS-B rebroadcast. Not used by
+     * FMUStateMachine (which only needs the action methods above); part of
+     * this interface so the event-loop dispatch (EventDispatcher, todo/76)
+     * can be driven by the same mock in tests. */
+    virtual void loadSearch (const std::shared_ptr<SMMSearch> &search) = 0;
+    virtual void sendADSB (PositionData pd) = 0;
 };
