@@ -2240,3 +2240,45 @@ TEST_CASE ("EventDispatcher filters own-callsign OtherAircraftReport before ADS-
     f.dispatcher->dispatch (other_report);
     REQUIRE (f.mav->send_adsb_calls == 1);
 }
+
+/* todo/68: cap-fmu's own-aircraft PositionData event (the FMU's MAV position
+ * report, distinct from OtherAircraftReport/ADS-B above) never reaches
+ * FMUStateMachine at all today — EventDispatcher's handler only forwards it
+ * to FSS/SMM reporting. So there is no GPS-denial reaction at the
+ * state-machine level: however degenerate the coordinates (frozen/repeated,
+ * as GPS-denial investigation for this todo found nothing detects), no MAV
+ * command is issued and no state transition happens, whether idle, goto, or
+ * searching. Pinned here so a future change that adds GPS-denial handling
+ * does so deliberately rather than silently regressing this gap further. */
+TEST_CASE ("EventDispatcher never reacts to PositionData regardless of FMU state (todo/68)", "[event_dispatcher]")
+{
+    auto f = make_dispatcher ();
+
+    auto assert_no_reaction = [&] ()
+    {
+        int mode_calls_before = f.mav->set_mode_calls;
+        flight_mode last_mode_before = f.mav->last_mode;
+        int report_calls_before = f.fss->report_position_calls;
+
+        event e = PositionData (-43.5, 172.6, 50.0, 0, 0, 0);
+        f.dispatcher->dispatch (e);
+
+        /* Still reported to FSS (that part is unaffected)... */
+        REQUIRE (f.fss->report_position_calls == report_calls_before + 1);
+        /* ...but no MAV command was issued and the mode is unchanged: the
+         * state machine has no reaction to a position report at all. */
+        REQUIRE (f.mav->set_mode_calls == mode_calls_before);
+        REQUIRE (f.mav->last_mode == last_mode_before);
+    };
+
+    /* idle (default fmu_state_manual) */
+    assert_no_reaction ();
+
+    /* searching */
+    f.sm->FSSNewCommand (fss_cmd_continue);
+    assert_no_reaction ();
+
+    /* goto */
+    f.sm->FSSNewCommand (fss_cmd_goto, FSSCommandTarget{ Point{}, 100 });
+    assert_no_reaction ();
+}

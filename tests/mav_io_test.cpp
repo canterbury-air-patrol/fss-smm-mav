@@ -1,3 +1,4 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "ilogger.hpp"
@@ -184,10 +185,34 @@ class MavLoopbackServer
     void
     sendPosition ()
     {
+        sendPosition (/*lat*/ -435000000, /*lon*/ 1726000000);
+    }
+
+    /* Same, with an explicit lat/lon (todo/68): lets a test send the exact
+     * same coordinates repeatedly, e.g. to simulate an EKF position estimate
+     * that has frozen rather than genuinely updating. */
+    void
+    sendPosition (int32_t lat, int32_t lon)
+    {
         mavlink_message_t msg;
-        mavlink_msg_global_position_int_pack_chan (1, 1, autopilot_tx_channel, &msg, 0, /*lat*/ -435000000,
-                                                   /*lon*/ 1726000000,
+        mavlink_msg_global_position_int_pack_chan (1, 1, autopilot_tx_channel, &msg, 0, lat, lon,
                                                    /*alt mm*/ 100000, /*rel alt mm*/ 100000, 0, 0, 0, /*hdg*/ 0);
+        sendMsg (msg);
+    }
+
+    /* Send a GPS_RAW_INT with the given fix_type (todo/68) — e.g.
+     * GPS_FIX_TYPE_NO_FIX — as ArduPilot would report GPS health directly
+     * (distinct from GLOBAL_POSITION_INT, which carries the EKF's position
+     * estimate and has no fix-validity field of its own). */
+    void
+    sendGpsRawInt (uint8_t fix_type)
+    {
+        mavlink_message_t msg;
+        mavlink_msg_gps_raw_int_pack_chan (1, 1, autopilot_tx_channel, &msg, /*time_usec*/ 0, fix_type, /*lat*/ 0,
+                                           /*lon*/ 0, /*alt*/ 0, /*eph*/ UINT16_MAX, /*epv*/ UINT16_MAX,
+                                           /*vel*/ UINT16_MAX, /*cog*/ UINT16_MAX, /*satellites_visible*/ 0,
+                                           /*alt_ellipsoid*/ 0, /*h_acc*/ 0, /*v_acc*/ 0, /*vel_acc*/ 0,
+                                           /*hdg_acc*/ 0, /*yaw*/ 0);
         sendMsg (msg);
     }
 
@@ -432,8 +457,12 @@ class PositionRecorder
 {
   public:
     void
-    record ()
+    record (const PositionData &pd)
     {
+        {
+            const std::lock_guard<std::mutex> lk (this->mtx);
+            this->last = pd;
+        }
         this->count.fetch_add (1);
     }
     auto
@@ -446,9 +475,19 @@ class PositionRecorder
     {
         return this->count.load ();
     }
+    /* Latest PositionData received, for tests that need to inspect the exact
+     * values that reached the callback (todo/68), not just that one arrived. */
+    auto
+    lastPosition () -> PositionData
+    {
+        const std::lock_guard<std::mutex> lk (this->mtx);
+        return this->last;
+    }
 
   private:
     std::atomic<int> count{ 0 };
+    std::mutex mtx{};
+    PositionData last{};
 };
 
 /* Establish a real down->up edge and wait for it: the comms-status callback
@@ -512,7 +551,7 @@ TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconne
     PositionRecorder positions;
 
     mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
-    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
     conn.start ();
 
     REQUIRE (server.waitForClient (io_timeout));
@@ -559,7 +598,7 @@ TEST_CASE ("mav_connection survives repeated drop/reconnect cycles", "[mav_io]")
     PositionRecorder positions;
 
     mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
-    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
     conn.start ();
 
     REQUIRE (server.waitForClient (io_timeout));
@@ -990,7 +1029,7 @@ TEST_CASE ("mav_connection survives a stream of random garbage bytes (todo/67)",
 
     mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
-    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -1028,7 +1067,7 @@ TEST_CASE ("mav_connection resynchronises after a truncated frame (todo/67)", "[
 
     mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
-    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -1070,7 +1109,7 @@ TEST_CASE ("mav_connection drops a corrupted-CRC frame without flapping link sta
 
     mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
-    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -1112,7 +1151,7 @@ TEST_CASE ("mav_connection keeps routing valid messages between garbage bursts (
 
     mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
-    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -1138,4 +1177,91 @@ TEST_CASE ("mav_connection keeps routing valid messages between garbage bursts (
             },
             io_timeout));
     }
+}
+
+/* todo/68: cap-fmu's GPS-denial/no-fix handling, the single-repo share of
+ * Tier-3 Path M m03. Investigation (not just missing tests) found that
+ * mav_connection's MAVLINK_MSG_ID_GPS_RAW_INT case (fix_type — the
+ * autopilot's own no-fix/2D/3D indicator) is a recognised no-op: the message
+ * is received and silently dropped. GLOBAL_POSITION_INT (the EKF's position
+ * estimate; it has no fix-validity field of its own) is always forwarded to
+ * FSS with a fresh wall-clock timestamp at send time
+ * (fss_client_ssl::sendPosition's fss_current_timestamp()), never anything
+ * derived from the MAV message. So today there is no signal anywhere in
+ * cap-fmu distinguishing a genuine fresh fix from a degraded/lost one — the
+ * HZ-03 "stale position mistaken for current" risk the todo names is real,
+ * and the data needed to detect it (fix_type) is already being received and
+ * discarded. Closing that gap (parsing fix_type, gating the position report
+ * or attaching a validity flag) is a production-behaviour decision of its
+ * own and is tracked separately; these tests pin the *current* behaviour so
+ * a future change here is a deliberate, reviewed one. */
+
+TEST_CASE ("GPS_RAW_INT fix_type is received but does not affect position reporting today (todo/68)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* Report no fix at all, then a position — the position must still be
+     * delivered unchanged: fix_type is not consulted anywhere on this path. */
+    server.sendGpsRawInt (GPS_FIX_TYPE_NO_FIX);
+    int before = positions.count_now ();
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition (-435000000, 1726000000);
+            return positions.count_now () > before;
+        },
+        io_timeout));
+
+    PositionData pd = positions.lastPosition ();
+    REQUIRE (pd.getP ().getLatitude () == Catch::Approx (-43.5));
+    REQUIRE (pd.getP ().getLongitude () == Catch::Approx (172.6));
+}
+
+TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged each time (todo/68)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* Simulate an EKF position estimate that has frozen (e.g. GPS lost, no
+     * further update) by sending the exact same coordinates repeatedly.
+     * Today nothing detects the repetition or suppresses/flags it: each
+     * report is delivered exactly like a fresh one, with no way downstream
+     * to tell a frozen estimate from a genuinely updating one. */
+    constexpr int32_t frozen_lat = -435000000;
+    constexpr int32_t frozen_lon = 1726000000;
+    for (int i = 0; i < 5; i++)
+    {
+        int before = positions.count_now ();
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPosition (frozen_lat, frozen_lon);
+                return positions.count_now () > before;
+            },
+            io_timeout));
+
+        PositionData pd = positions.lastPosition ();
+        REQUIRE (pd.getP ().getLatitude () == Catch::Approx (-43.5));
+        REQUIRE (pd.getP ().getLongitude () == Catch::Approx (172.6));
+    }
+    REQUIRE (positions.count_now () >= 5);
 }
