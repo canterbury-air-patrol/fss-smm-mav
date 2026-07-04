@@ -215,7 +215,9 @@ class App
 
     /* The event queue and its sync primitives are declared first so they are
      * destroyed LAST — after the callback producers below, whose worker/recv
-     * threads enqueue onto this queue and touch main_lock/main_cv. */
+     * threads enqueue onto this queue and touch main_lock/main_cv. See
+     * docs/threading.md for App's place in the full thread inventory and
+     * lock-ordering model. */
     std::queue<std::shared_ptr<event>> event_queue;
     std::mutex main_lock;
     std::condition_variable main_cv;

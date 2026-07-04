@@ -10,7 +10,8 @@
 #include "smm/ismm.hpp"
 #include "smm/smm-command.hpp"
 
-/* Single-event-loop-thread invariant
+/* Single-event-loop-thread invariant (see docs/threading.md for the full
+ * cross-thread model this is one piece of)
  * -----------------------------------
  * Every state-mutating method below (FSSNewCommand, SMMNewCommand,
  * setLowBattery, setCommsFailure, setMavCommsFailure) and the work they drive

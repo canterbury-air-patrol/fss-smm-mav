@@ -138,7 +138,9 @@ class mav_connection
     mav_systems systems{};
     /* state_lock guards: last_position, search, search_loaded,
      * search_loading, goto_active, goto_position, goto_ack_pending,
-     * retry_count, last_tried. */
+     * retry_count, last_tried. Never held at the same time as send_lock (see
+     * docs/threading.md for the full cross-thread ownership/lock-ordering
+     * model this connection is one piece of). */
     std::mutex state_lock{};
     Point last_position{};
     std::shared_ptr<SMMSearch> search{ nullptr };
