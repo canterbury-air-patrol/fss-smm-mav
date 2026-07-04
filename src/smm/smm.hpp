@@ -31,7 +31,10 @@ extern "C"
  * (todo/33). Any resulting flight action is reported back through the
  * load-search / RTL callbacks, which the App routes through the event queue so
  * it is applied on the event-loop thread (where the state machine arbitrates
- * priority). The worker itself never commands MAV. */
+ * priority). The worker itself never commands MAV.
+ *
+ * See docs/threading.md for the full thread inventory, data ownership, and
+ * lock-ordering model this worker/queue is one piece of. */
 class SMM : public ISMM
 {
     /* Test-only accessor: lets the resume/responsiveness tests inject held-search

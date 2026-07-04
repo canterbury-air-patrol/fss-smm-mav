@@ -7,4 +7,4 @@ else
 SUBDIRS = src
 endif
 
-EXTRA_DIST = mavlink debian
+EXTRA_DIST = mavlink debian docs
