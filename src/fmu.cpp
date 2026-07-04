@@ -198,7 +198,16 @@ FMUStateMachine::actionState (FMUState state) -> bool
             /* Tell MAV to Goto the commanded position (carried in with the goto
              * command, see fss_command_target). gotoPosition only stashes the
              * target (it transmits nothing), so the goto's transmission result is
-             * entirely the following setMode(); that is what `sent` tracks. */
+             * entirely the following setMode(); that is what `sent` tracks.
+             * IMPORTANT: `sent` here only reflects the opening MISSION_COUNT
+             * packet, not the whole (request-driven) mission upload — unlike
+             * RTL/failsafe/low-battery/terminate, goto is deliberately absent
+             * from requires_replay_on_failure() below, so a link drop after
+             * this returns true but before the upload's MISSION_ACK is NOT
+             * replayed on MAV recovery (todo/61). mav_connection surfaces that
+             * case as a logged warning instead (see goto_ack_pending in
+             * mavlink.cpp), since there is no cheap way to re-drive a
+             * mid-upload handshake from here. */
             this->mav.gotoPosition (this->fss_command_target.position);
             sent = this->mav.setMode (flight_mode_goto);
             break;

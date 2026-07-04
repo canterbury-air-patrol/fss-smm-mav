@@ -83,6 +83,23 @@ mav_connection::heartbeat_loop ()
                 this->logger.log (LogLevel::error, std::string ("WARN: Autopilot link down (")
                                                        + (fd_open ? "no heartbeat" : "no link")
                                                        + ") — MAV comms failure");
+                /* A goto's MISSION_COUNT can reach the autopilot with the rest
+                 * of the upload (request-driven) never completing if the link
+                 * then drops. Unlike RTL/failsafe/low-battery/terminate this
+                 * is not replayed on recovery (todo/61), so make the silent
+                 * no-op visible instead. */
+                bool goto_upload_lost;
+                {
+                    std::lock_guard<std::mutex> state_lk{ this->state_lock };
+                    goto_upload_lost = this->goto_ack_pending;
+                    this->goto_ack_pending = false;
+                }
+                if (goto_upload_lost)
+                {
+                    this->logger.log (LogLevel::error,
+                                      "WARN: MAV link lost with a goto mission upload in flight (MISSION_COUNT sent, "
+                                      "no MISSION_ACK) — the goto did not take effect");
+                }
             }
             if (this->mav_comms_cb)
             {
@@ -224,15 +241,31 @@ mav_connection::commandGoto (Point p) -> bool
         this->goto_active = true;
         this->search_loaded = false;
     }
+    bool sent;
     {
         std::lock_guard<std::mutex> lk (this->send_lock);
         mavlink_msg_mission_count_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, MISSION_TARGET_SYS_ID,
                                              TARGET_COMP_ID, mission_count_for (0, MissionPlanMode::go_to),
                                              MAV_MISSION_TYPE_MISSION, 0);
         /* The goto is a mission upload: report whether its opening MISSION_COUNT
-         * reached the autopilot (the rest is request-driven). */
-        return this->sendMavLinkMsgLocked (&msg);
+         * reached the autopilot (the rest is request-driven). Unlike RTL/
+         * failsafe/low-battery/terminate, a goto is not replayed on link
+         * recovery if the upload never completes (todo/61) — so a send
+         * failure here is surfaced immediately rather than silently treated
+         * as a successful goto by the caller. */
+        sent = this->sendMavLinkMsgLocked (&msg);
     }
+    if (sent)
+    {
+        std::lock_guard<std::mutex> lk{ this->state_lock };
+        this->goto_ack_pending = true;
+    }
+    else
+    {
+        this->logger.log (LogLevel::error,
+                          "WARN: goto MISSION_COUNT failed to send (MAV link down); goto did not take effect");
+    }
+    return sent;
 }
 
 auto
@@ -435,6 +468,9 @@ mav_connection::mission_ack (bool accepted)
     uint16_t search_seq = 0;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
+        /* The upload this MISSION_ACK completes is no longer at risk of a
+         * silent link-drop no-op (todo/61), whether accepted or rejected. */
+        this->goto_ack_pending = false;
         if (this->goto_active && accepted)
         {
             goto_set_current = true;
@@ -487,6 +523,9 @@ mav_connection::loadSearch () -> bool
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->goto_active = false;
+        /* A pending goto upload is superseded by this search upload, not lost
+         * to a link drop; nothing to warn about (todo/61). */
+        this->goto_ack_pending = false;
         this->search_loaded = false;
         this->search_loading = true;
         count = mission_count_for (this->search->getPoints ().size (), MissionPlanMode::search);

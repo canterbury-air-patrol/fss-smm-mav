@@ -8,11 +8,13 @@
 
 #include <ardupilotmega/mavlink.h>
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -23,6 +25,22 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+
+namespace
+{
+/* main() (src/main.cpp) ignores SIGPIPE so a send() to a peer that has
+ * closed its end reports EPIPE (which sendMavLinkMsg already handles)
+ * instead of terminating the process. Catch2 supplies its own main() here,
+ * so do the same at static-init time: a test that drops the server side
+ * and leaves the connection "open" from the FMU's perspective for a while
+ * (todo/61) can otherwise have a heartbeat send land on the dead socket and
+ * kill the whole test binary. */
+struct IgnoreSigpipe
+{
+    IgnoreSigpipe () { std::signal (SIGPIPE, SIG_IGN); }
+};
+const IgnoreSigpipe ignore_sigpipe_once{};
+} // namespace
 
 /* Integration harness for the real mav_connection over a loopback TCP socket.
  *
@@ -319,6 +337,33 @@ class NullLogger : public ILogger
 
 NullLogger test_logger{};
 
+/* Records every message logged, so a test can assert a specific warning was
+ * emitted (todo/61's goto-upload-lost warning is only observable this way,
+ * since nothing else about the FMU's state changes when the upload is
+ * abandoned mid-handshake). Thread-safe: log() runs on mav_connection's
+ * heartbeat thread. */
+class CapturingLogger : public ILogger
+{
+  public:
+    void
+    log (LogLevel, std::string_view msg) override
+    {
+        const std::lock_guard<std::mutex> lk (this->mtx);
+        this->messages.emplace_back (msg);
+    }
+    auto
+    containsSubstring (const std::string &needle) -> bool
+    {
+        const std::lock_guard<std::mutex> lk (this->mtx);
+        return std::any_of (this->messages.begin (), this->messages.end (),
+                            [&] (const std::string &m) { return m.find (needle) != std::string::npos; });
+    }
+
+  private:
+    std::mutex mtx{};
+    std::vector<std::string> messages{};
+};
+
 constexpr uint16_t test_goto_altitude_m = 50;
 constexpr uint16_t test_altitude_floor_m = 10;
 constexpr uint16_t test_altitude_cap_m = 120;
@@ -547,6 +592,44 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
     REQUIRE (result.item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
     /* A goto resumes at mission sequence 0 (no search offset). */
     REQUIRE (result.set_current == 0);
+}
+
+/* todo/61: unlike RTL/failsafe/low-battery/terminate, a goto's "sent" only
+ * reflects the opening MISSION_COUNT — the rest of the upload is request-
+ * driven and has no replay-on-recovery guarantee. A link drop before the
+ * MISSION_ACK must not be a silent no-op reported as a successful goto; it
+ * must surface a clear, operator-visible warning instead. */
+TEST_CASE ("a link drop mid goto-upload logs a warning instead of silently succeeding (todo/61)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture);
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    server.sendHeartbeat ();
+
+    /* MISSION_COUNT goes out (goto_ack_pending is now armed), but the server
+     * never issues the MISSION_REQUEST/MISSION_ACK that would complete the
+     * upload. */
+    conn.commandGoto (Point (-43.5, 172.6));
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
+
+    /* Sever the link before the handshake completes. The recv thread sees EOF
+     * and marks the connection down, so the heartbeat loop's next tick
+     * edge-triggers the down report (and, with it, the goto-upload-lost
+     * warning) without waiting out the full heartbeat timeout. */
+    server.dropClient ();
+
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            return capture.containsSubstring ("goto mission upload in flight")
+                   && capture.containsSubstring ("the goto did not take effect");
+        },
+        io_timeout));
 }
 
 TEST_CASE ("a search mission resume sets current past the setup items (todo/48)", "[mav_io]")
