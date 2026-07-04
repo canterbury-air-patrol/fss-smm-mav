@@ -673,6 +673,15 @@ run_mission_upload (MavLoopbackServer &server, uint16_t expected_count) -> Missi
     result.set_current = mavlink_msg_mission_set_current_get_seq (&msg);
     return result;
 }
+
+void
+expect_auto_mode (MavLoopbackServer &server)
+{
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, io_timeout));
+    REQUIRE (mavlink_msg_set_mode_get_target_system (&msg) == 1);
+    REQUIRE (mavlink_msg_set_mode_get_custom_mode (&msg) == COPTER_MODE_AUTO);
+}
 } // namespace
 
 TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", "[mav_io]")
@@ -692,6 +701,26 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
     REQUIRE (result.item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
     /* A goto resumes at mission sequence 0 (no search offset). */
     REQUIRE (result.set_current == 0);
+}
+
+TEST_CASE ("a goto mission selects current before engaging AUTO after upload (todo/77)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    conn.commandGoto (Point (-43.5, 172.6));
+
+    const MissionUploadResult result = run_mission_upload (server, 3);
+
+    REQUIRE (result.set_current == 0);
+    expect_auto_mode (server);
 }
 
 /* todo/61: unlike RTL/failsafe/low-battery/terminate, a goto's "sent" only
@@ -751,6 +780,26 @@ TEST_CASE ("a search mission resume sets current past the setup items (todo/48)"
     REQUIRE (result.item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
     REQUIRE (result.set_current == search_point_mission_seq (0));
     REQUIRE (result.set_current == 2);
+}
+
+TEST_CASE ("a search mission selects current before engaging AUTO after upload (todo/77)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    conn.loadSearch (std::make_shared<SMMSearch> ());
+
+    const MissionUploadResult result = run_mission_upload (server, 3);
+
+    REQUIRE (result.set_current == search_point_mission_seq (0));
+    expect_auto_mode (server);
 }
 
 /* Test-only accessor for the friend seam in SMM: inject a held (paused) search,

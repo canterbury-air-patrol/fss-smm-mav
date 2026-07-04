@@ -498,13 +498,17 @@ mav_connection::mission_ack (bool accepted)
     }
     if (goto_set_current)
     {
-        this->commandAuto ();
+        /* Select the freshly-uploaded mission item before engaging AUTO. ArduPilot
+         * can otherwise race the mode change against its post-upload mission
+         * current reset and stay in the previous mode (todo/77). */
         this->setCurrentWP (0);
+        this->commandAuto ();
     }
     if (search_set_current)
     {
-        this->commandAuto ();
+        /* Keep the search-resume path in the same post-upload order as goto. */
         this->setCurrentWP (search_seq);
+        this->commandAuto ();
     }
 }
 
