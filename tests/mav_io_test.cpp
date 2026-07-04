@@ -16,10 +16,13 @@
 #include <condition_variable>
 #include <csignal>
 #include <cstdint>
+#include <cstring>
 #include <functional>
+#include <iostream>
 #include <mutex>
 #include <netinet/in.h>
 #include <optional>
+#include <random>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <thread>
@@ -207,6 +210,41 @@ class MavLoopbackServer
         mavlink_msg_mission_ack_pack_chan (1, 1, autopilot_tx_channel, &msg, fmu_sys_id, fmu_comp_id,
                                            MAV_MISSION_ACCEPTED, mission_type, 0);
         sendMsg (msg);
+    }
+
+    /* Build a valid HEARTBEAT frame's raw wire bytes without sending it, so a
+     * fuzz test can truncate or corrupt them before injecting via sendRaw()
+     * (todo/67). */
+    auto
+    packHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR) -> std::vector<uint8_t>
+    {
+        mavlink_message_t msg;
+        mavlink_msg_heartbeat_pack_chan (1, 1, autopilot_tx_channel, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0,
+                                         MAV_STATE_ACTIVE);
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        unsigned int len = mavlink_msg_to_send_buffer (buf, &msg);
+        return std::vector<uint8_t> (buf, buf + len);
+    }
+
+    /* Send bytes directly to the FMU's connection, bypassing MAVLink framing
+     * entirely — used to inject garbage/truncated/corrupted frames (todo/67).
+     * Surfaces a short/failed send instead of silently swallowing it: an
+     * intermittent socket issue that dropped bytes would otherwise look like
+     * a parser-robustness failure and produce a misleading test result. */
+    void
+    sendRaw (const std::vector<uint8_t> &data)
+    {
+        int fd = this->client_fd.load ();
+        if (fd < 0)
+        {
+            return;
+        }
+        ssize_t sent = send (fd, data.data (), data.size (), MSG_NOSIGNAL);
+        if (sent < 0 || static_cast<std::size_t> (sent) != data.size ())
+        {
+            std::cerr << "sendRaw: short/failed send (" << sent << " of " << data.size ()
+                      << " bytes): " << std::strerror (errno) << "\n";
+        }
     }
 
     /* Read and parse inbound MAVLink from the FMU until a message of `want`
@@ -412,6 +450,29 @@ class PositionRecorder
   private:
     std::atomic<int> count{ 0 };
 };
+
+/* Establish a real down->up edge and wait for it: the comms-status callback
+ * only fires on a change, and mav_comms_ok's optimistic default is "up" (see
+ * heartbeat_loop's own comment), so a test that skipped straight to waiting
+ * for `ok` could hang forever if its first heartbeat happened to be
+ * processed before heartbeat_loop's first check ever observed "down". Shared
+ * by every test that needs the link up before doing anything else, so this
+ * race fix lives in one place. */
+auto
+waitForColdStartThenUp (MavLoopbackServer &server, CommsRecorder &recorder) -> bool
+{
+    if (!MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout))
+    {
+        return false;
+    }
+    return MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendHeartbeat ();
+            return recorder.lastStatus () == MavCommsStatus::ok;
+        },
+        io_timeout);
+}
 
 } // namespace
 
@@ -910,4 +971,171 @@ TEST_CASE ("SMM does not accept a search if the searching role is revoked mid-fe
     REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 1; }, io_timeout));
     REQUIRE (smm.commit_calls.load () == 0);
     REQUIRE (rtl.load () == 0);
+}
+
+/* todo/67: malformed-byte-stream robustness, the single-repo share of Tier-3
+ * Path K k01. These drive the real mav_connection recv path (not a mock)
+ * over the loopback socket, so hostile bytes exercise the actual MAVLink
+ * parser and its resync behaviour; the full-system flood (SITL + FSS + the
+ * cap-fmu binary) stays in Tier-3 Path K as the cross-check. Run under the
+ * same TSan `make check` as everything else, so a parser-state race would
+ * surface here too. */
+
+TEST_CASE ("mav_connection survives a stream of random garbage bytes (todo/67)", "[mav_io][fuzz]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* Seeded, deterministic corpus so a failure is reproducible. */
+    std::mt19937 rng (0xC0FFEE);
+    std::vector<uint8_t> garbage (4096);
+    for (auto &b : garbage)
+    {
+        b = static_cast<uint8_t> (rng ());
+    }
+    server.sendRaw (garbage);
+
+    /* The connection must survive (no crash/hang): a subsequent heartbeat
+     * still reports the link up and a position report still parses, proving
+     * the parser resynchronised rather than getting stuck on the garbage. */
+    int before = positions.count_now ();
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendHeartbeat ();
+            server.sendPosition ();
+            return recorder.lastStatus () == MavCommsStatus::ok && positions.count_now () > before;
+        },
+        io_timeout));
+}
+
+TEST_CASE ("mav_connection resynchronises after a truncated frame (todo/67)", "[mav_io][fuzz]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    auto full_frame = server.packHeartbeat ();
+    /* Cut the frame at every possible offset short of complete, each time
+     * followed by valid traffic: the parser must eventually resynchronise
+     * rather than staying stuck forever. A truncated frame's declared length
+     * is still whatever the original frame said, so the byte-level parser
+     * treats however many of the next frame's bytes are needed to "complete"
+     * it as fake payload before its checksum fails and it resumes scanning
+     * for STX — which can consume the very next frame's own STX depending on
+     * the cut point. So resync is not guaranteed within exactly one
+     * subsequent frame; resend inside the predicate until one gets through
+     * clean, the same defensive pattern used for the initial heartbeat-up
+     * race above. */
+    for (std::size_t cut = 1; cut < full_frame.size (); cut++)
+    {
+        int before = positions.count_now ();
+        std::vector<uint8_t> truncated (full_frame.begin (), full_frame.begin () + static_cast<long> (cut));
+        server.sendRaw (truncated);
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPosition ();
+                return positions.count_now () > before;
+            },
+            io_timeout));
+    }
+}
+
+TEST_CASE ("mav_connection drops a corrupted-CRC frame without flapping link state (todo/67)", "[mav_io][fuzz]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* Corrupt the checksum (the last two bytes of an unsigned MAVLink2
+     * frame). Must be dropped silently, not misinterpreted as some other
+     * message. */
+    auto frame = server.packHeartbeat ();
+    frame[frame.size () - 1] ^= 0xFF;
+    frame[frame.size () - 2] ^= 0xFF;
+    server.sendRaw (frame);
+
+    /* Drive completion via a real response instead of a blind sleep: waiting
+     * for a subsequent position report to arrive both proves the corrupted
+     * frame was processed (and dropped) without wedging anything, and takes
+     * exactly as long as that requires rather than a fixed guess that could
+     * be too short (flaky) or too long (slow) depending on machine load. */
+    int before = positions.count_now ();
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition ();
+            return positions.count_now () > before;
+        },
+        io_timeout));
+
+    /* The link must never have flapped down while the corrupted frame was
+     * being dropped. */
+    REQUIRE (recorder.lastStatus () == MavCommsStatus::ok);
+}
+
+TEST_CASE ("mav_connection keeps routing valid messages between garbage bursts (todo/67)", "[mav_io][fuzz]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    std::mt19937 rng (0xBADC0DE);
+    for (int i = 0; i < 5; i++)
+    {
+        std::vector<uint8_t> garbage (256);
+        for (auto &b : garbage)
+        {
+            b = static_cast<uint8_t> (rng ());
+        }
+        server.sendRaw (garbage);
+
+        int before = positions.count_now ();
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendHeartbeat ();
+                server.sendPosition ();
+                return recorder.lastStatus () == MavCommsStatus::ok && positions.count_now () > before;
+            },
+            io_timeout));
+    }
 }
