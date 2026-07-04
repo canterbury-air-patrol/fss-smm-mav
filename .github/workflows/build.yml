@@ -43,13 +43,23 @@ jobs:
           libfss-client-ssl \
           libsmm-asset-dev \
           libjsoncpp-dev \
-          jq
+          jq \
+          python3
 
     - name: Build and test
       run: |
         autoreconf -fi
         ./configure
         make check
+
+    - name: Test-plan traceability (todo/66)
+      run: python3 tools/traceability.py --out traceability-report.json
+
+    - name: Upload traceability report
+      uses: actions/upload-artifact@v4
+      with:
+        name: traceability-report
+        path: traceability-report.json
 
     - name: Smoke test (CLI and docker entrypoint scripts)
       run: |

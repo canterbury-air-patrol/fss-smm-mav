@@ -257,7 +257,7 @@ latch_low_battery (const std::shared_ptr<FMUStateMachine> &sm)
     }
 }
 
-TEST_CASE ("low battery latches RTL regardless of subsequent FSS commands", "[state_machine]")
+TEST_CASE ("low battery latches RTL regardless of subsequent FSS commands", "[state_machine][TC-FS-011][TC-FS-012]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -274,7 +274,7 @@ TEST_CASE ("low battery latches RTL regardless of subsequent FSS commands", "[st
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machine]")
+TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machine][TC-MAV-004][TC-MAV-005][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -289,7 +289,7 @@ TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machin
 }
 
 TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms recover (todo/46)",
-           "[state_machine][replay]")
+           "[state_machine][replay][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -311,7 +311,8 @@ TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms rec
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (todo/46)", "[state_machine][replay]")
+TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (todo/46)",
+           "[state_machine][replay][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -430,7 +431,7 @@ TEST_CASE ("low battery forces RTL out of an active search", "[state_machine]")
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("comms failure forces RTL out of an active search", "[state_machine]")
+TEST_CASE ("comms failure forces RTL out of an active search", "[state_machine][TC-MAV-004][TC-MAV-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -444,7 +445,7 @@ TEST_CASE ("comms failure forces RTL out of an active search", "[state_machine]"
 /* Design decision: terminate has the highest priority and overrides both
  * low_battery and comms_failure.  The ground station must always be able to
  * halt the aircraft, even during an emergency RTL. */
-TEST_CASE ("terminate overrides low battery", "[state_machine]")
+TEST_CASE ("terminate overrides low battery", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -456,7 +457,7 @@ TEST_CASE ("terminate overrides low battery", "[state_machine]")
     REQUIRE (mav->terminated);
 }
 
-TEST_CASE ("terminate overrides comms failure", "[state_machine]")
+TEST_CASE ("terminate overrides comms failure", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -471,7 +472,7 @@ TEST_CASE ("terminate overrides comms failure", "[state_machine]")
 /* Design decision: low_battery outranks comms_failure.  Both drive RTL, but
  * low_battery latches, so clearing comms (or sending FSS commands) must not
  * release the aircraft from RTL while the battery is still low. */
-TEST_CASE ("low battery outranks comms failure", "[state_machine]")
+TEST_CASE ("low battery outranks comms failure", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -491,7 +492,7 @@ TEST_CASE ("low battery outranks comms failure", "[state_machine]")
 /* Design decision: low_battery BLOCKS manual and disarm.  Allowing manual
  * override or a mid-air disarm when the battery is critically low risks loss
  * of the aircraft; RTL is the safe action. */
-TEST_CASE ("manual blocked when low battery is set", "[state_machine]")
+TEST_CASE ("manual blocked when low battery is set", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -501,7 +502,7 @@ TEST_CASE ("manual blocked when low battery is set", "[state_machine]")
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("manual allowed when battery OK", "[state_machine]")
+TEST_CASE ("manual allowed when battery OK", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -514,7 +515,7 @@ TEST_CASE ("manual allowed when battery OK", "[state_machine]")
     REQUIRE (mav->last_mode == flight_mode_manual);
 }
 
-TEST_CASE ("disarm allowed when battery OK", "[state_machine]")
+TEST_CASE ("disarm allowed when battery OK", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -523,7 +524,7 @@ TEST_CASE ("disarm allowed when battery OK", "[state_machine]")
     REQUIRE (mav->disarmed);
 }
 
-TEST_CASE ("disarm blocked when low battery is set", "[state_machine]")
+TEST_CASE ("disarm blocked when low battery is set", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -534,7 +535,7 @@ TEST_CASE ("disarm blocked when low battery is set", "[state_machine]")
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("same non-searching state does not re-action", "[state_machine]")
+TEST_CASE ("same non-searching state does not re-action", "[state_machine][TC-MAV-013]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -545,7 +546,7 @@ TEST_CASE ("same non-searching state does not re-action", "[state_machine]")
     REQUIRE (mav->set_mode_calls == calls);
 }
 
-TEST_CASE ("searching does not re-action on repeated state update", "[state_machine]")
+TEST_CASE ("searching does not re-action on repeated state update", "[state_machine][TC-MAV-013]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -556,7 +557,7 @@ TEST_CASE ("searching does not re-action on repeated state update", "[state_mach
     REQUIRE (smm->search_calls == calls);
 }
 
-TEST_CASE ("goto does not re-action on repeated FSS goto", "[state_machine]")
+TEST_CASE ("goto does not re-action on repeated FSS goto", "[state_machine][TC-MAV-013]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -567,7 +568,7 @@ TEST_CASE ("goto does not re-action on repeated FSS goto", "[state_machine]")
     REQUIRE (mav->set_mode_calls == calls);
 }
 
-TEST_CASE ("goto command passes its carried target to mav gotoPosition", "[state_machine]")
+TEST_CASE ("goto command passes its carried target to mav gotoPosition", "[state_machine][TC-MAV-018]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -584,7 +585,8 @@ TEST_CASE ("goto command passes its carried target to mav gotoPosition", "[state
  * failsafe takes over goto, and when comms recover the goto is re-applied with
  * the SAME target the original command carried (fss_command and its target are
  * written together and only a new FSS command overwrites them). */
-TEST_CASE ("goto target survives a comms-loss latch and is re-applied on recovery", "[state_machine]")
+TEST_CASE ("goto target survives a comms-loss latch and is re-applied on recovery",
+           "[state_machine][TC-MAV-018][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -612,7 +614,7 @@ TEST_CASE ("altitude adjust command calls mav setAltitude", "[state_machine]")
     REQUIRE (mav->last_altitude == 150);
 }
 
-TEST_CASE ("altitude adjust carries a full-width altitude through to setAltitude", "[state_machine]")
+TEST_CASE ("altitude adjust carries a full-width altitude through to setAltitude", "[state_machine][TC-MAV-018]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -626,7 +628,7 @@ TEST_CASE ("altitude adjust carries a full-width altitude through to setAltitude
     REQUIRE (mav->last_altitude == oversized_ft);
 }
 
-TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[state_machine]")
+TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[state_machine][TC-MAV-013]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -640,7 +642,7 @@ TEST_CASE ("altitude adjust does not re-action on repeated FSS altitude", "[stat
 /* Design decision: the low-battery RTL latch is debounced. A single noisy or
  * spurious low reading must not ground the mission; the latch only engages
  * after low_battery_latch_count consecutive low samples. */
-TEST_CASE ("low battery does not latch before the debounce count", "[state_machine]")
+TEST_CASE ("low battery does not latch before the debounce count", "[state_machine][TC-FS-011][TC-FS-012]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -661,7 +663,7 @@ TEST_CASE ("low battery does not latch before the debounce count", "[state_machi
 
 /* low_battery_latch_count is configurable (todo/54): a non-default count must
  * actually change the debounce, not just be accepted and ignored. */
-TEST_CASE ("a configured low_battery_latch_count changes the debounce", "[state_machine]")
+TEST_CASE ("a configured low_battery_latch_count changes the debounce", "[state_machine][TC-FS-011][TC-FS-012]")
 {
     auto [mav, smm, sm] = make_sm (2);
 
@@ -673,7 +675,7 @@ TEST_CASE ("a configured low_battery_latch_count changes the debounce", "[state_
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_machine]")
+TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_machine][TC-FS-011][TC-FS-012]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -698,7 +700,7 @@ TEST_CASE ("a healthy battery reading resets the low battery debounce", "[state_
 
 /* Once the latch has engaged, a later optimistic reading must NOT release it:
  * recovery from a critically low battery requires a restart. */
-TEST_CASE ("low battery latch is not cleared by a healthy reading", "[state_machine]")
+TEST_CASE ("low battery latch is not cleared by a healthy reading", "[state_machine][TC-FS-011][TC-FS-012]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -713,7 +715,7 @@ TEST_CASE ("low battery latch is not cleared by a healthy reading", "[state_mach
 /* The consecutive-low counter saturates at low_battery_latch_count so a long
  * flight with a sustained low battery cannot overflow it. The latch must engage
  * exactly once and stay engaged no matter how many more low readings arrive. */
-TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[state_machine]")
+TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[state_machine][TC-FS-011][TC-FS-012]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -733,7 +735,7 @@ TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[st
     REQUIRE (mav->set_mode_calls == 1);
 }
 
-TEST_CASE ("mav comms failure triggers failsafe RTL", "[state_machine]")
+TEST_CASE ("mav comms failure triggers failsafe RTL", "[state_machine][TC-MAV-004][TC-MAV-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -770,7 +772,8 @@ TEST_CASE ("repeated mav comms failures do not re-action the failsafe", "[state_
     REQUIRE (last_state == fmu_state_failsafe);
 }
 
-TEST_CASE ("mav comms failure clears and restores prior FSS command", "[state_machine]")
+TEST_CASE ("mav comms failure clears and restores prior FSS command",
+           "[state_machine][TC-MAV-004][TC-MAV-005][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -784,7 +787,7 @@ TEST_CASE ("mav comms failure clears and restores prior FSS command", "[state_ma
     REQUIRE (mav->last_mode == flight_mode_hold);
 }
 
-TEST_CASE ("terminate overrides mav comms failure", "[state_machine]")
+TEST_CASE ("terminate overrides mav comms failure", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -796,7 +799,7 @@ TEST_CASE ("terminate overrides mav comms failure", "[state_machine]")
     REQUIRE (mav->terminated);
 }
 
-TEST_CASE ("mav comms failure does not displace an active terminate", "[state_machine]")
+TEST_CASE ("mav comms failure does not displace an active terminate", "[state_machine][TC-MAV-016]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -905,7 +908,7 @@ TEST_CASE ("an explicit RTL during the low-battery latch is reported superseded"
 }
 
 TEST_CASE ("an RTL superseded by a recoverable comms failure still applies once comms clears",
-           "[state_machine][command_ack]")
+           "[state_machine][command_ack][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -1077,7 +1080,7 @@ actioned () -> FSSCommandResolution
 }
 } // namespace
 
-TEST_CASE ("same command on two connections actions once, both acked the same", "[command_ack][group]")
+TEST_CASE ("same command on two connections actions once, both acked the same", "[command_ack][group][TC-MAV-006]")
 {
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_hold = 5;
@@ -1100,7 +1103,8 @@ TEST_CASE ("same command on two connections actions once, both acked the same", 
     REQUIRE (to_ack[1] == 2);
 }
 
-TEST_CASE ("a duplicate arriving after resolution is acked immediately from the cache", "[command_ack][group]")
+TEST_CASE ("a duplicate arriving after resolution is acked immediately from the cache",
+           "[command_ack][group][TC-MAV-006]")
 {
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_goto = 3;
@@ -1119,7 +1123,8 @@ TEST_CASE ("a duplicate arriving after resolution is acked immediately from the 
     REQUIRE (late.resolution->outcome == fss_command_actioned);
 }
 
-TEST_CASE ("an older different command within the window is acked superseded, not actuated", "[command_ack][group]")
+TEST_CASE ("an older different command within the window is acked superseded, not actuated",
+           "[command_ack][group][TC-MAV-006]")
 {
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_hold = 5;
@@ -1144,7 +1149,8 @@ TEST_CASE ("an older different command within the window is acked superseded, no
     REQUIRE (stale_command_ack_reason != fsst::supersede_comms_loss);
 }
 
-TEST_CASE ("a new command supersedes an unresolved group and its copies are handed back", "[command_ack][group]")
+TEST_CASE ("a new command supersedes an unresolved group and its copies are handed back",
+           "[command_ack][group][TC-MAV-006]")
 {
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_hold = 5;
@@ -1355,7 +1361,7 @@ TEST_CASE ("search altitude derivation and clamp compose for realistic searches"
     REQUIRE (clamp_search_altitude (raw_search_altitude (2.0, 90.0), floor, cap) == floor);
 }
 
-TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor, cap]", "[altitude]")
+TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor, cap]", "[altitude][TC-MAV-018]")
 {
     /* Defaults from the README: 122 m cap, 10 m floor. */
     constexpr uint16_t floor = 10;
@@ -2173,7 +2179,7 @@ TEST_CASE ("EventDispatcher gates SmmRtl on isSearching()", "[event_dispatcher]"
 }
 
 TEST_CASE ("EventDispatcher never classifies an unknown battery reading as low, but still feeds the debounce",
-           "[event_dispatcher]")
+           "[event_dispatcher][TC-FS-011][TC-FS-012]")
 {
     auto f = make_dispatcher ("asset", 20);
     f.sm->FSSNewCommand (fss_cmd_continue);
