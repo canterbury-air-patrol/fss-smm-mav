@@ -137,7 +137,8 @@ class mav_connection
     notify_mav_comms_cb mav_comms_cb{};
     mav_systems systems{};
     /* state_lock guards: last_position, search, search_loaded,
-     * search_loading, goto_active, goto_position, retry_count, last_tried. */
+     * search_loading, goto_active, goto_position, goto_ack_pending,
+     * retry_count, last_tried. */
     std::mutex state_lock{};
     Point last_position{};
     std::shared_ptr<SMMSearch> search{ nullptr };
@@ -148,6 +149,14 @@ class mav_connection
     bool search_loaded{ false };
     Point goto_position{};
     bool goto_active{ false };
+    /* True from a successfully-sent goto MISSION_COUNT until its MISSION_ACK
+     * is processed (or it is superseded by a new goto/search). setMode()'s
+     * "sent" for a goto only reflects that opening packet (todo/61) — the
+     * rest of the upload is request-driven and the FMU has no replay-on-
+     * recovery guarantee for it (unlike RTL/failsafe/low-battery/terminate,
+     * todo/46). This flag lets a link drop mid-upload be reported instead of
+     * silently treated as a successful goto. */
+    bool goto_ack_pending{ false };
     std::optional<MavModeCommand> pending_mode_command{};
     /* Altitude (metres AGL, relative to home) a goto waypoint is flown at;
      * supplied from config, already clamped to [floor, cap]. Set once at
