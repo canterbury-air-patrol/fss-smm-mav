@@ -1081,9 +1081,16 @@ mav_connection::report_position (double lat, double lng, double alt, uint16_t hd
 void
 mav_connection::report_reached (int point)
 {
-    if (this->reached_cb && point > 1)
+    /* seq 0/1 (< search_first_point_seq) are the setup/takeoff items, which
+     * have no corresponding search point and are dropped rather than passed
+     * on (see todo/69 for why a goto/RTL's own reached events must also be
+     * gated by isSearching() upstream, not just this check). The translation
+     * for a real search-point seq is next_search_point_after_reached_seq's
+     * "resume from the next point" mapping, not mission_item_for's inverse
+     * (todo/64). */
+    if (this->reached_cb && point >= search_first_point_seq)
     {
-        this->reached_cb (point - 1);
+        this->reached_cb (next_search_point_after_reached_seq (static_cast<uint16_t> (point)));
     }
 }
 

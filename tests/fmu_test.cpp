@@ -1491,6 +1491,28 @@ TEST_CASE ("search_point_mission_seq offsets a search point index to its mission
     REQUIRE (mission_item_for (0, num_points, MissionPlanMode::go_to).kind == MissionItemKind::goto_point);
 }
 
+/* todo/64: next_search_point_after_reached_seq is what report_reached() uses
+ * to turn a MISSION_ITEM_REACHED seq into the point SMMSearch resumes from —
+ * one past the point index mission_item_for would assign that same seq,
+ * since SMMSearch::current_point tracks the *next* point, not the one just
+ * completed. Pinned directly (as a pure function) so this relationship stays
+ * correct if the setup-item count ever changes. */
+TEST_CASE ("next_search_point_after_reached_seq is one past mission_item_for's point index", "[mission]")
+{
+    constexpr std::size_t num_points = 10;
+    for (uint16_t seq = search_first_point_seq; seq < search_first_point_seq + num_points; seq++)
+    {
+        auto item = mission_item_for (seq, num_points, MissionPlanMode::search);
+        REQUIRE (item.kind == MissionItemKind::search_point);
+        REQUIRE (next_search_point_after_reached_seq (seq) == static_cast<int> (item.point_index) + 1);
+    }
+
+    /* The first real search point (seq == search_first_point_seq) resumes at
+     * index 1, not 0 - reaching it means point 0 is done and the next target
+     * is point 1. */
+    REQUIRE (next_search_point_after_reached_seq (search_first_point_seq) == 1);
+}
+
 TEST_CASE ("mission_item_for handles an empty search (no points)", "[mission]")
 {
     /* With zero points, only the two takeoff items exist; seq 2 onward is RTL. */

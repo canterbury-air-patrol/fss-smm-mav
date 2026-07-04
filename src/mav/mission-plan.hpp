@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -55,6 +56,32 @@ inline auto
 search_point_mission_seq (int point_index) -> uint16_t
 {
     return static_cast<uint16_t> (point_index + search_first_point_seq);
+}
+
+/* The search-point index MISSION_ITEM_REACHED(seq) resumes from, for a seq at
+ * or past search_first_point_seq (the caller must guard seq <
+ * search_first_point_seq itself — see report_reached, todo/64).
+ *
+ * This is NOT the inverse of search_point_mission_seq (`seq -
+ * search_first_point_seq`, which would give the index of the point just
+ * reached): SMMSearch::current_point tracks the *next* point to resume from,
+ * one past the item MISSION_ITEM_REACHED names, matching
+ * SMMSearch::reachedPoint's `current_point = point` and its
+ * `point >= getPointsCount()` search-complete check. So the reached seq for
+ * search point index i (= i + search_first_point_seq) maps to i + 1, i.e.
+ * `seq - search_first_point_seq + 1`, equivalently `seq - 1` for the current
+ * two-setup-item layout — expressed here in terms of search_first_point_seq
+ * so a future change to the setup-item count only has to change one place. */
+inline auto
+next_search_point_after_reached_seq (uint16_t seq) -> int
+{
+    /* Caller contract, not defensively clamped: report_reached() already
+     * guards this immediately before calling in, and silently clamping a
+     * violation would hide a real bug (a wrong resume point) rather than
+     * surface it. Compiled out under NDEBUG like the rest of this codebase's
+     * assert()-based invariant checks. */
+    assert (seq >= search_first_point_seq);
+    return static_cast<int> (seq) - static_cast<int> (search_first_point_seq) + 1;
 }
 
 inline auto
