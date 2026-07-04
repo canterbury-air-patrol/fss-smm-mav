@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "ilogger.hpp"
 #include "mav/internal.hpp"
 #include "mav/mav.hpp"
 #include "mav/mission-plan.hpp"
@@ -305,6 +306,19 @@ class CommsRecorder
     std::vector<MavCommsStatus> events{};
 };
 
+/* Discards everything: these tests exercise the I/O boundary, not logging, and
+ * a real Logger would need a file-backed directory (todo/59). */
+class NullLogger : public ILogger
+{
+  public:
+    void
+    log (LogLevel, std::string_view) override
+    {
+    }
+};
+
+NullLogger test_logger{};
+
 constexpr uint16_t test_goto_altitude_m = 50;
 constexpr uint16_t test_altitude_floor_m = 10;
 constexpr uint16_t test_altitude_cap_m = 120;
@@ -362,7 +376,7 @@ TEST_CASE ("mav_connection reports the link down at cold start, then up once a h
     MavLoopbackServer server;
     CommsRecorder recorder;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
     conn.start ();
 
@@ -391,7 +405,7 @@ TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconne
     MavLoopbackServer server;
     PositionRecorder positions;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
     conn.start ();
 
@@ -438,7 +452,7 @@ TEST_CASE ("mav_connection survives repeated drop/reconnect cycles", "[mav_io]")
     MavLoopbackServer server;
     PositionRecorder positions;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.registerPositionCB ([&positions] (const PositionData &) { positions.record (); });
     conn.start ();
 
@@ -521,7 +535,7 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
     reset_mav_parser ();
     MavLoopbackServer server;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -540,7 +554,7 @@ TEST_CASE ("a search mission resume sets current past the setup items (todo/48)"
     reset_mav_parser ();
     MavLoopbackServer server;
 
-    mav_connection conn ("127.0.0.1", server.port (), test_mav_params);
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
@@ -646,11 +660,11 @@ TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "
     reset_mav_parser ();
     MavLoopbackServer server;
 
-    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_mav_params);
+    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_mav_params, test_logger);
     mav.start ();
     REQUIRE (server.waitForClient (io_timeout));
 
-    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+    SMM smm (mav, test_logger, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
              test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
     /* SMM now feeds its flight actions back through callbacks (the App routes
      * these through the event queue); wire them straight to MAV here, as the
@@ -677,7 +691,7 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
     MavLoopbackServer server;
     CommsRecorder recorder;
 
-    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_mav_params);
+    MAV mav ("127.0.0.1", server.port (), terminate_action::none, test_mav_params, test_logger);
     mav.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
     mav.start ();
     REQUIRE (server.waitForClient (io_timeout));
@@ -699,7 +713,7 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
         },
         io_timeout));
 
-    SMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+    SMM smm (mav, test_logger, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
              test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
     smm.registerLoadSearchCB ([&mav] (const std::shared_ptr<SMMSearch> &s) { mav.loadSearch (s); });
     smm.registerRtlCB ([&mav] { mav.setMode (flight_mode_rtl); });
@@ -720,10 +734,10 @@ TEST_CASE ("SMM public methods stay responsive while the worker is in a slow SMM
     reset_mav_parser ();
     /* No loopback server / start(): the SMM worker never touches MAV on the
      * search path, so a bare MAV object is enough. */
-    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params);
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
 
     int dummy = 0;
-    TestSMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+    TestSMM smm (mav, test_logger, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
                  test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
     smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});
     smm.registerRtlCB ([] {});
@@ -762,10 +776,10 @@ TEST_CASE ("SMM public methods stay responsive while the worker is in a slow SMM
 TEST_CASE ("SMM keeps reporting position even when not searching (todo/33)", "[mav_io]")
 {
     reset_mav_parser ();
-    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params);
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
 
     int dummy = 0;
-    TestSMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+    TestSMM smm (mav, test_logger, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
                  test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
     smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});
     smm.registerRtlCB ([] {});
@@ -784,10 +798,10 @@ TEST_CASE ("SMM keeps reporting position even when not searching (todo/33)", "[m
 TEST_CASE ("SMM does not accept a search if the searching role is revoked mid-fetch (todo/33)", "[mav_io]")
 {
     reset_mav_parser ();
-    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params);
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
 
     int dummy = 0;
-    TestSMM smm (mav, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
+    TestSMM smm (mav, test_logger, test_altitude_cap_m, test_altitude_floor_m, 90.0, test_smm_report_interval_ms,
                  test_smm_connect_timeout_s, test_smm_transfer_timeout_s);
     std::atomic<int> rtl{ 0 };
     smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});

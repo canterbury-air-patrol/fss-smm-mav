@@ -51,12 +51,13 @@ class App
     App (const char *config_file, terminate_action ta, const FmuConfig &cfg, Logger &t_logger)
         : event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, logger (t_logger),
           lowbat_threshold (cfg.lowbat_threshold), low_battery_latch_count (cfg.low_battery_latch_count),
-          reconnect_interval_s (cfg.reconnect_interval_s), aircraft{}, fss (std::make_unique<FSS> (config_file)),
+          reconnect_interval_s (cfg.reconnect_interval_s), aircraft (logger), fss (std::make_unique<FSS> (config_file)),
           mav (std::make_unique<MAV> (cfg.mav_address, static_cast<uint16_t> (cfg.mav_port), ta,
                                       MavParams{ cfg.goto_altitude_m, cfg.altitude_floor_m, cfg.altitude_cap_m,
                                                  static_cast<uint32_t> (cfg.position_stream_interval_ms) * 1000U,
-                                                 static_cast<uint32_t> (cfg.battery_stream_interval_ms) * 1000U })),
-          smm (std::make_unique<SMM> (*mav, cfg.altitude_cap_m, cfg.altitude_floor_m, cfg.camera_fov_deg,
+                                                 static_cast<uint32_t> (cfg.battery_stream_interval_ms) * 1000U },
+                                      logger)),
+          smm (std::make_unique<SMM> (*mav, logger, cfg.altitude_cap_m, cfg.altitude_floor_m, cfg.camera_fov_deg,
                                       static_cast<uint64_t> (cfg.smm_position_report_interval_ms),
                                       cfg.smm_connect_timeout_s, cfg.smm_transfer_timeout_s)),
           asset_name (fss->getAssetName ())

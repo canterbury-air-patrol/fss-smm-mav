@@ -1,5 +1,6 @@
 #pragma once
 #include "../fmu-types.hpp"
+#include "../ilogger.hpp"
 #include "../smm/smm-types.hpp"
 #include "imav.hpp"
 #include "mav-params.hpp"
@@ -26,9 +27,10 @@ class MAV : public IMAV
     Point goto_position{};
     uint32_t target_altitude{ 0 };
     terminate_action action;
+    ILogger &logger;
 
   public:
-    MAV (std::string t_addr, uint16_t t_port, terminate_action ta, const MavParams &t_params);
+    MAV (std::string t_addr, uint16_t t_port, terminate_action ta, const MavParams &t_params, ILogger &t_logger);
     MAV (MAV &) = delete;
     MAV (MAV &&) = delete;
     auto operator= (MAV &) -> MAV & = delete;

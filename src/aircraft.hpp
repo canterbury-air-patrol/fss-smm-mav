@@ -1,7 +1,7 @@
 #pragma once
 #include "fmu-types.hpp"
+#include "ilogger.hpp"
 #include <chrono>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -74,6 +74,7 @@ class known_aircraft
     std::mutex lock{};
     uint32_t lastAllocatedICAO{ first_icao_address_for_unknown_aircraft };
     std::map<std::string, std::shared_ptr<aircraft_details>> aircraft{};
+    ILogger &logger;
     auto
     findAircraft (const std::string &t_call_sign, uint32_t t_icao_address) -> std::shared_ptr<aircraft_details>
     {
@@ -87,8 +88,8 @@ class known_aircraft
             this->lastAllocatedICAO = next_synthetic_icao (this->lastAllocatedICAO);
             t_icao_address = this->lastAllocatedICAO;
         }
-        std::cout << "Aircraft: Creating new aircraft with callsign " << t_call_sign << " ICAO: " << t_icao_address
-                  << std::endl;
+        this->logger.log (LogLevel::info, "Aircraft: Creating new aircraft with callsign " + t_call_sign
+                                              + " ICAO: " + std::to_string (t_icao_address));
         auto ad = std::make_shared<aircraft_details> (t_icao_address);
         this->aircraft.insert (std::pair<std::string, std::shared_ptr<aircraft_details>> (t_call_sign, ad));
         return ad;
@@ -115,7 +116,7 @@ class known_aircraft
     }
 
   public:
-    known_aircraft () = default;
+    explicit known_aircraft (ILogger &t_logger) : logger (t_logger) {}
     auto
     newPositionReport (PositionData pd) -> bool
     {

@@ -34,6 +34,17 @@
 #include <unistd.h>
 #include <vector>
 
+/* Discards everything; used where a test needs an ILogger but is not
+ * itself testing logging output (todo/59). */
+class NullLogger : public ILogger
+{
+  public:
+    void
+    log (LogLevel, std::string_view) override
+    {
+    }
+};
+
 class MockMAV : public IMAV
 {
   public:
@@ -1656,7 +1667,8 @@ TEST_CASE ("mav_comms_is_up requires an open socket and a recent heartbeat", "[m
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")
 {
-    known_aircraft ka;
+    NullLogger null_logger;
+    known_aircraft ka (null_logger);
     std::string callsign = "TEST123";
 
     uint32_t icao1 = ka.getAircraftICAOAddress (callsign);
@@ -1675,7 +1687,8 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
 
 TEST_CASE ("known_aircraft evicts aircraft that go quiet past the eviction window", "[aircraft]")
 {
-    known_aircraft ka;
+    NullLogger null_logger;
+    known_aircraft ka (null_logger);
     const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
 
     /* Establish aircraft A at t=1000 and capture its synthetic ICAO. */
@@ -1695,7 +1708,8 @@ TEST_CASE ("known_aircraft evicts aircraft that go quiet past the eviction windo
 
 TEST_CASE ("known_aircraft keeps actively-reporting aircraft across the window", "[aircraft]")
 {
-    known_aircraft ka;
+    NullLogger null_logger;
+    known_aircraft ka (null_logger);
     const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
 
     ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "C", 0, 0, 1000, 0, 0, 0));
@@ -2029,6 +2043,24 @@ TEST_CASE ("Logger in-flight rotation keeps writing after rotating", "[logger]")
     std::ifstream check (dir.logFile ());
     std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
     REQUIRE (content.find ("still alive") != std::string::npos);
+}
+
+/* todo/59 acceptance: a subsystem's runtime diagnostic must reach the
+ * persistent log file, not only std::cout/std::cerr. known_aircraft is the
+ * easiest subsystem to prove this against directly (pure, no sockets); the
+ * same ILogger seam is now used by MAV/SMM (verified by compilation, since
+ * their diagnostics run on real I/O paths not exercised at unit level). */
+TEST_CASE ("known_aircraft diagnostics reach the persistent log file", "[aircraft][logger]")
+{
+    TempLogDir dir;
+    Logger logger (dir.str ());
+    known_aircraft ka (logger);
+
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "LOGTEST", 0, 0, 1000, 0, 0, 0));
+
+    std::ifstream check (dir.logFile ());
+    std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
+    REQUIRE (content.find ("Creating new aircraft with callsign LOGTEST") != std::string::npos);
 }
 
 /* EventDispatcher (todo/76) is App::run()'s std::visit dispatch policy,

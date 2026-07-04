@@ -1,5 +1,4 @@
 #include <cstring>
-#include <iostream>
 
 #include "internal.hpp"
 #include "mav.hpp"
@@ -48,7 +47,7 @@ MAV::terminate () -> bool
         case terminate_action::disarm:
             return this->connection->commandForceDisARM ();
         case terminate_action::none:
-            std::cerr << "WARN: terminate-action is none, falling through to RTL\n";
+            this->logger.log (LogLevel::error, "WARN: terminate-action is none, falling through to RTL");
             return this->connection->commandRTL ();
     }
     return false;
@@ -90,8 +89,9 @@ MAV::sendADSB (PositionData pd)
                                 0, pd.getFlags (), pd.getSquawk ());
 }
 
-MAV::MAV (std::string t_addr, uint16_t t_port, terminate_action ta, const MavParams &t_params)
-    : connection (std::make_shared<mav_connection> (std::move (t_addr), t_port, t_params)), action (ta)
+MAV::MAV (std::string t_addr, uint16_t t_port, terminate_action ta, const MavParams &t_params, ILogger &t_logger)
+    : connection (std::make_shared<mav_connection> (std::move (t_addr), t_port, t_params, t_logger)), action (ta),
+      logger (t_logger)
 {
 }
 
