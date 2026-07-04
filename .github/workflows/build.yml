@@ -86,6 +86,14 @@ jobs:
         test "$(jq -r '.ssl.client_private_key' "${CONFIG_FILE}")" = "/certs/${NAME}.private.pem"
         test "$(jq -r '.servers[0].port' "${CONFIG_FILE}")" = "20202"
         test "$(jq -r '.fmu.mav_port' "${CONFIG_FILE}")" = "5760"
+        # log_dir is omitted unless LOG_DIR is set, so the default in
+        # FmuConfig (and the image's own /var/log/cap-fmu) applies (todo/78).
+        test "$(jq -r '.fmu | has("log_dir")' "${CONFIG_FILE}")" = "false"
+
+        # LOG_DIR, when set, must appear in the generated config verbatim.
+        rm -f "${CONFIG_FILE}"
+        LOG_DIR=/mnt/logs/cap-fmu ./docker/generate-config.sh
+        test "$(jq -r '.fmu.log_dir' "${CONFIG_FILE}")" = "/mnt/logs/cap-fmu"
 
         # An invalid SERVER1_PORT (previously unvalidated) must fail early,
         # not write a config with a malformed or out-of-range port.

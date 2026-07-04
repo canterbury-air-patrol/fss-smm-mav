@@ -67,6 +67,14 @@ if [ "${SERVER1_PORT}" -lt 1 ] || [ "${SERVER1_PORT}" -gt 65535 ]; then
     exit 1
 fi
 
+# LOG_DIR is optional (todo/78): the image creates and owns the cap-fmu
+# default (/var/log/cap-fmu) so logging works out of the box, but a
+# deployment that wants logs to survive container recreation can set LOG_DIR
+# to a mounted volume instead. Omitted entirely when unset, so the default
+# in FmuConfig (and this image's directory) is what applies -- not a
+# duplicated literal here that could drift from it.
+LOG_DIR="${LOG_DIR:-}"
+
 # jq -n builds the document from typed arguments: --arg values are always
 # emitted as properly-escaped JSON strings (a NAME/SERVER1_ADDR/MAVPROXY_HOST
 # containing a quote, backslash, or newline cannot break the document or
@@ -78,6 +86,7 @@ jq -n \
     --argjson server_port "${SERVER1_PORT}" \
     --arg mav_host "${MAVPROXY_HOST}" \
     --argjson mav_port "${MAVPROXY_PORT}" \
+    --arg log_dir "${LOG_DIR}" \
     '{
         name: $name,
         ssl: {
@@ -88,10 +97,10 @@ jq -n \
         servers: [
             { address: $server_addr, port: $server_port }
         ],
-        fmu: {
+        fmu: ({
             mav_address: $mav_host,
             mav_port: $mav_port
-        }
+        } + (if $log_dir != "" then { log_dir: $log_dir } else {} end))
     }' > "${CONFIG_FILE}"
 
 # Belt-and-braces: confirm the file we just wrote actually parses, rather than
