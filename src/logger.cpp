@@ -75,12 +75,6 @@ Logger::timestamp ()
 }
 
 void
-Logger::log (std::string_view msg)
-{
-    log (LogLevel::info, msg);
-}
-
-void
 Logger::log (LogLevel msg_level, std::string_view msg)
 {
     /* Higher enum value == more verbose; drop anything above the configured

@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "../fmu-types.hpp"
+#include "../ilogger.hpp"
 #include "../smm/smm.hpp"
 #include "../util.hpp"
 #include "mav-params.hpp"
@@ -163,6 +164,7 @@ class mav_connection
      * the recv thread when requesting the streams, so they need no locking. */
     uint32_t position_stream_interval_us;
     uint32_t battery_stream_interval_us;
+    ILogger &logger;
     auto sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
     /* Returns whether the SET_MODE was actually transmitted to the autopilot
@@ -183,7 +185,7 @@ class mav_connection
     /* Log that `command` arrived before the autopilot type was known, so the
      * airframe-specific flight mode could not be resolved. Shared by every
      * command path so the wording stays identical. */
-    static void warnUnresolvedMode (MavModeCommand command);
+    void warnUnresolvedMode (MavModeCommand command);
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     void connect_to_mav ();
     void disconnect_from_mav ();
@@ -198,7 +200,7 @@ class mav_connection
     void heartbeat_loop ();
 
   public:
-    mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params);
+    mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger);
     ~mav_connection ();
     mav_connection (mav_connection &) = delete;
     mav_connection (mav_connection &&) = delete;

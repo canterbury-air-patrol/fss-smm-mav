@@ -5,6 +5,7 @@
 #include <secure-string.hpp>
 
 #include "../fmu-core-types.hpp"
+#include "../ilogger.hpp"
 #include "smm-command.hpp"
 
 extern "C"
@@ -55,7 +56,7 @@ class SMMSearch
     /* altitude_cap/altitude_floor: regulatory ceiling and minimum (m).
      * camera_fov_deg: camera total cross-track field of view (deg), used to
      * derive flight altitude from the search sweep width. */
-    SMMSearch (smm_search, uint16_t altitude_cap, uint16_t altitude_floor, double camera_fov_deg);
+    SMMSearch (smm_search, uint16_t altitude_cap, uint16_t altitude_floor, double camera_fov_deg, ILogger &logger);
     SMMSearch (SMMSearch &) = delete;
     SMMSearch (SMMSearch &&) = delete;
     auto operator= (SMMSearch &) -> SMMSearch & = delete;

@@ -12,6 +12,7 @@
 
 #include <secure-string.hpp>
 
+#include "../ilogger.hpp"
 #include "../mav/mav.hpp"
 #include "ismm.hpp"
 #include "smm-types.hpp"
@@ -39,6 +40,7 @@ class SMM : public ISMM
 
   private:
     MAV &mav;
+    ILogger &logger;
     smm_connection conn{ nullptr };
     std::string smm_host{};
     flight_safety_system::secure_string smm_user{};
@@ -146,7 +148,7 @@ class SMM : public ISMM
     /* The tuning parameters (report interval, connect/transfer timeouts) have no
      * defaults here: each value lives once in FmuConfig (its default) and every
      * caller passes it through, so there is no duplicated literal to drift. */
-    SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
+    SMM (MAV &t_mav, ILogger &t_logger, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
          uint64_t t_position_report_interval_ms, long t_connect_timeout_s, long t_transfer_timeout_s);
     SMM (SMM &) = delete;
     SMM (SMM &&) = delete;

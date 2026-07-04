@@ -11,7 +11,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -81,8 +80,9 @@ mav_connection::heartbeat_loop ()
             this->mav_comms_ok.store (up);
             if (!up)
             {
-                std::cerr << "WARN: Autopilot link down (" << (fd_open ? "no heartbeat" : "no link")
-                          << ") — MAV comms failure\n";
+                this->logger.log (LogLevel::error, std::string ("WARN: Autopilot link down (")
+                                                       + (fd_open ? "no heartbeat" : "no link")
+                                                       + ") — MAV comms failure");
             }
             if (this->mav_comms_cb)
             {
@@ -112,8 +112,9 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, double 
 void
 mav_connection::warnUnresolvedMode (MavModeCommand command)
 {
-    std::cerr << "WARN: " << mav_mode_command_name (command)
-              << " command received before the autopilot type is known (no heartbeat yet); deferring\n";
+    this->logger.log (LogLevel::error, std::string ("WARN: ") + mav_mode_command_name (command)
+                                           + " command received before the autopilot type is known (no heartbeat "
+                                             "yet); deferring");
 }
 
 auto
@@ -494,8 +495,9 @@ mav_connection::loadSearch () -> bool
          * silently uploading a truncated mission with no idea why. */
         if (count > UINT16_MAX)
         {
-            std::cerr << "WARN: search has " << this->search->getPoints ().size () << " waypoints; mission count "
-                      << count << " exceeds the 16-bit MAVLink field and will be truncated\n";
+            this->logger.log (LogLevel::error, "WARN: search has " + std::to_string (this->search->getPoints ().size ())
+                                                   + " waypoints; mission count " + std::to_string (count)
+                                                   + " exceeds the 16-bit MAVLink field and will be truncated");
         }
     }
     {
@@ -706,16 +708,18 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
              * directly would over-read past the copied bytes. */
             char text_buf[MAVLINK_MSG_STATUSTEXT_FIELD_TEXT_LEN + 1] = { 0 };
             mavlink_msg_statustext_get_text (msg, text_buf);
-            std::cout << "Status: " << text_buf << '\n';
+            this->logger.log (LogLevel::info, std::string ("Status: ") + text_buf);
         }
         break;
         default:
             /* A genuinely unrecognised message id (everything we expect is
-             * enumerated above). Keep it to a single concise stderr line — the
-             * old multi-field stdout dump fanned out across the operator console
-             * and, for any unexpected high-rate stream, behaved as a firehose. */
-            std::cerr << "WARN: unhandled MAVLink msg id " << msg->msgid << " from sys " << (short)msg->sysid
-                      << " comp " << (short)msg->compid << '\n';
+             * enumerated above). Keep it to a single concise debug-level line —
+             * the old multi-field stdout dump fanned out across the operator
+             * console and, for any unexpected high-rate stream, would behave as
+             * a firehose at the default log level too. */
+            this->logger.log (LogLevel::debug, "WARN: unhandled MAVLink msg id " + std::to_string (msg->msgid)
+                                                   + " from sys " + std::to_string (msg->sysid) + " comp "
+                                                   + std::to_string (msg->compid));
     }
 }
 
@@ -883,11 +887,11 @@ mav_connection::disconnect_from_mav ()
     }
 }
 
-mav_connection::mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params)
+mav_connection::mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger)
     : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_params.goto_altitude_m),
       altitude_floor_m (t_params.altitude_floor_m), altitude_cap_m (t_params.altitude_cap_m),
       position_stream_interval_us (t_params.position_stream_interval_us),
-      battery_stream_interval_us (t_params.battery_stream_interval_us)
+      battery_stream_interval_us (t_params.battery_stream_interval_us), logger (t_logger)
 {
 }
 
@@ -947,7 +951,7 @@ mav_connection::sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool
         if (transfered < 0)
         {
             /* Preserve the failure detail before tearing anything down. */
-            std::cerr << "WARN: MAV send() failed: " << std::strerror (errno) << "\n";
+            this->logger.log (LogLevel::error, std::string ("WARN: MAV send() failed: ") + std::strerror (errno));
             /* Only flag the connection broken and let the reconnector tear it
              * down. We must not call disconnect_from_mav() here: sendMavLinkMsg
              * can run on the recv thread (via processMessages), and that path

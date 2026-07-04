@@ -9,6 +9,7 @@
 #include "fmu-core-types.hpp"
 #include "fmu-state-types.hpp"
 #include "fss/fmu-fss-types.hpp"
+#include "ilogger.hpp"
 
 inline const char *
 fmu_state_name (FMUState s)
@@ -66,7 +67,7 @@ fss_cmd_name (FSSCommand cmd)
     return "unknown";
 }
 
-class Logger
+class Logger : public ILogger
 {
   public:
     /* Default size threshold (bytes) at which log() rotates the file
@@ -75,12 +76,13 @@ class Logger
 
     explicit Logger (std::string_view dir, LogLevel level = LogLevel::info,
                      std::size_t max_bytes = default_max_log_bytes);
+    ~Logger () override = default;
 
-    /* Log at info level. */
-    void log (std::string_view msg);
+    using ILogger::log;
+
     /* Log at an explicit level; emitted only if it passes the configured
      * verbosity. */
-    void log (LogLevel msg_level, std::string_view msg);
+    void log (LogLevel msg_level, std::string_view msg) override;
 
   private:
     static std::string timestamp ();

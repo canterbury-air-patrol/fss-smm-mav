@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <iostream>
 #include <strings.h>
 #include <utility>
 #include <vector>
@@ -22,11 +21,11 @@ template <class... Ts> struct overloaded : Ts...
 template <class... Ts> overloaded (Ts...) -> overloaded<Ts...>;
 } // namespace
 
-SMM::SMM (MAV &t_mav, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
+SMM::SMM (MAV &t_mav, ILogger &t_logger, uint16_t t_altitude_cap, uint16_t t_altitude_floor, double t_camera_fov_deg,
           uint64_t t_position_report_interval_ms, long t_connect_timeout_s, long t_transfer_timeout_s)
-    : mav (t_mav), altitude_cap (t_altitude_cap), altitude_floor (t_altitude_floor), camera_fov_deg (t_camera_fov_deg),
-      position_report_interval_ms (t_position_report_interval_ms), connect_timeout_s (t_connect_timeout_s),
-      transfer_timeout_s (t_transfer_timeout_s)
+    : mav (t_mav), logger (t_logger), altitude_cap (t_altitude_cap), altitude_floor (t_altitude_floor),
+      camera_fov_deg (t_camera_fov_deg), position_report_interval_ms (t_position_report_interval_ms),
+      connect_timeout_s (t_connect_timeout_s), transfer_timeout_s (t_transfer_timeout_s)
 {
     //    smm_asset_debugging_set (true);
     /* Start the worker now: no tasks are enqueued until the App wires up events,
@@ -176,7 +175,7 @@ SMM::connect ()
     explicit_bzero (pass_cstr.data (), pass_cstr.size ());
     if (this->conn == nullptr)
     {
-        std::cout << "SMM: Connection failed (no connection)" << '\n';
+        this->logger.log (LogLevel::error, "SMM: Connection failed (no connection)");
         return;
     }
 
@@ -197,7 +196,8 @@ SMM::connect ()
     if (!smm_connection_is_connected (this->conn))
     {
         /* Oh dear */
-        std::cout << "SMM: Connection failed (" << smm_asset_connection_get_state (this->conn) << ")" << '\n';
+        this->logger.log (LogLevel::error, "SMM: Connection failed ("
+                                               + std::to_string (smm_asset_connection_get_state (this->conn)) + ")");
         this->disconnect ();
         return;
     }
@@ -215,14 +215,14 @@ SMM::connect ()
         }
         if (this->asset == nullptr)
         {
-            std::cout << "SMM: Failed to find this asset" << '\n';
+            this->logger.log (LogLevel::error, "SMM: Failed to find this asset");
             this->disconnect ();
             return;
         }
     }
     else
     {
-        std::cout << "SMM: Failed to get assets" << '\n';
+        this->logger.log (LogLevel::error, "SMM: Failed to get assets");
         this->disconnect ();
     }
 }
@@ -246,7 +246,7 @@ SMM::doConnect (const ConnectTask &t)
             || this->asset_name != t.asset_name
             || smm_asset_connection_get_state (this->conn) != SMM_CONNECTION_CONNECTED)
         {
-            std::cout << "SMM: Details have changed" << '\n';
+            this->logger.log (LogLevel::info, "SMM: Details have changed");
             this->disconnect ();
         }
     }
@@ -258,7 +258,7 @@ SMM::doConnect (const ConnectTask &t)
         this->smm_pass = t.pass;
         this->asset_name = t.asset_name;
 
-        std::cout << "SMM: Connecting (" << this->smm_host << "," << this->asset_name << ")" << '\n';
+        this->logger.log (LogLevel::info, "SMM: Connecting (" + this->smm_host + "," + this->asset_name + ")");
         this->connect ();
     }
 }
@@ -402,8 +402,8 @@ SMM::tryAcquireSearch (Point current_pos)
         }
         /* Fetch the waypoints (and validate them) before accepting, so an
          * un-loadable search is never committed to on the server. */
-        auto candidate
-            = std::make_shared<SMMSearch> (new_search, this->altitude_cap, this->altitude_floor, this->camera_fov_deg);
+        auto candidate = std::make_shared<SMMSearch> (new_search, this->altitude_cap, this->altitude_floor,
+                                                      this->camera_fov_deg, this->logger);
         /* Re-check search_active immediately before accept: this is the
          * load-bearing guard — accept() commits on the SMM server and the
          * event-loop guard cannot undo it. */
@@ -515,7 +515,8 @@ SMM::currentSearchPoints () -> int
     return this->current_search_points.load ();
 }
 
-SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altitude_floor, double camera_fov_deg)
+SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altitude_floor, double camera_fov_deg,
+                      ILogger &logger)
 {
     this->search = t_search;
     smm_waypoints wps = nullptr;
@@ -535,19 +536,21 @@ SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altit
     /* Derive the flight altitude from the search's sweep (lane) width and the
      * camera geometry, then clamp into [floor, cap]. The pure helpers live in
      * search-altitude.hpp so the formula and clamp are unit tested directly;
-     * here we keep the warning logging (stderr, to leave stdout clean). */
+     * here we keep the warning logging. */
     double sweep_width = static_cast<double> (smm_search_sweep_width (search));
     double raw_altitude = raw_search_altitude (sweep_width, camera_fov_deg);
     this->altitude = clamp_search_altitude (raw_altitude, altitude_floor, altitude_cap);
     if (raw_altitude > altitude_cap)
     {
-        std::cerr << "SMM: Derived altitude (" << raw_altitude << "m) for sweep width " << sweep_width
-                  << "m exceeds altitude cap (" << altitude_cap << "m), clamping altitude\n";
+        logger.log (LogLevel::error, "SMM: Derived altitude (" + std::to_string (raw_altitude) + "m) for sweep width "
+                                         + std::to_string (sweep_width) + "m exceeds altitude cap ("
+                                         + std::to_string (altitude_cap) + "m), clamping altitude");
     }
     else if (raw_altitude < altitude_floor)
     {
-        std::cerr << "SMM: Derived altitude (" << raw_altitude << "m) for sweep width " << sweep_width
-                  << "m below altitude floor (" << altitude_floor << "m), clamping altitude\n";
+        logger.log (LogLevel::error, "SMM: Derived altitude (" + std::to_string (raw_altitude) + "m) for sweep width "
+                                         + std::to_string (sweep_width) + "m below altitude floor ("
+                                         + std::to_string (altitude_floor) + "m), clamping altitude");
     }
 }
 
