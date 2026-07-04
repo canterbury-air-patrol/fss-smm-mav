@@ -42,7 +42,8 @@ jobs:
           catch2 \
           libfss-client-ssl \
           libsmm-asset-dev \
-          libjsoncpp-dev
+          libjsoncpp-dev \
+          jq
 
     - name: Build and test
       run: |
@@ -60,9 +61,40 @@ jobs:
         if ./src/cap-fmu; then echo "expected failure without --terminate-action" >&2; exit 1; fi
         # The deployment scripts must at least parse.
         bash -n docker/cap-fmu.sh
+        bash -n docker/generate-config.sh
         bash -n docker/setup.sh
         bash -n docker/build.sh
         bash -n docker/install.sh
+
+    - name: Smoke test (docker config generation, todo/56)
+      run: |
+        export CONFIG_FILE=/tmp/fmu-client-smoke-test.json
+        export TERMINATE_ACTION=none
+        export MAVPROXY_HOST=127.0.0.1
+        export MAVPROXY_PORT=5760
+        export SERVER1_ADDR=smm.example.org
+        export SERVER1_PORT=20202
+        # A name containing JSON-significant characters (quote, backslash) must
+        # not break the generated document or inject a field.
+        export NAME='weird"name\with/slash'
+
+        ./docker/generate-config.sh
+        jq empty "${CONFIG_FILE}"
+        # The escaped name must round-trip exactly, and be reused verbatim (not
+        # re-interpreted) in the derived cert paths.
+        test "$(jq -r '.name' "${CONFIG_FILE}")" = "${NAME}"
+        test "$(jq -r '.ssl.client_private_key' "${CONFIG_FILE}")" = "/certs/${NAME}.private.pem"
+        test "$(jq -r '.servers[0].port' "${CONFIG_FILE}")" = "20202"
+        test "$(jq -r '.fmu.mav_port' "${CONFIG_FILE}")" = "5760"
+
+        # An invalid SERVER1_PORT (previously unvalidated) must fail early,
+        # not write a config with a malformed or out-of-range port.
+        rm -f "${CONFIG_FILE}"
+        if SERVER1_PORT=not-a-port ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric SERVER1_PORT" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
 
   distcheck:
     runs-on: ubuntu-latest
