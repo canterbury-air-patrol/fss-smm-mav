@@ -75,8 +75,9 @@ FSS::reportPosition (PositionData t_pd)
      * and the worker only does the blocking send. */
     const double alt_ft_d = metres_to_feet (t_pd.getAltitudeMetres ());
     auto alt_ft = std::isfinite (alt_ft_d) ? static_cast<int16_t> (std::lround (alt_ft_d)) : static_cast<int16_t> (0);
+    bool fix_valid = (t_pd.getFlags () & POSITION_FLAG_VALID_COORDS) != 0;
     this->enqueue (FssPositionTask{ p.getLatitude (), p.getLongitude (), alt_ft, t_pd.getHeading (),
-                                    t_pd.getVelocityHorizontal (), t_pd.getVelocityVertical () });
+                                    t_pd.getVelocityHorizontal (), t_pd.getVelocityVertical (), fix_valid });
 }
 
 void
@@ -142,7 +143,7 @@ FSS::workerLoop ()
         std::visit (
             overloaded{
                 [this] (const FssPositionTask &t)
-                { this->ssl_client->sendPosition (t.lat, t.lng, t.alt, t.heading, t.hor_vel, t.ver_vel); },
+                { this->ssl_client->sendPosition (t.lat, t.lng, t.alt, t.heading, t.hor_vel, t.ver_vel, t.fix_valid); },
                 [this] (const FssReachedTask &t) { this->ssl_client->reachedPoint (t.point, t.total_points); },
                 [this] (const FssBatteryTask &t)
                 { this->ssl_client->sendBatteryStatus (t.remaining, t.consumed, t.voltage); },

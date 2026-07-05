@@ -246,11 +246,16 @@ fss_client_ssl::handleSMMSettings (
 }
 
 void
-fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel)
+fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel,
+                              bool fix_valid)
 {
     static constexpr std::chrono::milliseconds ts_1sec_interval{ 1000 };
     static constexpr uint16_t squawk_vfr = 1200;
-    static constexpr uint32_t valid_fields = 1 | 2 | 4 | 8 | 16 | 32;
+    static constexpr uint32_t valid_fields_all = 1 | 2 | 4 | 8 | 16 | 32;
+    /* Coordinates are not backed by a real GPS fix (todo/79): drop just the
+     * coords-valid bit (bit 1) so FSS-Web can render "no fix" instead of
+     * showing a stale/lost position as a fresh, current one. */
+    static constexpr uint32_t valid_fields_no_fix = valid_fields_all & ~static_cast<uint32_t> (1);
     static constexpr uint8_t aircraft_type = 14;
 
     /* steady_clock is used only for local rate limiting (it is monotonic and
@@ -271,8 +276,8 @@ fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t head
             squawk_vfr,
             /* Time since last contact (0), we are annoncing now */
             0,
-            /* Report valid for: coords, altitude, heading, velocity, callsign, squawk */
-            valid_fields,
+            /* Report valid for: coords (unless no fix), altitude, heading, velocity, callsign, squawk */
+            fix_valid ? valid_fields_all : valid_fields_no_fix,
             /* Using GPS for altitude */
             1,
             /* Type is UAV */

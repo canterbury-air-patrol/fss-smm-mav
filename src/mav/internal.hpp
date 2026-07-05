@@ -159,6 +159,13 @@ class mav_connection
      * todo/46). This flag lets a link drop mid-upload be reported instead of
      * silently treated as a successful goto. */
     bool goto_ack_pending{ false };
+    /* The autopilot's own GPS health indicator (GPS_RAW_INT.fix_type), tracked
+     * so a position report can carry whether its coordinates are backed by a
+     * real fix (todo/79). Defaults to NO_GPS — invalid — so a position sent
+     * before the first GPS_RAW_INT arrives is not mistaken for a good fix.
+     * Written and read only on the recv thread (processMavLinkMsg), so it
+     * needs no lock, same as goto_altitude_m above. */
+    uint8_t gps_fix_type{ GPS_FIX_TYPE_NO_GPS };
     std::optional<MavModeCommand> pending_mode_command{};
     /* Altitude (metres AGL, relative to home) a goto waypoint is flown at;
      * supplied from config, already clamped to [floor, cap]. Set once at
@@ -200,8 +207,8 @@ class mav_connection
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     void connect_to_mav ();
     void disconnect_from_mav ();
-    void report_position (double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor,
-                          int16_t t_vel_ver);
+    void report_position (double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
+                          bool fix_valid);
     void report_battery_status (int8_t, int32_t, double);
     void report_reached (int);
     void send_waypoint (uint16_t, uint8_t);

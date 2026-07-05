@@ -604,6 +604,9 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
                                  this->position_stream_interval_us);
             this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_BATTERY_STATUS,
                                  this->battery_stream_interval_us);
+            /* GPS fix health (todo/79) does not need to be faster than the
+             * battery cadence, so reuse it rather than adding a new config key. */
+            this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_GPS_RAW_INT, this->battery_stream_interval_us);
         }
         sys->setupComplete ();
     }
@@ -642,8 +645,12 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
                 std::lock_guard<std::mutex> lk (this->state_lock);
                 this->last_position = Point (latd, lngd);
             }
+            /* GLOBAL_POSITION_INT itself has no fix-validity field (it is just the
+             * EKF's estimate); GPS_RAW_INT.fix_type is the autopilot's own signal
+             * for whether that estimate is backed by a real GPS fix (todo/79). */
+            bool fix_valid = this->gps_fix_type >= GPS_FIX_TYPE_2D_FIX;
             /* GLOBAL_POSITION_INT.alt is millimetres; PositionData carries metres. */
-            this->report_position (latd, lngd, mav_mm_to_metres (alt), heading, vh, vz);
+            this->report_position (latd, lngd, mav_mm_to_metres (alt), heading, vh, vz, fix_valid);
         }
         break;
         case MAVLINK_MSG_ID_BATTERY_STATUS:
@@ -697,10 +704,16 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             }
         }
         break;
+        case MAVLINK_MSG_ID_GPS_RAW_INT:
+        {
+            /* The autopilot's own no-fix/2D/3D health indicator, tracked for
+             * the next GLOBAL_POSITION_INT's fix-validity flag (todo/79). */
+            this->gps_fix_type = mavlink_msg_gps_raw_int_get_fix_type (msg);
+        }
+        break;
         case MAVLINK_MSG_ID_ADSB_VEHICLE:
         case MAVLINK_MSG_ID_COLLISION:
         case MAVLINK_MSG_ID_COMMAND_ACK:
-        case MAVLINK_MSG_ID_GPS_RAW_INT:
         case MAVLINK_MSG_ID_GPS_GLOBAL_ORIGIN:
         case MAVLINK_MSG_ID_SYS_STATUS:
         case MAVLINK_MSG_ID_PARAM_VALUE:
@@ -1074,11 +1087,13 @@ mav_connection::report_battery_status (int8_t remaining, int32_t consumed, doubl
 }
 
 void
-mav_connection::report_position (double lat, double lng, double alt, uint16_t hdg, uint16_t vh, int16_t vv)
+mav_connection::report_position (double lat, double lng, double alt, uint16_t hdg, uint16_t vh, int16_t vv,
+                                 bool fix_valid)
 {
     if (this->position_cb)
     {
-        this->position_cb (PositionData (lat, lng, alt, hdg, vh, vv));
+        uint16_t flags = fix_valid ? POSITION_FLAG_VALID_COORDS : 0;
+        this->position_cb (PositionData (lat, lng, alt, hdg, vh, vv, flags));
     }
 }
 
