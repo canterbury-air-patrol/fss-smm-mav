@@ -12,7 +12,9 @@ master-plan audit can merge evidence from both without a translation step.
 Usage: tools/traceability.py [--out PATH] [BINARY ...]
 Defaults to tests/fmu_test and tests/mav_io_test relative to the repo root
 if no binaries are given. Exits non-zero if a binary fails to run at all,
-or if any test case tagged with a TC ID failed.
+exits with a failure its report does not explain, or if any test case
+tagged with a TC ID did not pass (failed or skipped: a skipped tagged
+test is missing evidence, not passing evidence).
 """
 import argparse
 import datetime
@@ -27,6 +29,9 @@ TC_TAG_RE = re.compile(r"^TC-[A-Z]+-[0-9]+$")
 
 def run_binary(binary):
     """Run one Catch2 binary with the JSON reporter and return its parsed report."""
+    # Argv-list exec of the caller's own arguments, no shell involved: whoever
+    # controls argv is the invoker, who can already run the binary directly.
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
     result = subprocess.run(
         [str(binary), "--reporter", "JSON"],
         capture_output=True,
@@ -34,25 +39,43 @@ def run_binary(binary):
         check=False,
     )
     try:
-        return json.loads(result.stdout), result.returncode
+        report = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"{binary}: did not produce valid JSON output (exit code {result.returncode}); "
             f"stderr:\n{result.stderr}"
         ) from exc
+    # Catch2 exits non-zero for failed test cases, which the report already
+    # explains (and outcome_for reports).  Any other non-zero exit (config
+    # error, aborted run) means the report cannot be trusted as evidence.
+    case_totals = report.get("test-run", {}).get("totals", {}).get("test-cases", {})
+    if result.returncode != 0 and case_totals.get("failed", 0) == 0:
+        raise RuntimeError(
+            f"{binary}: exited {result.returncode} but its report contains no failed "
+            f"test cases; stderr:\n{result.stderr}"
+        )
+    return report
 
 
 def outcome_for(test_case):
-    """Derive passed/failed from a Catch2 JSON test-case's assertion totals."""
+    """
+    Derive the outcome from a Catch2 JSON test-case's assertion totals:
+    any failed assertion means failed; no passing assertions at all means
+    the case was skipped (SKIP() or an empty section path) and must not
+    count as passing evidence.  fail-but-ok assertions are allowed
+    failures, so they land in neither bucket.
+    """
     totals = test_case.get("totals", {}).get("assertions", {})
     if totals.get("failed", 0) > 0:
         return "failed"
+    if totals.get("passed", 0) == 0:
+        return "skipped"
     return "passed"
 
 
 def collect_from_binary(binary):
     """Return {test_id: [{"nodeid": ..., "outcome": ...}]} for one binary."""
-    report, _ = run_binary(binary)
+    report = run_binary(binary)
     test_ids = {}
     for test_case in report.get("test-run", {}).get("test-cases", []):
         info = test_case["test-info"]
@@ -81,15 +104,15 @@ def main():
     binaries = args.binaries or [repo_root / "tests" / "fmu_test", repo_root / "tests" / "mav_io_test"]
 
     test_ids = {}
-    any_failed = False
+    any_not_passed = False
     for binary in binaries:
         if not binary.exists():
             print(f"error: {binary} does not exist (build it with `make check` first)", file=sys.stderr)
             return 1
         collected = collect_from_binary(binary)
         merge(test_ids, collected)
-        if any(entry["outcome"] == "failed" for entries in collected.values() for entry in entries):
-            any_failed = True
+        if any(entry["outcome"] != "passed" for entries in collected.values() for entry in entries):
+            any_not_passed = True
 
     test_ids = {test_id: entries for test_id, entries in sorted(test_ids.items())}
     payload = {
@@ -99,7 +122,7 @@ def main():
     args.out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     print(f"traceability: {len(test_ids)} TC IDs covered, report written to {args.out}")
-    return 1 if any_failed else 0
+    return 1 if any_not_passed else 0
 
 
 if __name__ == "__main__":
