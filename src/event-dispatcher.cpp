@@ -28,6 +28,12 @@ EventDispatcher::EventDispatcher (FMUStateMachine &t_state_machine, IMAV &t_mav,
 }
 
 void
+EventDispatcher::setNowMsFn (std::function<uint64_t ()> fn)
+{
+    this->now_ms_fn = std::move (fn);
+}
+
+void
 EventDispatcher::dispatch (const event &e)
 {
     std::visit (
@@ -143,7 +149,19 @@ EventDispatcher::dispatch (const event &e)
             {
                 if (oar.pd.getCallSign () != asset_name)
                 {
-                    mav.sendADSB (oar.pd);
+                    /* Rate-limit ADS-B rebroadcast to one per ICAO address per
+                     * second (todo/81): forward if this is the first sighting
+                     * of this ICAO, or at least 1000ms has passed since the
+                     * last forward. */
+                    static constexpr uint64_t adsb_forward_interval_ms = 1000;
+                    uint32_t icao = oar.pd.getICAOAddress ();
+                    uint64_t now = now_ms_fn ();
+                    auto it = adsb_last_forwarded_ms.find (icao);
+                    if (it == adsb_last_forwarded_ms.end () || now - it->second >= adsb_forward_interval_ms)
+                    {
+                        mav.sendADSB (oar.pd);
+                        adsb_last_forwarded_ms[icao] = now;
+                    }
                 }
             },
             [] (const Nudge &) {},
