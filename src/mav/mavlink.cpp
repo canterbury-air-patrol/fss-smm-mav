@@ -1,6 +1,7 @@
 #include "altitude-units.hpp"
 #include "battery-voltage.hpp"
 #include "internal.hpp"
+#include "latlon-encoding.hpp"
 #include "mav-comms.hpp"
 #include "mav.hpp"
 #include "mission-plan.hpp"
@@ -41,9 +42,6 @@ constexpr uint8_t TARGET_COMP_ID = 1;
 constexpr uint8_t MISSION_TARGET_SYS_ID = 0;
 constexpr mavlink_channel_t MAV_RECV_CHANNEL = MAVLINK_COMM_0;
 constexpr mavlink_channel_t MAV_SEND_CHANNEL = MAVLINK_COMM_1;
-
-/* Convert double/float into int32_t */
-constexpr double LAT_LNG_COV = 0.0000001;
 
 void
 mav_connection::sendHeartBeat ()
@@ -119,10 +117,10 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, double 
     mavlink_message_t msg;
     /* ADSB_VEHICLE.altitude is millimetres; PositionData carries metres. */
     std::lock_guard<std::mutex> lk (this->send_lock);
-    mavlink_msg_adsb_vehicle_pack_chan (
-        SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, icao_address, static_cast<int32_t> (lat / LAT_LNG_COV),
-        static_cast<int32_t> (lng / LAT_LNG_COV), altitude_type, metres_to_mav_mm (altitude_m), heading, hor_vel,
-        static_cast<int16_t> (ver_vel), callsign, emitter_type, tslc, flags, squawk);
+    mavlink_msg_adsb_vehicle_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, icao_address, degrees_to_degE7 (lat),
+                                        degrees_to_degE7 (lng), altitude_type, metres_to_mav_mm (altitude_m), heading,
+                                        hor_vel, static_cast<int16_t> (ver_vel), callsign, emitter_type, tslc, flags,
+                                        squawk);
     this->sendMavLinkMsgLocked (&msg);
 }
 
@@ -390,18 +388,18 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
             // NOLINTNEXTLINE(bugprone-swapped-arguments)
             mavlink_msg_mission_item_int_pack_chan (
                 SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, MISSION_TARGET_SYS_ID, TARGET_COMP_ID,
-                seq,                           /* Which waypoint is this */
-                MAV_FRAME_GLOBAL_RELATIVE_ALT, /* Use altitude relative to the home point */
-                MAV_CMD_NAV_WAYPOINT,          /* Navigate to a point */
-                0,                             /* This waypoint is the current target */
-                1,                             /* Auto continue */
-                0,                             /* Hold time: 0s */
-                acceptable_radius,             /* Accept radius: m */
-                0,                             /* Pass radius: 0m */
-                NAN,                           /* Yaw: NaN for dont care */
-                static_cast<int32_t> (local_goto_position.getLatitude () / LAT_LNG_COV),  /* Latitude */
-                static_cast<int32_t> (local_goto_position.getLongitude () / LAT_LNG_COV), /* Longitude */
-                static_cast<float> (this->goto_altitude_m),                               /* Altitude (m AGL) */
+                seq,                                                    /* Which waypoint is this */
+                MAV_FRAME_GLOBAL_RELATIVE_ALT,                          /* Use altitude relative to the home point */
+                MAV_CMD_NAV_WAYPOINT,                                   /* Navigate to a point */
+                0,                                                      /* This waypoint is the current target */
+                1,                                                      /* Auto continue */
+                0,                                                      /* Hold time: 0s */
+                acceptable_radius,                                      /* Accept radius: m */
+                0,                                                      /* Pass radius: 0m */
+                NAN,                                                    /* Yaw: NaN for dont care */
+                degrees_to_degE7 (local_goto_position.getLatitude ()),  /* Latitude */
+                degrees_to_degE7 (local_goto_position.getLongitude ()), /* Longitude */
+                static_cast<float> (this->goto_altitude_m),             /* Altitude (m AGL) */
                 mission_type);
             break;
         case MissionItemKind::takeoff:
@@ -439,10 +437,10 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
                 0,                                                                            /* Hold time: 0s */
                 acceptable_radius,                                                            /* Accept radius: m */
                 0,                                                                            /* Pass radius: 0m */
-                NAN,                                                    /* Yaw: NaN for dont care */
-                static_cast<int32_t> (p.getLatitude () / LAT_LNG_COV),  /* Latitude */
-                static_cast<int32_t> (p.getLongitude () / LAT_LNG_COV), /* Longitude */
-                static_cast<float> (local_search->getAltitude ()),      /* Altitude (m) */
+                NAN,                                               /* Yaw: NaN for dont care */
+                degrees_to_degE7 (p.getLatitude ()),               /* Latitude */
+                degrees_to_degE7 (p.getLongitude ()),              /* Longitude */
+                static_cast<float> (local_search->getAltitude ()), /* Altitude (m) */
                 mission_type);
             break;
         }
@@ -634,8 +632,8 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             int32_t lat = mavlink_msg_global_position_int_get_lat (msg);
             int32_t lng = mavlink_msg_global_position_int_get_lon (msg);
             int32_t alt = mavlink_msg_global_position_int_get_alt (msg);
-            double latd = (static_cast<double> (lat) * LAT_LNG_COV);
-            double lngd = (static_cast<double> (lng) * LAT_LNG_COV);
+            double latd = degE7_to_degrees (lat);
+            double lngd = degE7_to_degrees (lng);
             uint16_t heading = mavlink_msg_global_position_int_get_hdg (msg);
             int16_t vx = mavlink_msg_global_position_int_get_vx (msg);
             int16_t vy = mavlink_msg_global_position_int_get_vy (msg);
