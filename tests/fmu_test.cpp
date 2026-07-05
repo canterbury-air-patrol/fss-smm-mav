@@ -12,6 +12,7 @@
 #include "logger.hpp"
 #include "mav/battery-voltage.hpp"
 #include "mav/internal.hpp"
+#include "mav/latlon-encoding.hpp"
 #include "mav/mav-comms.hpp"
 #include "mav/mission-plan.hpp"
 #include "mav/mode-resolve.hpp"
@@ -1414,6 +1415,37 @@ TEST_CASE ("horizontal_velocity is a Pythagorean magnitude with no int overflow"
     REQUIRE (horizontal_velocity (INT16_MIN, INT16_MIN) == 46340);
     REQUIRE (horizontal_velocity (INT16_MAX, INT16_MAX) == 46339);
     REQUIRE (horizontal_velocity (INT16_MIN, 0) == 32768);
+}
+
+/* todo/80: lat/lon degrees<->degE7 encoding at the numeric extremes (TC-MAV-018
+ * boundary share). The geofence *policy* half of TC-MAV-018 (southern/western
+ * coordinates, longitude wrap, coordinate-system confusion) is out of scope for
+ * cap-fmu -- no fence logic exists here at all (todo/17, deferred). This is only
+ * the numeric encoding used by commandGoto/send_waypoint/sendADSB and decoded
+ * from GLOBAL_POSITION_INT: confirms the round-trip is exact and does not
+ * silently wrap or overflow at the latitude/longitude/antimeridian extremes. */
+TEST_CASE ("degrees_to_degE7 round-trips exactly at the latitude/longitude extremes", "[mav][latlon]")
+{
+    /* Latitude extremes. */
+    REQUIRE (degrees_to_degE7 (-90.0) == -900000000);
+    REQUIRE (degrees_to_degE7 (90.0) == 900000000);
+    REQUIRE (degrees_to_degE7 (-90.0000001) == -900000001);
+    REQUIRE (degrees_to_degE7 (90.0000001) == 900000001);
+
+    /* Longitude extremes, including just past the antimeridian: no wrap, the
+     * commanded position is not silently corrupted to a wildly different one. */
+    REQUIRE (degrees_to_degE7 (-180.0) == -1800000000);
+    REQUIRE (degrees_to_degE7 (180.0) == 1800000000);
+    REQUIRE (degrees_to_degE7 (-180.0000001) == -1800000001);
+    REQUIRE (degrees_to_degE7 (180.0000001) == 1800000001);
+
+    /* Round-trip (degrees -> degE7 -> degrees) is exact at every extreme above,
+     * plus a couple of ordinary values for good measure. */
+    for (double degrees :
+         { -90.0, 90.0, -90.0000001, 90.0000001, -180.0, 180.0, -180.0000001, 180.0000001, 0.0, -43.5, 172.6 })
+    {
+        REQUIRE (degE7_to_degrees (degrees_to_degE7 (degrees)) == Catch::Approx (degrees));
+    }
 }
 
 TEST_CASE ("resolve_mav_mode returns no mode until the autopilot type is known", "[mav]")
