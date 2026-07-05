@@ -1,3 +1,39 @@
+cap-fmu (1.1.0) unstable; urgency=medium
+
+  * Fix intermittent failure to re-engage AUTO after a fresh mission upload
+    (goto or search): the aircraft could remain in RTL indefinitely due to a
+    race between the mode change and ArduPilot's post-upload mission reset.
+  * Track GPS fix validity (GPS_RAW_INT.fix_type) and report it to FSS, so a
+    degraded or lost GPS fix is no longer indistinguishable from a fresh,
+    current position.
+  * Latch flight termination: once triggered, no later command can silently
+    move the FMU back out of the terminated state.
+  * Fix a paused search's progress being corrupted by a goto mission's own
+    MISSION_ITEM_REACHED (including its RTL terminator).
+  * Rate-limit ADS-B rebroadcast to one update per ICAO address per second,
+    so a busy receiver near a real airport cannot flood the autopilot.
+  * Make the low-battery latch's debounce count configurable (previously a
+    hardcoded constant), alongside the existing lowbat_threshold.
+  * Warn instead of silently losing a goto mission upload interrupted by a
+    MAV link drop; log and replay a failed SMM-triggered RTL on link
+    recovery.
+  * Fail hard on an unopenable or unparsable client.json instead of a
+    reassuring "using defaults" warning immediately followed by a fatal
+    error.
+  * Scrub SMM credential buffers after use instead of leaving them in
+    non-zeroed heap memory.
+  * Rotate fmu.log once a size threshold is crossed, not only at process
+    start, so a long-running or chatty deployment can't grow one log file
+    without bound.
+  * Route MAV/SMM/aircraft-tracking diagnostics through the persistent,
+    rotating logger instead of stdout/stderr, which a daemon typically
+    discards.
+  * Docker: generate the FSS client config safely via jq instead of shell
+    string interpolation, create/chown the log directory so logging works
+    for the non-root container user, and support a LOG_DIR override.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sun, 05 Jul 2026 19:52:32 +1200
+
 cap-fmu (1.0.0) unstable; urgency=medium
 
   * First stable release.
