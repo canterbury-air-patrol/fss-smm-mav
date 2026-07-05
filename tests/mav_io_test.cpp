@@ -1228,24 +1228,18 @@ TEST_CASE ("mav_connection keeps routing valid messages between garbage bursts (
     }
 }
 
-/* todo/68: cap-fmu's GPS-denial/no-fix handling, the single-repo share of
- * Tier-3 Path M m03. Investigation (not just missing tests) found that
- * mav_connection's MAVLINK_MSG_ID_GPS_RAW_INT case (fix_type — the
- * autopilot's own no-fix/2D/3D indicator) is a recognised no-op: the message
- * is received and silently dropped. GLOBAL_POSITION_INT (the EKF's position
- * estimate; it has no fix-validity field of its own) is always forwarded to
- * FSS with a fresh wall-clock timestamp at send time
- * (fss_client_ssl::sendPosition's fss_current_timestamp()), never anything
- * derived from the MAV message. So today there is no signal anywhere in
- * cap-fmu distinguishing a genuine fresh fix from a degraded/lost one — the
- * HZ-03 "stale position mistaken for current" risk the todo names is real,
- * and the data needed to detect it (fix_type) is already being received and
- * discarded. Closing that gap (parsing fix_type, gating the position report
- * or attaching a validity flag) is a production-behaviour decision of its
- * own and is tracked separately; these tests pin the *current* behaviour so
- * a future change here is a deliberate, reviewed one. */
+/* todo/68/79: cap-fmu's GPS-denial/no-fix handling, the single-repo share of
+ * Tier-3 Path M m03. Investigation found that mav_connection's
+ * MAVLINK_MSG_ID_GPS_RAW_INT case (fix_type — the autopilot's own no-fix/2D/
+ * 3D indicator) was a recognised no-op: received and silently dropped, while
+ * GLOBAL_POSITION_INT (the EKF's position estimate, which has no fix-validity
+ * field of its own) was always forwarded as if fresh. todo/79 closed that gap:
+ * fix_type is now tracked and the next GLOBAL_POSITION_INT's report carries a
+ * POSITION_FLAG_VALID_COORDS bit reflecting it — the position is still
+ * delivered (not suppressed), but downstream (FSS-Web) can now tell a fix-
+ * backed report from a degraded/lost one instead of treating both as current. */
 
-TEST_CASE ("GPS_RAW_INT fix_type is received but does not affect position reporting today (todo/68)", "[mav_io]")
+TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag (todo/79)", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1259,9 +1253,9 @@ TEST_CASE ("GPS_RAW_INT fix_type is received but does not affect position report
     REQUIRE (server.waitForClient (io_timeout));
     REQUIRE (waitForColdStartThenUp (server, recorder));
 
-    /* Report no fix at all, then a position — the position must still be
-     * delivered unchanged: fix_type is not consulted anywhere on this path. */
-    server.sendGpsRawInt (GPS_FIX_TYPE_NO_FIX);
+    /* No GPS_RAW_INT has arrived yet: the default (GPS_FIX_TYPE_NO_GPS) must
+     * not be mistaken for a good fix, so a position reported before the first
+     * fix_type is flagged invalid too. */
     int before = positions.count_now ();
     REQUIRE (MavLoopbackServer::waitFor (
         [&] ()
@@ -1270,10 +1264,39 @@ TEST_CASE ("GPS_RAW_INT fix_type is received but does not affect position report
             return positions.count_now () > before;
         },
         io_timeout));
+    PositionData pd_before_fix = positions.lastPosition ();
+    REQUIRE (pd_before_fix.getP ().getLatitude () == Catch::Approx (-43.5));
+    REQUIRE (pd_before_fix.getP ().getLongitude () == Catch::Approx (172.6));
+    REQUIRE ((pd_before_fix.getFlags () & POSITION_FLAG_VALID_COORDS) == 0);
 
-    PositionData pd = positions.lastPosition ();
-    REQUIRE (pd.getP ().getLatitude () == Catch::Approx (-43.5));
-    REQUIRE (pd.getP ().getLongitude () == Catch::Approx (172.6));
+    /* An explicit no-fix report: the position is still delivered unchanged,
+     * just flagged. */
+    server.sendGpsRawInt (GPS_FIX_TYPE_NO_FIX);
+    before = positions.count_now ();
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition (-435000000, 1726000000);
+            return positions.count_now () > before;
+        },
+        io_timeout));
+    PositionData pd_no_fix = positions.lastPosition ();
+    REQUIRE (pd_no_fix.getP ().getLatitude () == Catch::Approx (-43.5));
+    REQUIRE (pd_no_fix.getP ().getLongitude () == Catch::Approx (172.6));
+    REQUIRE ((pd_no_fix.getFlags () & POSITION_FLAG_VALID_COORDS) == 0);
+
+    /* Once a real fix comes in, the next position report is flagged valid. */
+    server.sendGpsRawInt (GPS_FIX_TYPE_3D_FIX);
+    before = positions.count_now ();
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition (-435000000, 1726000000);
+            return positions.count_now () > before;
+        },
+        io_timeout));
+    PositionData pd_good_fix = positions.lastPosition ();
+    REQUIRE ((pd_good_fix.getFlags () & POSITION_FLAG_VALID_COORDS) != 0);
 }
 
 TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged each time (todo/68)", "[mav_io]")

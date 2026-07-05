@@ -29,6 +29,12 @@ class Point
     };
 };
 
+/* Bit in PositionData's/the FSS wire message's flags word marking the lat/lon
+ * as backed by a valid GPS fix (GPS_FIX_TYPE_2D_FIX or better), not a lost/
+ * no-fix estimate. Same numbering as MAVLink's ADSB_FLAGS_VALID_COORDS and
+ * fss_client_ssl::sendPosition's hardcoded valid_fields bit 1 (todo/79). */
+constexpr uint16_t POSITION_FLAG_VALID_COORDS = 1;
+
 class PositionData
 {
   private:
@@ -52,6 +58,12 @@ class PositionData
     /* t_alt_m is altitude in metres (see alt_m above). */
     PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver)
         : p (Point (t_lat, t_lng)), alt_m (t_alt_m), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver) {};
+    /* Own-aircraft report with an explicit validity flags word (todo/79); ADSB
+     * peers carry callsign/squawk/etc too and use the constructor below instead. */
+    PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
+                  uint16_t t_flags)
+        : p (Point (t_lat, t_lng)), alt_m (t_alt_m), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver),
+          flags (t_flags) {};
     PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
                   std::string t_callsign, uint16_t t_squawk, uint32_t t_icaoaddress, uint64_t t_timestamp,
                   uint16_t t_flags, uint8_t t_altitude_type, uint8_t t_emitter_type)

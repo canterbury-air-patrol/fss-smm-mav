@@ -37,6 +37,10 @@ class FSS : public IFSSReporter
         uint16_t heading{ 0 };
         uint16_t hor_vel{ 0 };
         int16_t ver_vel{ 0 };
+        /* Whether lat/lng are backed by a valid GPS fix (todo/79); forwarded to
+         * the wire report's valid_fields so FSS-Web can show "no fix" instead of
+         * a stale position re-reported as current. */
+        bool fix_valid{ true };
     };
     struct FssReachedTask
     {
