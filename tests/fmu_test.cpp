@@ -2150,6 +2150,21 @@ TEST_CASE ("known_aircraft diagnostics reach the persistent log file", "[aircraf
  * above, plus a MockFSSReporter, instead of needing real sockets. */
 namespace
 {
+/* Test double for the ADS-B throttle's "now" source (todo/81): a plain
+ * counter advanced explicitly, so the 1s throttle window can be crossed
+ * without a real sleep_for. Injected into EventDispatcher::setNowMsFn as a
+ * lambda over a shared_ptr, mirroring the shared-mock pattern MockMAV/MockSMM
+ * already use in this fixture. */
+struct FakeClock
+{
+    uint64_t t{ 0 };
+    void
+    advance (uint64_t ms)
+    {
+        t += ms;
+    }
+};
+
 struct DispatcherFixture
 {
     std::shared_ptr<MockMAV> mav;
@@ -2159,8 +2174,9 @@ struct DispatcherFixture
     std::unique_ptr<TempLogDir> log_dir;
     std::unique_ptr<Logger> logger;
     std::unique_ptr<EventDispatcher> dispatcher;
+    std::shared_ptr<FakeClock> clock;
 
-    DispatcherFixture () : mav{}, smm{}, fss{}, sm{}, log_dir{}, logger{}, dispatcher{} {}
+    DispatcherFixture () : mav{}, smm{}, fss{}, sm{}, log_dir{}, logger{}, dispatcher{}, clock{} {}
 };
 
 auto
@@ -2175,6 +2191,8 @@ make_dispatcher (const std::string &asset_name = "test-asset", int lowbat_thresh
     f.logger = std::make_unique<Logger> (f.log_dir->str ());
     f.dispatcher
         = std::make_unique<EventDispatcher> (*f.sm, *f.mav, *f.smm, *f.fss, *f.logger, asset_name, lowbat_threshold);
+    f.clock = std::make_shared<FakeClock> ();
+    f.dispatcher->setNowMsFn ([clock = f.clock] () { return clock->t; });
     return f;
 }
 } // namespace
@@ -2277,6 +2295,43 @@ TEST_CASE ("EventDispatcher filters own-callsign OtherAircraftReport before ADS-
     event other_report = OtherAircraftReport{ other };
     f.dispatcher->dispatch (other_report);
     REQUIRE (f.mav->send_adsb_calls == 1);
+}
+
+/* todo/81: the CAP test plan (uav_system_test_plan.md §4.1) requires ADS-B
+ * rebroadcast rate-limited to one forward per ICAO address per second, so a
+ * busy receiver near a real airport cannot flood ArduPilot with ADSB_VEHICLE
+ * updates at dump1090's raw rate. */
+TEST_CASE ("EventDispatcher throttles ADS-B rebroadcast to one per ICAO address per second (todo/81)",
+           "[event_dispatcher]")
+{
+    auto f = make_dispatcher ("MYCALL", 20);
+
+    constexpr uint32_t icao_a = 0x0A0A0A;
+    constexpr uint32_t icao_b = 0x0B0B0B;
+    PositionData a1 (0.0, 0.0, 100.0, 0, 0, 0, "AAA", 0, icao_a, 0, 0, 0, 0);
+    PositionData a2 (0.0, 0.0, 100.0, 0, 0, 0, "AAA", 0, icao_a, 0, 0, 0, 0);
+    PositionData b1 (0.0, 0.0, 100.0, 0, 0, 0, "BBB", 0, icao_b, 0, 0, 0, 0);
+
+    /* First sighting of A forwards. */
+    event first_a = OtherAircraftReport{ a1 };
+    f.dispatcher->dispatch (first_a);
+    REQUIRE (f.mav->send_adsb_calls == 1);
+
+    /* A second report for the same ICAO within the same second is throttled. */
+    event second_a = OtherAircraftReport{ a2 };
+    f.dispatcher->dispatch (second_a);
+    REQUIRE (f.mav->send_adsb_calls == 1);
+
+    /* A different ICAO in between is unaffected by A's throttle. */
+    event first_b = OtherAircraftReport{ b1 };
+    f.dispatcher->dispatch (first_b);
+    REQUIRE (f.mav->send_adsb_calls == 2);
+
+    /* Once 1000ms have passed, A forwards again. */
+    f.clock->advance (1000);
+    event third_a = OtherAircraftReport{ a1 };
+    f.dispatcher->dispatch (third_a);
+    REQUIRE (f.mav->send_adsb_calls == 3);
 }
 
 /* todo/68: cap-fmu's own-aircraft PositionData event (the FMU's MAV position

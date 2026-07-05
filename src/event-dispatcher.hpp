@@ -6,6 +6,10 @@
 #include "logger.hpp"
 #include "mav/imav.hpp"
 #include "smm/ismm.hpp"
+#include "util.hpp"
+#include <cstdint>
+#include <functional>
+#include <map>
 #include <string>
 
 /* The event-loop's routing policy: which events reach the state machine,
@@ -28,6 +32,10 @@ class EventDispatcher
 
     void dispatch (const event &e);
 
+    /* Test seam (todo/81): inject a fake "now" source so the per-ICAO ADS-B
+     * throttle can be exercised without a real 1s sleep_for. */
+    void setNowMsFn (std::function<uint64_t ()> fn);
+
   private:
     FMUStateMachine &state_machine;
     IMAV &mav;
@@ -43,4 +51,12 @@ class EventDispatcher
      * Cleared whenever the FMU leaves fmu_state_searching so a stale RTL
      * intent cannot fire after a later, unrelated command took over. */
     bool smm_rtl_replay_pending{ false };
+    std::function<uint64_t ()> now_ms_fn{ current_timestamp_ms };
+    /* Last-forwarded time per ICAO address (todo/81), throttling ADS-B
+     * rebroadcast to at most one per address per second (the CAP test plan's
+     * §4.1 requirement) so a busy receiver near a real airport cannot flood
+     * ArduPilot with ADSB_VEHICLE updates at dump1090's raw rate. Grows by one
+     * entry per distinct aircraft ever seen this flight; unbounded is fine at
+     * realistic air-traffic density, so no pruning. */
+    std::map<uint32_t, uint64_t> adsb_last_forwarded_ms{};
 };
