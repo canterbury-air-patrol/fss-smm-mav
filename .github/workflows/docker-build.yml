@@ -1,0 +1,65 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches:
+      - develop
+      - 'release/[0-9]*'
+    tags:
+      - 'v[0-9]*'
+      - '[0-9]*'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The image build compiles the tree (COPY . /src), which needs the
+          # mavlink submodule headers.
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          IMAGE="canterburyairpatrol/cap-fmu"
+          ref="${GITHUB_REF}"
+          if [[ "$ref" == "refs/heads/develop" ]]; then
+            sha="${GITHUB_SHA::7}"
+            echo "tags=${IMAGE}:latest,${IMAGE}:${sha}" >> "$GITHUB_OUTPUT"
+          elif [[ "$ref" == refs/heads/release/* ]]; then
+            ver="${ref#refs/heads/release/}"
+            echo "tags=${IMAGE}:${ver}" >> "$GITHUB_OUTPUT"
+          elif [[ "$ref" == refs/tags/v* ]]; then
+            ver="${ref#refs/tags/v}"
+            echo "tags=${IMAGE}:${ver}" >> "$GITHUB_OUTPUT"
+          elif [[ "$ref" == refs/tags/* ]]; then
+            ver="${ref#refs/tags/}"
+            echo "tags=${IMAGE}:${ver}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: ${{ steps.tags.outputs.tags != '' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify push succeeded
+        if: ${{ steps.tags.outputs.tags == '' }}
+        run: |
+          echo "::error::No tags were computed for ref ${GITHUB_REF} — image was built but not pushed."
+          exit 1
