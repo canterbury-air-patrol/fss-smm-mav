@@ -50,7 +50,10 @@ jobs:
       run: |
         autoreconf -fi
         ./configure
-        make check
+        # VERBOSE=1 makes automake's test harness print test-suite.log (the
+        # failed tests' own output) into the job log on failure; otherwise the
+        # detail is lost when the runner is torn down.
+        make check VERBOSE=1
 
     - name: Test-plan traceability (todo/66)
       run: python3 tools/traceability.py --out traceability-report.json
@@ -215,7 +218,10 @@ jobs:
       run: |
         autoreconf -fi
         ./configure --enable-${{ matrix.sanitizer }}
-        make check
+        # VERBOSE=1 makes automake's test harness print test-suite.log (the
+        # failed tests' own output, e.g. a TSan race report) into the job log
+        # on failure; otherwise the detail is lost when the runner is torn down.
+        make check VERBOSE=1
 
   static-analysis:
     runs-on: ubuntu-latest
