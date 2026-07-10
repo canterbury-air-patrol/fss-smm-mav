@@ -1253,20 +1253,22 @@ TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag (
     REQUIRE (server.waitForClient (io_timeout));
     REQUIRE (waitForColdStartThenUp (server, recorder));
 
-    /* Re-send this phase's position until the callback reports its (distinct)
+    /* Re-send this phase's position until the callback echoes its (distinct)
      * coordinates back. Waiting on the coordinates rather than a count bump
      * makes each phase immune to a straggler re-send from the previous phase:
      * frames arrive in TCP-stream order, so once this phase's coordinates come
      * back, the GPS_RAW_INT sent before them has been processed. A count-based
      * wait could instead be satisfied by a previous phase's final re-send —
      * still carrying the old fix state — and read a stale flag. */
-    auto positionReportAt = [&] (int32_t lat_e7, int32_t lon_e7) -> PositionData
+    auto waitForEchoedPosition = [&] (int32_t lat_e7, int32_t lon_e7) -> PositionData
     {
         REQUIRE (MavLoopbackServer::waitFor (
             [&] ()
             {
                 server.sendPosition (lat_e7, lon_e7);
-                return positions.lastPosition ().getP ().getLatitude () == Catch::Approx (lat_e7 * 1e-7);
+                PositionData last = positions.lastPosition ();
+                return last.getP ().getLatitude () == Catch::Approx (lat_e7 * 1e-7)
+                       && last.getP ().getLongitude () == Catch::Approx (lon_e7 * 1e-7);
             },
             io_timeout));
         return positions.lastPosition ();
@@ -1275,7 +1277,7 @@ TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag (
     /* No GPS_RAW_INT has arrived yet: the default (GPS_FIX_TYPE_NO_GPS) must
      * not be mistaken for a good fix, so a position reported before the first
      * fix_type is flagged invalid too. */
-    PositionData pd_before_fix = positionReportAt (-435000000, 1726000000);
+    PositionData pd_before_fix = waitForEchoedPosition (-435000000, 1726000000);
     REQUIRE (pd_before_fix.getP ().getLatitude () == Catch::Approx (-43.5));
     REQUIRE (pd_before_fix.getP ().getLongitude () == Catch::Approx (172.6));
     REQUIRE ((pd_before_fix.getFlags () & POSITION_FLAG_VALID_COORDS) == 0);
@@ -1283,14 +1285,14 @@ TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag (
     /* An explicit no-fix report: the position is still delivered unchanged,
      * just flagged. */
     server.sendGpsRawInt (GPS_FIX_TYPE_NO_FIX);
-    PositionData pd_no_fix = positionReportAt (-436000000, 1727000000);
+    PositionData pd_no_fix = waitForEchoedPosition (-436000000, 1727000000);
     REQUIRE (pd_no_fix.getP ().getLatitude () == Catch::Approx (-43.6));
     REQUIRE (pd_no_fix.getP ().getLongitude () == Catch::Approx (172.7));
     REQUIRE ((pd_no_fix.getFlags () & POSITION_FLAG_VALID_COORDS) == 0);
 
     /* Once a real fix comes in, the next position report is flagged valid. */
     server.sendGpsRawInt (GPS_FIX_TYPE_3D_FIX);
-    PositionData pd_good_fix = positionReportAt (-437000000, 1728000000);
+    PositionData pd_good_fix = waitForEchoedPosition (-437000000, 1728000000);
     REQUIRE ((pd_good_fix.getFlags () & POSITION_FLAG_VALID_COORDS) != 0);
 }
 
