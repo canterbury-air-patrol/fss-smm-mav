@@ -438,6 +438,12 @@ constexpr long test_smm_transfer_timeout_s = 10;
 constexpr MavParams test_mav_params{ test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
                                      test_position_stream_interval_us, test_battery_stream_interval_us };
 constexpr auto io_timeout = std::chrono::seconds (8);
+/* Bound for asserting a message is *not* sent: unlike a positive wait, there is
+ * no early exit (the loop must run out the clock), so this stays far shorter
+ * than io_timeout. Any erroneous MISSION_SET_CURRENT/SET_MODE(AUTO) a todo/82
+ * regression would emit happens synchronously while processing the incoming
+ * MISSION_ACK, well within this margin. */
+constexpr auto no_message_timeout = std::chrono::milliseconds (300);
 
 /* mav_connection parses on the single global channel MAVLINK_COMM_0. In the real
  * app there is only ever one connection, but here each test spins up its own, so
@@ -808,6 +814,132 @@ TEST_CASE ("a search mission selects current before engaging AUTO after upload (
 
     REQUIRE (result.set_current == search_point_mission_seq (0));
     expect_auto_mode (server);
+}
+
+/* todo/82: a late MISSION_ACK for a goto upload must not be able to select a
+ * mission item or command AUTO once a newer safety-critical mode (here, RTL —
+ * standing in for a real low-battery/comms-loss/operator RTL, all of which
+ * reach the autopilot the same way via commandRTL()) has taken control while
+ * the upload was still open. */
+TEST_CASE ("a newer RTL invalidates an in-flight goto upload; its late ACCEPTED ack is ignored (todo/82)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    conn.commandGoto (Point (-43.5, 172.6));
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
+    const uint8_t mission_type = mavlink_msg_mission_count_get_mission_type (&msg);
+    const uint16_t count = mavlink_msg_mission_count_get_count (&msg);
+
+    /* Drive the item exchange (as run_mission_upload would) but withhold the
+     * MISSION_ACK: the upload is still open when the newer safety state takes
+     * control. */
+    for (uint16_t seq = 0; seq < count; seq++)
+    {
+        server.sendMissionRequestInt (seq, mission_type);
+        REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_ITEM_INT, msg, io_timeout));
+    }
+
+    /* The newer safety state takes control mid-upload: the same call the
+     * state machine's RTL action makes. */
+    conn.commandRTL ();
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, io_timeout));
+    REQUIRE (mavlink_msg_set_mode_get_custom_mode (&msg) == COPTER_MODE_RTL);
+
+    /* The autopilot finishes and accepts the now-superseded upload. */
+    server.sendMissionAck (mission_type);
+
+    /* Neither MISSION_SET_CURRENT nor a further SET_MODE (AUTO) may follow. */
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, no_message_timeout));
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, no_message_timeout));
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("invalidated an in-flight"); },
+                                         io_timeout));
+}
+
+/* todo/82: the equivalent interrupted-search-upload case. loadSearch() itself
+ * issues its own RTL before the upload (existing "enter RTL while loading"
+ * behaviour); the second RTL here stands in for a newer safety state — e.g.
+ * low battery — arriving before the search's own MISSION_ACK. */
+TEST_CASE ("a newer RTL invalidates an in-flight search upload; its late ACCEPTED ack is ignored (todo/82)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    conn.loadSearch (std::make_shared<SMMSearch> ());
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
+    const uint8_t mission_type = mavlink_msg_mission_count_get_mission_type (&msg);
+    const uint16_t count = mavlink_msg_mission_count_get_count (&msg);
+
+    for (uint16_t seq = 0; seq < count; seq++)
+    {
+        server.sendMissionRequestInt (seq, mission_type);
+        REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_ITEM_INT, msg, io_timeout));
+    }
+
+    conn.commandRTL ();
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, io_timeout));
+    REQUIRE (mavlink_msg_set_mode_get_custom_mode (&msg) == COPTER_MODE_RTL);
+
+    server.sendMissionAck (mission_type);
+
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, no_message_timeout));
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, no_message_timeout));
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("invalidated an in-flight"); },
+                                         io_timeout));
+}
+
+/* todo/82: a duplicate/retransmitted accepted MISSION_ACK arriving after a
+ * goto upload already completed must not repeat the MISSION_SET_CURRENT/AUTO
+ * transition. goto_active alone used to be a long-lived signal — it never
+ * cleared after a first ack — so a second ack would re-fire it. */
+TEST_CASE ("a duplicate accepted goto ACK after completion does not re-enter AUTO (todo/82)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    conn.commandGoto (Point (-43.5, 172.6));
+
+    const MissionUploadResult result = run_mission_upload (server, 3);
+    REQUIRE (result.set_current == 0);
+    expect_auto_mode (server);
+
+    /* A duplicate delivery of the same accepted ack, after the upload has
+     * already completed and AUTO has already been commanded once. */
+    mavlink_message_t msg;
+    server.sendMissionAck (MAV_MISSION_TYPE_MISSION);
+
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, no_message_timeout));
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, no_message_timeout));
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] () { return capture.containsSubstring ("no goto/search upload was genuinely pending"); }, io_timeout));
 }
 
 /* Test-only accessor for the friend seam in SMM: inject a held (paused) search,
