@@ -133,6 +133,37 @@ mav_connection::warnUnresolvedMode (MavModeCommand command)
 }
 
 auto
+mav_connection::invalidateInFlightUploadLocked () -> bool
+{
+    bool was_in_flight = this->goto_ack_pending || this->search_loading;
+    if (this->search_loading)
+    {
+        /* The abandoned search never reached search_loaded, so there is no
+         * completed mission to resume; drop the reference so a later
+         * MISSION_REQUEST for the abandoned upload's sequence numbers finds
+         * nothing to serve rather than reusing it (todo/82). A search that
+         * was already loaded (search_loaded, not search_loading) keeps its
+         * `search` reference — only the `search_loaded` flag below is
+         * cleared for it, same as every other clear_search_loaded caller,
+         * because control has left whatever mission was active. */
+        this->search = nullptr;
+    }
+    this->goto_active = false;
+    this->goto_ack_pending = false;
+    this->search_loading = false;
+    this->search_loaded = false;
+    return was_in_flight;
+}
+
+void
+mav_connection::logUploadInvalidated (const std::string &action_name)
+{
+    this->logger.log (LogLevel::error, "WARN: " + action_name
+                                           + " invalidated an in-flight goto/search mission upload; its "
+                                             "MISSION_ACK, if it arrives, will be ignored");
+}
+
+auto
 mav_connection::setFlightMode (uint8_t fmode) -> bool
 {
     mavlink_message_t msg;
@@ -152,22 +183,41 @@ mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loade
     std::optional<uint8_t> fmode = resolve_mav_mode (sys != nullptr ? sys->getAutoPilotType () : 0, command);
     if (!fmode.has_value ())
     {
+        bool upload_invalidated = false;
         {
             std::lock_guard<std::mutex> lk{ this->state_lock };
             this->pending_mode_command = command;
+            /* The decision to take control has been made even though the
+             * SET_MODE itself is deferred (todo/82); an in-flight upload must
+             * not survive to complete once a heartbeat resolves and replays it. */
+            if (clear_search_loaded)
+            {
+                upload_invalidated = this->invalidateInFlightUploadLocked ();
+            }
         }
         warnUnresolvedMode (command);
+        if (upload_invalidated)
+        {
+            this->logUploadInvalidated (mav_mode_command_name (command));
+        }
         /* Deferred, not transmitted: replayPendingMode() re-sends it once the
          * autopilot type is known. Report not-sent so a safety-critical caller
          * also tracks it for replay on link recovery. */
         return false;
     }
     bool sent = this->setFlightMode (*fmode);
-    std::lock_guard<std::mutex> lk{ this->state_lock };
-    this->pending_mode_command.reset ();
-    if (clear_search_loaded)
+    bool upload_invalidated = false;
     {
-        this->search_loaded = false;
+        std::lock_guard<std::mutex> lk{ this->state_lock };
+        this->pending_mode_command.reset ();
+        if (clear_search_loaded)
+        {
+            upload_invalidated = this->invalidateInFlightUploadLocked ();
+        }
+    }
+    if (upload_invalidated)
+    {
+        this->logUploadInvalidated (mav_mode_command_name (command));
     }
     return sent;
 }
@@ -220,9 +270,14 @@ mav_connection::commandDisARM () -> bool
                                             MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0);
         sent = this->sendMavLinkMsgLocked (&msg);
     }
+    bool upload_invalidated;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
-        this->search_loaded = false;
+        upload_invalidated = this->invalidateInFlightUploadLocked ();
+    }
+    if (upload_invalidated)
+    {
+        this->logUploadInvalidated ("disarm");
     }
     return sent;
 }
@@ -317,9 +372,14 @@ mav_connection::commandForceDisARM () -> bool
                                             MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, force_magic, 0, 0, 0, 0, 0);
         sent = this->sendMavLinkMsgLocked (&msg);
     }
+    bool upload_invalidated;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
-        this->search_loaded = false;
+        upload_invalidated = this->invalidateInFlightUploadLocked ();
+    }
+    if (upload_invalidated)
+    {
+        this->logUploadInvalidated ("force-disarm");
     }
     return sent;
 }
@@ -335,9 +395,14 @@ mav_connection::commandTerminate () -> bool
                                             MAV_CMD_DO_FLIGHTTERMINATION, 0, 1, 0, 0, 0, 0, 0, 0);
         sent = this->sendMavLinkMsgLocked (&msg);
     }
+    bool upload_invalidated;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
-        this->search_loaded = false;
+        upload_invalidated = this->invalidateInFlightUploadLocked ();
+    }
+    if (upload_invalidated)
+    {
+        this->logUploadInvalidated ("terminate");
     }
     return sent;
 }
@@ -348,16 +413,23 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
     constexpr int acceptable_radius = 5;
     mavlink_message_t msg;
     bool local_goto_active;
+    bool local_search_loading;
     Point local_goto_position;
     std::shared_ptr<SMMSearch> local_search;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         local_goto_active = this->goto_active;
+        local_search_loading = this->search_loading;
         local_goto_position = this->goto_position;
         local_search = this->search;
     }
-    /* In search mode with no search loaded there is nothing to send. */
-    if (!local_goto_active && local_search == nullptr)
+    /* Only reply while an upload is genuinely open. goto_active/search_loading
+     * are exactly what a newer safety-critical mode invalidates when it takes
+     * control mid-upload (todo/82); once cleared, a request that still
+     * references the abandoned upload's sequence numbers must not be served
+     * from `search`, which can still be non-null (an unrelated, already-
+     * resumable search) even though no upload is open. */
+    if (!local_goto_active && !local_search_loading)
     {
         return;
     }
@@ -463,15 +535,31 @@ mav_connection::mission_ack (bool accepted)
 {
     bool goto_set_current = false;
     bool search_set_current = false;
+    bool stale_ack = false;
     uint16_t search_seq = 0;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
-        /* The upload this MISSION_ACK completes is no longer at risk of a
-         * silent link-drop no-op (todo/61), whether accepted or rejected. */
+        /* Correlate the ack with an upload that is still genuinely pending
+         * (todo/82): goto_active alone is long-lived (nothing clears it once
+         * an upload completes, so it cannot prove *this* ack belongs to a
+         * mission still allowed to complete). goto_ack_pending is the
+         * narrower "opening MISSION_COUNT sent, no ack processed yet" signal
+         * (todo/61), and is exactly what a newer safety-critical mode
+         * invalidates mid-upload (invalidateInFlightUploadLocked()), so it is
+         * the sole gate here. This upload's lifecycle ends with this ack
+         * either way — accepted or rejected — so goto_active must not
+         * outlive it either, or a later stale/duplicate ack (or an abandoned
+         * request for its now-closed sequence numbers) could still be
+         * actioned or served. */
+        bool goto_was_pending = this->goto_ack_pending;
         this->goto_ack_pending = false;
-        if (this->goto_active && accepted)
+        if (goto_was_pending)
         {
-            goto_set_current = true;
+            this->goto_active = false;
+            if (accepted)
+            {
+                goto_set_current = true;
+            }
         }
         if (this->search_loading)
         {
@@ -493,6 +581,17 @@ mav_connection::mission_ack (bool accepted)
                 this->search = nullptr;
             }
         }
+        /* An accepted ack that neither branch consumed is either a duplicate/
+         * retransmitted delivery for an upload already completed, or one
+         * invalidated by a newer safety-critical mode while still in flight
+         * (todo/82) — both must be logged and ignored, never actioned. */
+        stale_ack = accepted && !goto_set_current && !search_set_current;
+    }
+    if (stale_ack)
+    {
+        this->logger.log (LogLevel::error,
+                          "WARN: accepted MISSION_ACK ignored — no goto/search upload was genuinely pending "
+                          "(superseded by a newer safety-critical mode, already completed, or a duplicate delivery)");
     }
     if (goto_set_current)
     {

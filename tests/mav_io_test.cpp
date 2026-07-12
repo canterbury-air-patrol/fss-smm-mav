@@ -688,10 +688,18 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
 {
     reset_mav_parser ();
     MavLoopbackServer server;
+    CommsRecorder recorder;
 
     mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
+    /* Establish the link as genuinely up first (todo/82): otherwise the
+     * cold-start "no heartbeat yet" detection (heartbeat_loop) can invalidate
+     * the goto's own MISSION_ACK correlation (goto_ack_pending) before this
+     * upload completes, exactly as a real comms-loss failsafe would — which
+     * is not what this test is exercising. */
+    REQUIRE (waitForColdStartThenUp (server, recorder));
 
     /* A goto lays out seq 0/1 = waypoint, seq 2 = RTL terminator (count 3). */
     conn.commandGoto (Point (-43.5, 172.6));

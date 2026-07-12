@@ -204,6 +204,21 @@ class mav_connection
      * airframe-specific flight mode could not be resolved. Shared by every
      * command path so the wording stays identical. */
     void warnUnresolvedMode (MavModeCommand command);
+    /* Clear goto/search upload state so a MISSION_ACK for an upload that is
+     * no longer allowed to complete — because a newer safety-critical mode
+     * (RTL, hold, manual, disarm, force-disarm, terminate) just took control
+     * mid-upload — cannot select a mission item or command AUTO (todo/82).
+     * Also drops a search that never reached search_loaded, so a lingering
+     * MISSION_REQUEST for the abandoned upload's sequence numbers cannot be
+     * served from it. Must be called with state_lock already held. Returns
+     * whether an upload was genuinely in flight (its ack still pending), so
+     * the caller can log it once state_lock is released. */
+    auto invalidateInFlightUploadLocked () -> bool;
+    /* Log that `action_name` invalidated an in-flight goto/search mission
+     * upload (todo/82). Shared by every command that can take control
+     * mid-upload so the wording stays identical. Must be called without
+     * state_lock held. */
+    void logUploadInvalidated (const std::string &action_name);
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     void connect_to_mav ();
     void disconnect_from_mav ();
