@@ -1448,6 +1448,55 @@ TEST_CASE ("degrees_to_degE7 round-trips exactly at the latitude/longitude extre
     }
 }
 
+/* todo/85: the shared coordinate validator every external source of a
+ * commanded/reported position must pass before its coordinates reach
+ * degrees_to_degE7() (whose float-to-int32 cast is undefined behavior on a
+ * non-finite or out-of-range input). */
+TEST_CASE ("Point::isValid accepts the geographic range and rejects outside it", "[latlon][validate]")
+{
+    /* Boundary values remain accepted, unchanged from before validation
+     * existed (todo/80's exact round-trip test above covers their encoding). */
+    REQUIRE (Point (-90.0, -180.0).isValid ());
+    REQUIRE (Point (90.0, 180.0).isValid ());
+    REQUIRE (Point (0.0, 0.0).isValid ());
+    REQUIRE (Point (-43.5, 172.6).isValid ());
+
+    /* Just outside the geographic range. */
+    REQUIRE_FALSE (Point (-90.0000001, 0.0).isValid ());
+    REQUIRE_FALSE (Point (90.0000001, 0.0).isValid ());
+    REQUIRE_FALSE (Point (0.0, -180.0000001).isValid ());
+    REQUIRE_FALSE (Point (0.0, 180.0000001).isValid ());
+
+    /* Non-finite. */
+    double nan = std::numeric_limits<double>::quiet_NaN ();
+    double inf = std::numeric_limits<double>::infinity ();
+    REQUIRE_FALSE (Point (nan, 0.0).isValid ());
+    REQUIRE_FALSE (Point (0.0, nan).isValid ());
+    REQUIRE_FALSE (Point (inf, 0.0).isValid ());
+    REQUIRE_FALSE (Point (-inf, 0.0).isValid ());
+    REQUIRE_FALSE (Point (0.0, inf).isValid ());
+    REQUIRE_FALSE (Point (0.0, -inf).isValid ());
+
+    /* Finite but wildly out of range. */
+    REQUIRE_FALSE (Point (1e300, 0.0).isValid ());
+    REQUIRE_FALSE (Point (0.0, -1e300).isValid ());
+}
+
+/* todo/85: degrees_to_degE7() is a last-resort backstop against UB for a
+ * caller that skips Point::isValid() -- confirm it clamps to a deterministic
+ * value instead of invoking undefined behavior, without disturbing the
+ * representable-input behavior the round-trip test above pins. */
+TEST_CASE ("degrees_to_degE7 clamps non-finite and out-of-range input instead of invoking UB", "[latlon][validate]")
+{
+    double nan = std::numeric_limits<double>::quiet_NaN ();
+    double inf = std::numeric_limits<double>::infinity ();
+    REQUIRE (degrees_to_degE7 (nan) == 0);
+    REQUIRE (degrees_to_degE7 (inf) == 0);
+    REQUIRE (degrees_to_degE7 (-inf) == 0);
+    REQUIRE (degrees_to_degE7 (1e300) == INT32_MAX);
+    REQUIRE (degrees_to_degE7 (-1e300) == INT32_MIN);
+}
+
 TEST_CASE ("resolve_mav_mode returns no mode until the autopilot type is known", "[mav]")
 {
     REQUIRE (!resolve_mav_mode (0, MavModeCommand::rtl).has_value ());
