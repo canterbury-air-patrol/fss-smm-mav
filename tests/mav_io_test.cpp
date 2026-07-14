@@ -20,6 +20,7 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <netinet/in.h>
 #include <optional>
@@ -971,6 +972,46 @@ struct SMMTestAccess
         smm.asset = asset;
     }
 };
+
+/* todo/85: parse_waypoints() is the pure decision SMMSearch's constructor
+ * uses to decide whether a fetched search is loadable -- tested directly here
+ * against plain smm_waypoint_s structs, without a live smm_search handle
+ * (there is no lightweight way to fabricate one; smm_search is opaque and
+ * only populated via the real HTTP-backed library). */
+TEST_CASE ("parse_waypoints reports all_valid only when every waypoint is a valid coordinate (todo/85)", "[smm]")
+{
+    smm_waypoint_s a{ -43.5, 172.6 };
+    smm_waypoint_s b{ -41.0, 174.0 };
+    smm_waypoint_s bad{ std::numeric_limits<double>::quiet_NaN (), 0.0 };
+
+    SECTION ("every waypoint valid")
+    {
+        smm_waypoint wps[] = { &a, &b };
+        ParsedWaypoints result = parse_waypoints (wps, 2);
+        REQUIRE (result.all_valid);
+        REQUIRE (result.points.size () == 2);
+        REQUIRE (result.points[0].getLatitude () == Catch::Approx (-43.5));
+        REQUIRE (result.points[1].getLatitude () == Catch::Approx (-41.0));
+    }
+
+    SECTION ("one invalid waypoint invalidates the whole batch")
+    {
+        smm_waypoint wps[] = { &a, &bad, &b };
+        ParsedWaypoints result = parse_waypoints (wps, 3);
+        REQUIRE_FALSE (result.all_valid);
+        /* Every point is still decoded -- the caller (SMMSearch's constructor)
+         * discards the whole candidate rather than the single bad point, so
+         * there is no partial mission to accidentally load. */
+        REQUIRE (result.points.size () == 3);
+    }
+
+    SECTION ("zero waypoints is vacuously all-valid")
+    {
+        ParsedWaypoints result = parse_waypoints (nullptr, 0);
+        REQUIRE (result.all_valid);
+        REQUIRE (result.points.empty ());
+    }
+}
 
 /* SMM test double exposing the I/O seams so a test can make a blocking SMM call
  * controllable (block_fetch + releaseFetch) and observable (the call counters)

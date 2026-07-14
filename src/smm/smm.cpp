@@ -522,15 +522,24 @@ SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altit
     smm_waypoints wps = nullptr;
     size_t wps_count = 0;
     /* A failed fetch (e.g. transient network error) leaves the search with no
-     * points; only treat it as valid once we have at least one waypoint. */
+     * points; only treat it as valid once we have at least one waypoint, and
+     * only if every one of them is a valid coordinate (todo/85) -- one bad
+     * waypoint invalidates the whole candidate rather than uploading a
+     * partially-corrupt mission, and flows through the same failed-acquire
+     * retry/RTL path in tryAcquireSearch() as a fetch failure. */
     if (smm_search_get_waypoints (this->search, &wps, &wps_count) && wps_count > 0)
     {
-        for (size_t i = 0; i < wps_count; i++)
+        ParsedWaypoints parsed = parse_waypoints (wps, wps_count);
+        for (const auto &wp : parsed.points)
         {
-            Point wp (wps[i]->lat, wps[i]->lon);
             this->addPoint (wp);
         }
-        this->valid = true;
+        this->valid = parsed.all_valid;
+        if (!parsed.all_valid)
+        {
+            logger.log (LogLevel::error, "WARN: SMM search has an invalid waypoint (non-finite or out-of-range "
+                                         "coordinate); discarding the candidate rather than loading it");
+        }
     }
     smm_waypoints_free (wps, wps_count);
     /* Derive the flight altitude from the search's sweep (lane) width and the
