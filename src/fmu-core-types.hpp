@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -26,6 +27,17 @@ class Point
     operator== (const Point &other) const -> bool
     {
         return latitude == other.latitude && longitude == other.longitude;
+    };
+    /* Shared, pure coordinate validator (todo/85): every external source of a
+     * commanded/reported position (FSS goto, SMM search waypoints, ADS-B
+     * peer reports) must pass this before the coordinates reach
+     * degrees_to_degE7(), whose float-to-int32 cast is undefined behavior on
+     * a non-finite or out-of-range input. */
+    auto
+    isValid () const -> bool
+    {
+        return std::isfinite (latitude) && latitude >= -90.0 && latitude <= 90.0 && std::isfinite (longitude)
+               && longitude >= -180.0 && longitude <= 180.0;
     };
 };
 
