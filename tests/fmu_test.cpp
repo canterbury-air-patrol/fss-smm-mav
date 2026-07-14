@@ -2383,6 +2383,29 @@ TEST_CASE ("EventDispatcher throttles ADS-B rebroadcast to one per ICAO address 
     REQUIRE (f.mav->send_adsb_calls == 3);
 }
 
+/* todo/85: a peer's ADS-B coordinates are untrusted. A non-finite/out-of-range
+ * one must be dropped before rebroadcast rather than forwarded (even clamped)
+ * to the autopilot's collision-avoidance, or counted against the per-ICAO
+ * rate limit (todo/81) as if it were a legitimate sighting. */
+TEST_CASE ("EventDispatcher drops an ADS-B report with an invalid coordinate before rebroadcast (todo/85)",
+           "[event_dispatcher]")
+{
+    auto f = make_dispatcher ("MYCALL", 20);
+
+    double nan = std::numeric_limits<double>::quiet_NaN ();
+    PositionData bad (nan, 0.0, 100.0, 0, 0, 0, "BAD", 0, 0xBAD1D, 0, 0, 0, 0);
+    event bad_report = OtherAircraftReport{ bad };
+    f.dispatcher->dispatch (bad_report);
+    REQUIRE (f.mav->send_adsb_calls == 0);
+
+    /* A subsequent valid report for the same ICAO is not throttled by the
+     * dropped one -- it was never counted as a sighting. */
+    PositionData good (0.0, 0.0, 100.0, 0, 0, 0, "BAD", 0, 0xBAD1D, 0, 0, 0, 0);
+    event good_report = OtherAircraftReport{ good };
+    f.dispatcher->dispatch (good_report);
+    REQUIRE (f.mav->send_adsb_calls == 1);
+}
+
 /* todo/68: cap-fmu's own-aircraft PositionData event (the FMU's MAV position
  * report, distinct from OtherAircraftReport/ADS-B above) never reaches
  * FMUStateMachine at all today — EventDispatcher's handler only forwards it
