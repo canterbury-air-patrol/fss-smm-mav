@@ -149,6 +149,16 @@ EventDispatcher::dispatch (const event &e)
             {
                 if (oar.pd.getCallSign () != asset_name)
                 {
+                    /* A peer's coordinates are untrusted (todo/85): forwarding a
+                     * non-finite or out-of-range position to the autopilot's
+                     * collision-avoidance would be worse than not reporting
+                     * this contact at all, so drop it before the rate-limit
+                     * check even considers it for rebroadcast. */
+                    if (!oar.pd.getP ().isValid ())
+                    {
+                        logger.log (LogLevel::debug, "ADSB: dropping a peer report with an invalid coordinate");
+                        return;
+                    }
                     /* Rate-limit ADS-B rebroadcast to one per ICAO address per
                      * second (todo/81): forward if this is the first sighting
                      * of this ICAO, or at least 1000ms has passed since the
