@@ -116,6 +116,21 @@ fss_client_ssl::handleCommandFrom (
         return;
     }
 
+    /* A goto with a non-finite or out-of-range coordinate must never reach the
+     * command group or the state machine (todo/85): degrees_to_degE7() would
+     * hit undefined behavior on it downstream, and CommandPayload::sameAs()
+     * cannot dedup a NaN target against anything (always compares unequal),
+     * so a malformed retry would be actioned repeatedly. Reject synchronously,
+     * the same way an unrecognised command is above, so the malformed command
+     * never opens or disturbs a command group. */
+    if (raw_command == flight_safety_system::transport::asset_command_goto
+        && !Point (msg->getLatitude (), msg->getLongitude ()).isValid ())
+    {
+        this->sendCommandAck (conn, acked_id, raw_command, flight_safety_system::transport::command_ack_rejected,
+                              flight_safety_system::transport::supersede_none);
+        return;
+    }
+
     /* Payload-bearing commands carry a target the dedup must distinguish on: a
      * second goto/altitude with a different payload inside the tolerance window is
      * a new logical command, not a duplicate of the first. */
