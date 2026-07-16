@@ -1150,6 +1150,69 @@ TEST_CASE ("an older different command within the window is acked superseded, no
     REQUIRE (stale_command_ack_reason != fsst::supersede_comms_loss);
 }
 
+TEST_CASE ("a different older command is never actuated as new no matter how far outside the window "
+           "(todo/86)",
+           "[command_ack][group][TC-MAV-006]")
+{
+    constexpr int cmd_hold = 5;
+    constexpr int cmd_rtl = 1;
+    constexpr int cmd_terminate = 9;
+
+    /* Boundary: older by exactly the tolerance window. The legacy dedup treated
+     * this as "outside the window" and let it fall through to actuate; it must
+     * still be rejected as stale — staleness has no upper bound. */
+    {
+        CommandAckGroup<int> group{ group_tolerance_ms };
+        auto current = group.onDelivery (cmd_hold, 100000, 1);
+        REQUIRE (current.disposition == CommandAckGroup<int>::Disposition::actuate);
+        auto stale = group.onDelivery (cmd_rtl, 100000 - group_tolerance_ms, 2);
+        REQUIRE (stale.disposition == CommandAckGroup<int>::Disposition::stale_superseded);
+    }
+
+    /* Older by one millisecond more than the window: definitely rejected. */
+    {
+        CommandAckGroup<int> group{ group_tolerance_ms };
+        auto current = group.onDelivery (cmd_hold, 100000, 1);
+        REQUIRE (current.disposition == CommandAckGroup<int>::Disposition::actuate);
+        auto stale = group.onDelivery (cmd_rtl, 100000 - group_tolerance_ms - 1, 2);
+        REQUIRE (stale.disposition == CommandAckGroup<int>::Disposition::stale_superseded);
+    }
+
+    /* Older by several hours: a delayed/reconnect-replayed server delivery of an
+     * old command must not be actioned just because it is long outside the
+     * dedup window. Use terminate as the command: this is the worst case named
+     * in the todo, since terminate latches permanently once actuated. */
+    {
+        constexpr uint64_t five_hours_ms = 5ULL * 60 * 60 * 1000;
+        CommandAckGroup<int> group{ group_tolerance_ms };
+        auto current = group.onDelivery (cmd_hold, five_hours_ms + 100000, 1);
+        REQUIRE (current.disposition == CommandAckGroup<int>::Disposition::actuate);
+        auto stale = group.onDelivery (cmd_terminate, 100000, 2);
+        REQUIRE (stale.disposition == CommandAckGroup<int>::Disposition::stale_superseded);
+    }
+
+    /* Equal timestamp, different command: not "older", so it is a genuinely new
+     * command and must actuate rather than being mistaken for stale. */
+    {
+        CommandAckGroup<int> group{ group_tolerance_ms };
+        auto current = group.onDelivery (cmd_hold, 100000, 1);
+        REQUIRE (current.disposition == CommandAckGroup<int>::Disposition::actuate);
+        auto simultaneous = group.onDelivery (cmd_rtl, 100000, 2);
+        REQUIRE (simultaneous.disposition == CommandAckGroup<int>::Disposition::actuate);
+    }
+
+    /* Newer, different command, far outside the window: also a genuinely new
+     * command and must actuate. */
+    {
+        constexpr uint64_t five_hours_ms = 5ULL * 60 * 60 * 1000;
+        CommandAckGroup<int> group{ group_tolerance_ms };
+        auto current = group.onDelivery (cmd_hold, 100000, 1);
+        REQUIRE (current.disposition == CommandAckGroup<int>::Disposition::actuate);
+        auto later = group.onDelivery (cmd_rtl, 100000 + five_hours_ms, 2);
+        REQUIRE (later.disposition == CommandAckGroup<int>::Disposition::actuate);
+    }
+}
+
 TEST_CASE ("a new command supersedes an unresolved group and its copies are handed back",
            "[command_ack][group][TC-MAV-006]")
 {

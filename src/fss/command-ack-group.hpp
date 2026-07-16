@@ -129,7 +129,10 @@ template <typename Target> class CommandAckGroup
     };
 
     /* `t_tolerance_ms` is the window within which two timestamps count as the same
-     * logical command. */
+     * logical command (repeat deliveries of the same command/payload from
+     * redundant servers). It does NOT bound staleness rejection: a different,
+     * older command is always superseded regardless of how far outside this
+     * window it falls (todo/86). */
     explicit CommandAckGroup (uint64_t t_tolerance_ms) : tolerance_ms (t_tolerance_ms) {}
 
     /* `t_command` is an opaque command-identity value (the caller's enum), matched
@@ -162,11 +165,18 @@ template <typename Target> class CommandAckGroup
             return result;
         }
 
-        if (this->active && !same_logical_command && t_timestamp < this->timestamp
-            && (this->timestamp - t_timestamp) < this->tolerance_ms)
+        if (this->active && !same_logical_command && t_timestamp < this->timestamp)
         {
             /* Older, different command (different type or different payload): the
-             * newer one is already in effect. */
+             * newer one is already in effect. This is deliberately NOT bounded by
+             * `tolerance_ms` (todo/86): that window exists only to recognise
+             * repeat deliveries of the SAME logical command across redundant
+             * servers, not to cap how stale a *different* one has to be before it
+             * stops being stale. A delayed/replayed delivery of an old command —
+             * worst case an old terminate, which latches permanently — must never
+             * be actuated as new just because the gap to the current command
+             * exceeds the dedup window, whether that gap is 61 seconds or several
+             * hours. */
             result.disposition = Disposition::stale_superseded;
             return result;
         }
