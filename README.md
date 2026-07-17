@@ -64,6 +64,8 @@ absent entirely):
         "fmu": {
                 "mav_address": "127.0.0.1",
                 "mav_port": 5760,
+                "mav_connect_timeout_s": 5,
+                "mav_send_timeout_s": 2,
                 "altitude_cap_ft": 400,
                 "altitude_floor_ft": 33,
                 "goto_altitude_ft": 165,
@@ -86,6 +88,8 @@ absent entirely):
 |---|---|---|
 | `mav_address` | `127.0.0.1` | Host/IP of the MAVLink autopilot endpoint the FMU connects to (e.g. a mavproxy/SITL TCP endpoint). Unlike the other keys (which warn and fall back to their default), a present-but-invalid value here is **fatal**: an empty/whitespace-only or non-string `mav_address` aborts startup, since silently using the default could connect to the wrong autopilot. Omit the key to use the default. |
 | `mav_port` | `5760` | TCP port of the MAVLink autopilot endpoint. Range 1–65535; a present-but-invalid value is **fatal** (see `mav_address`). |
+| `mav_connect_timeout_s` | `5` | Upper bound (seconds) on a MAV TCP connect attempt. A black-holed or unreachable autopilot endpoint cannot stall startup or a reconnect attempt beyond this. Range 1–30. |
+| `mav_send_timeout_s` | `2` | Upper bound (seconds) on a blocking MAV send (`SO_SNDTIMEO` and, where available, `TCP_USER_TIMEOUT`). A peer that stops reading, or a network path that silently disappears, cannot pin a sender — including the event-loop thread issuing a safety command — beyond this. Kept tighter than `mav_connect_timeout_s`: unlike a slow connect, a blocked send runs on/behind the live event loop and directly extends comms-failure detection latency. Range 1–10. |
 | `altitude_cap_m` | `122` | Regulatory ceiling for the derived search altitude, in metres AGL. |
 | `altitude_cap_ft` | – | The same ceiling expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
 | `altitude_floor_m` | `10` | Minimum search altitude, in metres AGL. The derived altitude is never flown below this, so a tiny or zero sweep width cannot put the aircraft at ground level. Clamped to be no greater than the altitude cap. |

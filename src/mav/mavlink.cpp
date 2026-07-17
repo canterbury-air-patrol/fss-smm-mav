@@ -1081,7 +1081,9 @@ mav_connection::mav_connection (std::string t_addr, uint16_t t_port, const MavPa
     : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_params.goto_altitude_m),
       altitude_floor_m (t_params.altitude_floor_m), altitude_cap_m (t_params.altitude_cap_m),
       position_stream_interval_us (t_params.position_stream_interval_us),
-      battery_stream_interval_us (t_params.battery_stream_interval_us), logger (t_logger)
+      battery_stream_interval_us (t_params.battery_stream_interval_us),
+      connect_timeout_ms (t_params.mav_connect_timeout_ms), send_timeout_ms (t_params.mav_send_timeout_ms),
+      logger (t_logger)
 {
 }
 

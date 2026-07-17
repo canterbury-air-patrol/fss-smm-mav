@@ -488,8 +488,15 @@ constexpr uint32_t test_battery_stream_interval_us = 1000000;
 constexpr uint64_t test_smm_report_interval_ms = 1000;
 constexpr long test_smm_connect_timeout_s = 5;
 constexpr long test_smm_transfer_timeout_s = 10;
-constexpr MavParams test_mav_params{ test_goto_altitude_m, test_altitude_floor_m, test_altitude_cap_m,
-                                     test_position_stream_interval_us, test_battery_stream_interval_us };
+constexpr uint32_t test_mav_connect_timeout_ms = 2000;
+constexpr uint32_t test_mav_send_timeout_ms = 2000;
+constexpr MavParams test_mav_params{ test_goto_altitude_m,
+                                     test_altitude_floor_m,
+                                     test_altitude_cap_m,
+                                     test_position_stream_interval_us,
+                                     test_battery_stream_interval_us,
+                                     test_mav_connect_timeout_ms,
+                                     test_mav_send_timeout_ms };
 constexpr auto io_timeout = std::chrono::seconds (8);
 /* Bound for asserting a message is *not* sent: unlike a positive wait, there is
  * no early exit (the loop must run out the clock), so this stays far shorter

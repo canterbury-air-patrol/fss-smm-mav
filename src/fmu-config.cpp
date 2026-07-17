@@ -246,6 +246,14 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         }
         cfg.mav_port = v;
     }
+    if (fmu.isMember ("mav_connect_timeout_s"))
+    {
+        setRangedInt (cfg.mav_connect_timeout_s, "mav_connect_timeout_s", fmu["mav_connect_timeout_s"], 1, 30);
+    }
+    if (fmu.isMember ("mav_send_timeout_s"))
+    {
+        setRangedInt (cfg.mav_send_timeout_s, "mav_send_timeout_s", fmu["mav_send_timeout_s"], 1, 10);
+    }
 
     if (fmu.isMember ("log_level"))
     {

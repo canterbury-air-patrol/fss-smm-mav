@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <sys/socket.h>
 #include <thread>
 
 #include "../fmu-types.hpp"
@@ -182,6 +183,20 @@ class mav_connection
      * the recv thread when requesting the streams, so they need no locking. */
     uint32_t position_stream_interval_us;
     uint32_t battery_stream_interval_us;
+    /* Bound (milliseconds) on how long connect_to_mav() waits for a TCP
+     * connect to complete before giving up (todo/84). Set once at
+     * construction; read only on whichever thread calls connect_to_mav()
+     * (the main thread via start(), or the FSS reconnector thread via
+     * attemptReconnect()), so it needs no locking — same pattern as
+     * goto_altitude_m above. */
+    uint32_t connect_timeout_ms;
+    /* Bound (milliseconds) applied as SO_SNDTIMEO and (where available)
+     * TCP_USER_TIMEOUT on a freshly connected socket, so a peer that stops
+     * reading, or a network path that silently disappears, cannot block a
+     * send indefinitely (todo/84). Set once at construction; read only
+     * inside connect_to_mav() when configuring the socket, so it needs no
+     * locking. */
+    uint32_t send_timeout_ms;
     ILogger &logger;
     auto sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
@@ -228,6 +243,16 @@ class mav_connection
      * anomalous, so a rejection is logged at debug rather than warn/error. */
     auto isFromAutopilot (const mavlink_message_t *msg) -> bool;
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
+    /* Attempt a bounded TCP connect: puts `sock` in non-blocking mode, calls
+     * connect(), and if it does not complete immediately, poll()s for
+     * POLLOUT up to connect_timeout_ms before giving up. Returns true once
+     * the socket is confirmed connected (via SO_ERROR); false on any
+     * failure or timeout, having logged a distinguishing message either way
+     * (todo/84). Restores `sock` to blocking mode before returning true,
+     * since the rest of the connection relies on blocking I/O bounded by
+     * SO_RCVTIMEO/SO_SNDTIMEO, not O_NONBLOCK semantics; on false, `sock` is
+     * left as-is — the caller always closes it immediately. */
+    auto connectWithTimeout (int sock, const struct sockaddr *remote, socklen_t remote_len) -> bool;
     void connect_to_mav ();
     void disconnect_from_mav ();
     void report_position (double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
