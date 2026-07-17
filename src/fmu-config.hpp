@@ -67,6 +67,19 @@ struct FmuConfig
      * mavproxy. */
     std::string mav_address{ "127.0.0.1" };
     int mav_port{ 5760 };
+    /* Upper bound (seconds) on a MAV TCP connect attempt: a black-holed or
+     * unreachable autopilot endpoint must not stall startup/reconnect beyond
+     * this (todo/84). */
+    int mav_connect_timeout_s{ 5 };
+    /* Upper bound (seconds) applied to a blocking MAV send (SO_SNDTIMEO and,
+     * where available, TCP_USER_TIMEOUT): a peer that stops reading, or a
+     * network path that silently disappears, must not pin a sender —
+     * including the event-loop thread issuing a safety command — beyond
+     * this (todo/84). Kept tighter than mav_connect_timeout_s by
+     * default/range: unlike a slow connect, a blocked send runs on/behind
+     * the live event loop, so a large configured value directly extends
+     * comms-failure detection latency. */
+    int mav_send_timeout_s{ 2 };
     /* Logging verbosity: error, info (default), or debug. */
     LogLevel log_level{ LogLevel::info };
     /* Directory the rotating fmu.log is written to. Defaults to the system
