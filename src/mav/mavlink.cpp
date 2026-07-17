@@ -17,8 +17,10 @@
 #include <thread>
 
 #include <cerrno>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -992,6 +994,77 @@ recv_mav_thread (mav_connection *conn)
     conn->processMessages ();
 }
 
+auto
+mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, socklen_t remote_len) -> bool
+{
+    int flags = fcntl (sock, F_GETFL, 0);
+    if (flags == -1 || fcntl (sock, F_SETFL, flags | O_NONBLOCK) == -1)
+    {
+        perror ("Failed to set MAV socket non-blocking for connect");
+        return false;
+    }
+
+    if (connect (sock, remote, remote_len) < 0 && errno != EINPROGRESS)
+    {
+        perror (("Failed to connect to " + this->addr).c_str ());
+        return false;
+    }
+
+    /* connect() may also have completed immediately (e.g. genuinely-local
+     * loopback): poll() still behaves correctly, it just returns POLLOUT right
+     * away. Loop only on EINTR, recomputing the remaining time each pass, so an
+     * unrelated interrupted poll() cannot silently extend the wait past
+     * connect_timeout_ms. */
+    auto deadline = std::chrono::steady_clock::now () + std::chrono::milliseconds (this->connect_timeout_ms);
+    while (true)
+    {
+        auto remaining
+            = std::chrono::duration_cast<std::chrono::milliseconds> (deadline - std::chrono::steady_clock::now ());
+        if (remaining.count () <= 0)
+        {
+            this->logger.log (LogLevel::error, "WARN: Connect to " + this->addr + ":" + std::to_string (this->port)
+                                                   + " timed out after " + std::to_string (this->connect_timeout_ms)
+                                                   + "ms");
+            return false;
+        }
+        struct pollfd pfd = { .fd = sock, .events = POLLOUT, .revents = 0 };
+        int poll_rc = poll (&pfd, 1, static_cast<int> (remaining.count ()));
+        if (poll_rc < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            perror ("poll() failed while connecting to MAV");
+            return false;
+        }
+        if (poll_rc == 0)
+        {
+            this->logger.log (LogLevel::error, "WARN: Connect to " + this->addr + ":" + std::to_string (this->port)
+                                                   + " timed out after " + std::to_string (this->connect_timeout_ms)
+                                                   + "ms");
+            return false;
+        }
+        break;
+    }
+
+    int so_error = 0;
+    socklen_t so_error_len = sizeof (so_error);
+    if (getsockopt (sock, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) < 0 || so_error != 0)
+    {
+        errno = so_error != 0 ? so_error : errno;
+        perror (("Failed to connect to " + this->addr).c_str ());
+        return false;
+    }
+
+    if (fcntl (sock, F_SETFL, flags) == -1)
+    {
+        perror ("Failed to restore MAV socket to blocking mode after connect");
+        return false;
+    }
+    return true;
+}
+
 void
 mav_connection::connect_to_mav ()
 {
@@ -1013,11 +1086,9 @@ mav_connection::connect_to_mav ()
         return;
     }
 
-    if (connect (new_fd, reinterpret_cast<struct sockaddr *> (&remote),
-                 remote.ss_family == AF_INET ? sizeof (struct sockaddr_in) : sizeof (struct sockaddr_in6))
-        < 0)
+    socklen_t remote_len = remote.ss_family == AF_INET ? sizeof (struct sockaddr_in) : sizeof (struct sockaddr_in6);
+    if (!this->connectWithTimeout (new_fd, reinterpret_cast<struct sockaddr *> (&remote), remote_len))
     {
-        perror (("Failed to connect to " + this->addr).c_str ());
         close (new_fd);
         return;
     }
