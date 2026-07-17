@@ -14,6 +14,15 @@ enum FMUState
     fmu_state_goto,
     fmu_state_altitude_adjust,
     fmu_state_rtl,
+    /* SMM has nothing to search right now (a search just completed with none
+     * queued behind it, or the next acquire attempt failed): the aircraft
+     * flies the same RTL flight-mode action as fmu_state_rtl, but unlike a
+     * real RTL this is not a command to stop searching. actionState()
+     * deliberately does not cancel the SMM searching role for this state, so
+     * SMM's own background acquire-retry loop keeps running and a freshly
+     * reacquired search auto-engages with no operator action (todo/70,
+     * todo/77). */
+    fmu_state_waiting_for_tasking,
     fmu_state_hold,
     fmu_state_low_battery,
     fmu_state_failsafe,

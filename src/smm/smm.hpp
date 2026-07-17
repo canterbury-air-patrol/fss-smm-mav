@@ -158,8 +158,11 @@ class SMM : public ISMM
     auto operator= (SMM &) -> SMM & = delete;
     auto operator= (SMM &&) -> SMM & = delete;
     ~SMM () override;
-    /* Register the flight-action callbacks (load an acquired search / fly RTL on a
-     * failed acquire). Call once before SMM activity begins. */
+    /* Register the flight-action callbacks: load an acquired/resumed search,
+     * or report SMM has nothing to search right now -- either a failed
+     * acquire attempt (tryAcquireSearch) or a held search's last waypoint
+     * completing with none queued behind it (doReachedPoint, todo/70). Call
+     * once before SMM activity begins. */
     void registerLoadSearchCB (std::function<void (std::shared_ptr<SMMSearch>)> cb);
     void registerRtlCB (std::function<void ()> cb);
     void connect (const std::string &host, const flight_safety_system::secure_string &user,

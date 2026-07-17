@@ -7,7 +7,7 @@
 auto
 map_smm_state (SMMCommand cmd) -> FMUState
 {
-    FMUState new_state = fmu_state_rtl;
+    FMUState new_state = fmu_state_waiting_for_tasking;
 
     switch (cmd)
     {
@@ -17,7 +17,7 @@ map_smm_state (SMMCommand cmd) -> FMUState
             break;
         case smm_cmd_mission_complete:
         default:
-            new_state = fmu_state_rtl;
+            new_state = fmu_state_waiting_for_tasking;
             break;
     }
     return new_state;
@@ -162,6 +162,7 @@ requires_replay_on_failure (FMUState state) -> bool
         case fmu_state_failsafe:
         case fmu_state_low_battery:
         case fmu_state_terminate:
+        case fmu_state_waiting_for_tasking:
             return true;
         default:
             return false;
@@ -172,7 +173,13 @@ requires_replay_on_failure (FMUState state) -> bool
 auto
 FMUStateMachine::actionState (FMUState state) -> bool
 {
-    if (state != fmu_state_searching)
+    /* waiting_for_tasking is exempted alongside searching: it is SMM
+     * reporting it has nothing to search right now, not a command to stop
+     * searching, so the SMM searching role (and its background acquire-retry
+     * loop) must stay granted -- cancelling it here would permanently starve
+     * the retry loop after the first failure, since nothing else ever
+     * re-grants it short of a fresh explicit FSS continue (todo/70, todo/77). */
+    if (state != fmu_state_searching && state != fmu_state_waiting_for_tasking)
     {
         this->smm.cancelSearch ();
     }
@@ -192,12 +199,16 @@ FMUStateMachine::actionState (FMUState state) -> bool
         case fmu_state_rtl:
         case fmu_state_failsafe:
         case fmu_state_low_battery:
+        case fmu_state_waiting_for_tasking:
             /* Tell MAV to RTL. When the MAV link is down (e.g. the comms-loss
              * failsafe fired precisely because telemetry was lost), the send is
              * skipped (sendMavLinkMsg short-circuits with the link down), so the
              * RTL does not reach the autopilot now. ArduPilot's own comms/GCS
              * failsafe is the immediate backstop; in addition, a failed send here
-             * is recorded below and replayed once the MAV link recovers (todo/46). */
+             * is recorded below and replayed once the MAV link recovers (todo/46).
+             * waiting_for_tasking commands the identical RTL flight mode as a
+             * real RTL -- only the cancelSearch() exemption above and the
+             * FMUState label itself differ. */
             sent = this->mav.setMode (flight_mode_rtl);
             break;
         case fmu_state_goto:
@@ -392,6 +403,13 @@ FMUStateMachine::isSearching () -> bool
 {
     std::lock_guard<std::mutex> lk (this->lock);
     return this->current_state == fmu_state_searching;
+}
+
+auto
+FMUStateMachine::isWaitingForTasking () -> bool
+{
+    std::lock_guard<std::mutex> lk (this->lock);
+    return this->current_state == fmu_state_waiting_for_tasking;
 }
 
 FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm, int t_low_battery_latch_count)

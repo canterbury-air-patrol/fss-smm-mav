@@ -62,9 +62,10 @@ class FMUStateMachine
     const std::thread::id event_loop_thread_id{ std::this_thread::get_id () };
 #endif
     FMUState current_state{ fmu_state_manual };
-    /* A safety-critical state (RTL / failsafe / low-battery / terminate) whose MAV
-     * command could not be transmitted (link down). Replayed when MAV comms
-     * recover; empty once delivered or superseded. Guarded by this->lock. */
+    /* A safety-critical state (RTL / failsafe / low-battery / terminate /
+     * waiting-for-tasking) whose MAV command could not be transmitted (link
+     * down). Replayed when MAV comms recover; empty once delivered or
+     * superseded. Guarded by this->lock. */
     std::optional<FMUState> pending_replay_state{};
     FSSCommand fss_command{ fss_cmd_unknown };
     /* Target of the most recent goto/altitude FSS command, retained so
@@ -126,4 +127,14 @@ class FMUStateMachine
      * transition runs on the event loop too, the guard sees a consistent value
      * (todo/33). */
     auto isSearching () -> bool;
+    /* True while the FMU is waiting for tasking: SMM reported it has nothing
+     * to search right now (a completed search with none queued behind it, or
+     * a failed acquire attempt). The aircraft is flying the same RTL flight
+     * mode as fmu_state_rtl, but -- unlike a real RTL -- the SMM searching
+     * role was deliberately left granted, so SMM's own background
+     * acquire-retry loop keeps running (todo/70, todo/77). The event loop
+     * uses this to resume searching (rather than re-uploading directly) when
+     * SMM reports a freshly (re)acquired search. Reads current_state under
+     * this->lock (todo/33). */
+    auto isWaitingForTasking () -> bool;
 };

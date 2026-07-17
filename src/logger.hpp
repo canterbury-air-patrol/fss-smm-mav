@@ -26,6 +26,8 @@ fmu_state_name (FMUState s)
             return "altitude_adjust";
         case fmu_state_rtl:
             return "rtl";
+        case fmu_state_waiting_for_tasking:
+            return "waiting_for_tasking";
         case fmu_state_hold:
             return "hold";
         case fmu_state_low_battery:
