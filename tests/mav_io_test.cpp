@@ -862,6 +862,47 @@ TEST_CASE ("a send to a peer that stops reading is bounded by the configured sen
     REQUIRE (elapsed < std::chrono::seconds (10));
 }
 
+TEST_CASE ("a stale heartbeat on an otherwise-open socket is retired and reconnected (todo/84)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+    const int accepts_before = server.acceptCount ();
+
+    /* Stop heartbeating without dropping the socket — the fd stays open at the
+     * TCP layer throughout, the "half-open" scenario this test exists for.
+     * Wait for the resulting heartbeat-staleness down edge. */
+    REQUIRE (
+        MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
+
+    /* heartbeat_loop() must have flagged the connection broken without tearing
+     * it down itself (docs/threading.md: only attemptReconnect() retires a
+     * connection) — drive the reconnector as App's would. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            conn.attemptReconnect ();
+            return server.acceptCount () > accepts_before;
+        },
+        io_timeout));
+
+    /* The new connection is a genuinely working recv path, not just a fresh
+     * socket. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendHeartbeat ();
+            return recorder.lastStatus () == MavCommsStatus::ok;
+        },
+        io_timeout));
+}
+
 TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconnect", "[mav_io]")
 {
     reset_mav_parser ();
