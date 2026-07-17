@@ -84,6 +84,17 @@ mav_connection::heartbeat_loop ()
                 this->logger.log (LogLevel::error, std::string ("WARN: Autopilot link down (")
                                                        + (fd_open ? "no heartbeat" : "no link")
                                                        + ") — MAV comms failure");
+                if (fd_open)
+                {
+                    /* A stale heartbeat on a socket that is still locally open is a
+                     * half-open link (todo/84): the network path is gone but the fd
+                     * itself has not errored, so nothing else would ever retire it.
+                     * Only flag it broken here — attemptReconnect() (the reconnector
+                     * thread, the sole owner of actual teardown; see
+                     * docs/threading.md) tears it down and dials a fresh connection
+                     * on its next pass. */
+                    this->broken = true;
+                }
                 /* A goto's MISSION_COUNT can reach the autopilot with the rest
                  * of the upload (request-driven) never completing if the link
                  * then drops. Unlike RTL/failsafe/low-battery/terminate this
