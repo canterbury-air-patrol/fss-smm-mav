@@ -18,12 +18,14 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
+#include <fcntl.h>
 #include <functional>
 #include <iostream>
 #include <limits>
 #include <mutex>
 #include <netinet/in.h>
 #include <optional>
+#include <poll.h>
 #include <random>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -412,6 +414,112 @@ class MavLoopbackServer
     std::vector<uint8_t> leftover{};
 };
 
+/* A bare TCP listener that intentionally never calls accept(), so its accept
+ * queue can be deliberately filled and then a further connect() attempt
+ * reliably times out (its SYN is dropped by the kernel, not merely delayed)
+ * — a deterministic, root-free, firewall-free local stand-in for a
+ * black-holed remote endpoint (todo/84). Distinct from MavLoopbackServer,
+ * which always accepts.
+ *
+ * The accept queue is filled by self-calibration rather than assuming
+ * listen(fd, 1) leaves room for exactly one connection: each filler
+ * connection is itself bounded by a short non-blocking connect+poll, so a
+ * filler that lands on an already-full queue cannot hang the test; the loop
+ * stops as soon as one filler fails to complete quickly, which is the
+ * signal that the queue is now genuinely full regardless of the exact
+ * backlog rounding a given kernel applies. */
+class BlackholeListener
+{
+  public:
+    BlackholeListener ()
+    {
+        this->listen_fd = socket (AF_INET, SOCK_STREAM, 0);
+        REQUIRE (this->listen_fd >= 0);
+        int one = 1;
+        setsockopt (this->listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof (one));
+
+        struct sockaddr_in addr = {};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
+        addr.sin_port = 0;
+        REQUIRE (bind (this->listen_fd, reinterpret_cast<struct sockaddr *> (&addr), sizeof (addr)) == 0);
+
+        socklen_t len = sizeof (addr);
+        REQUIRE (getsockname (this->listen_fd, reinterpret_cast<struct sockaddr *> (&addr), &len) == 0);
+        this->listen_port = ntohs (addr.sin_port);
+
+        REQUIRE (listen (this->listen_fd, 1) == 0);
+
+        bool filled = false;
+        for (int i = 0; i < 8 && !filled; i++)
+        {
+            int filler = socket (AF_INET, SOCK_STREAM, 0);
+            REQUIRE (filler >= 0);
+            int flags = fcntl (filler, F_GETFL, 0);
+            fcntl (filler, F_SETFL, flags | O_NONBLOCK);
+
+            struct sockaddr_in target = {};
+            target.sin_family = AF_INET;
+            target.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
+            target.sin_port = htons (this->listen_port);
+            int rc = connect (filler, reinterpret_cast<struct sockaddr *> (&target), sizeof (target));
+            bool ok = false;
+            if (rc == 0)
+            {
+                ok = true;
+            }
+            else if (errno == EINPROGRESS)
+            {
+                struct pollfd pfd = { .fd = filler, .events = POLLOUT, .revents = 0 };
+                if (poll (&pfd, 1, 200) == 1)
+                {
+                    int so_error = 0;
+                    socklen_t so_error_len = sizeof (so_error);
+                    ok = getsockopt (filler, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) == 0 && so_error == 0;
+                }
+            }
+            if (ok)
+            {
+                /* Keep it open and never accepted: it stays in the queue. */
+                this->fillers.push_back (filler);
+            }
+            else
+            {
+                close (filler);
+                filled = true;
+            }
+        }
+        REQUIRE (filled);
+    }
+
+    ~BlackholeListener ()
+    {
+        for (int fd : this->fillers)
+        {
+            close (fd);
+        }
+        if (this->listen_fd >= 0)
+        {
+            close (this->listen_fd);
+        }
+    }
+    BlackholeListener (const BlackholeListener &) = delete;
+    BlackholeListener (BlackholeListener &&) = delete;
+    auto operator= (const BlackholeListener &) -> BlackholeListener & = delete;
+    auto operator= (BlackholeListener &&) -> BlackholeListener & = delete;
+
+    auto
+    port () const -> uint16_t
+    {
+        return this->listen_port;
+    }
+
+  private:
+    int listen_fd{ -1 };
+    uint16_t listen_port{ 0 };
+    std::vector<int> fillers{};
+};
+
 /* Thread-safe record of the comms-status callbacks (invoked from the FMU's
  * heartbeat thread). */
 class CommsRecorder
@@ -672,6 +780,29 @@ TEST_CASE ("mav_connection reports the link down at cold start, then up once a h
             return recorder.lastStatus () == MavCommsStatus::ok;
         },
         io_timeout));
+}
+
+TEST_CASE ("start() does not block beyond the configured connect deadline against a black-holed endpoint (todo/84)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    BlackholeListener blackhole;
+    CapturingLogger capture;
+
+    MavParams short_connect_params = test_mav_params;
+    short_connect_params.mav_connect_timeout_ms = 300;
+
+    mav_connection conn ("127.0.0.1", blackhole.port (), short_connect_params, capture);
+
+    auto t0 = std::chrono::steady_clock::now ();
+    conn.start ();
+    auto elapsed = std::chrono::steady_clock::now () - t0;
+
+    /* Generous margin over the 300ms deadline covers scheduling noise and TSan
+     * instrumentation overhead without masking a regression to an unbounded
+     * (multi-second-to-minutes) OS-level connect timeout. */
+    REQUIRE (elapsed < std::chrono::seconds (2));
+    REQUIRE (capture.containsSubstring ("timed out"));
 }
 
 TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconnect", "[mav_io]")
