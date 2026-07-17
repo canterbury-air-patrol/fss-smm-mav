@@ -110,13 +110,19 @@ class App
                                    { enqueue_event (std::make_shared<event> (SmmLoadSearch{ search })); });
         smm->registerRtlCB ([this] { enqueue_event (std::make_shared<event> (SmmRtl{})); });
 
+        /* Start signal handling before any potentially long external operation
+         * (todo/84): SIGINT/SIGTERM are already blocked process-wide (see
+         * main()), so this only decides how promptly a pending signal is
+         * consumed once raised, not whether it is lost — but starting it first
+         * is cheap and keeps that window as small as possible. */
+        std::thread sig_thread ([this] { signal_waiter (); });
+
         /* All callbacks are now registered; only now open the MAV connection and
          * start its recv/heartbeat threads, so those threads cannot race the
          * registration above. (FSS connects lazily via the reconnector below,
          * which likewise starts after registration.) */
         mav->start ();
 
-        std::thread sig_thread ([this] { signal_waiter (); });
         std::thread reconnector ([this] { fss_reconnector (); });
 
         while (true)
