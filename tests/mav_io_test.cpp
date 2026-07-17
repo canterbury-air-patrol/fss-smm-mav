@@ -169,13 +169,15 @@ class MavLoopbackServer
         return this->accept_count.load ();
     }
 
-    /* Send a HEARTBEAT as if from the autopilot (sysid 1), so the FMU records a
-     * fresh last_heartbeat_ts and the heartbeat loop reports the link up. */
+    /* Send a HEARTBEAT as if from `sysid` (the autopilot, sysid 1, by default),
+     * so the FMU records a fresh last_heartbeat_ts and the heartbeat loop
+     * reports the link up. A non-default sysid (todo/83) stands in for another
+     * vehicle or GCS sharing the link. */
     void
-    sendHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR)
+    sendHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR, uint8_t sysid = 1)
     {
         mavlink_message_t msg;
-        mavlink_msg_heartbeat_pack_chan (1, 1, autopilot_tx_channel, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0,
+        mavlink_msg_heartbeat_pack_chan (sysid, 1, autopilot_tx_channel, &msg, type, MAV_AUTOPILOT_ARDUPILOTMEGA, 0, 0,
                                          MAV_STATE_ACTIVE);
         sendMsg (msg);
     }
@@ -189,14 +191,15 @@ class MavLoopbackServer
         sendPosition (/*lat*/ -435000000, /*lon*/ 1726000000);
     }
 
-    /* Same, with an explicit lat/lon (todo/68): lets a test send the exact
-     * same coordinates repeatedly, e.g. to simulate an EKF position estimate
-     * that has frozen rather than genuinely updating. */
+    /* Same, with an explicit lat/lon (todo/68) and sysid (todo/83): lets a test
+     * send the exact same coordinates repeatedly, e.g. to simulate an EKF
+     * position estimate that has frozen rather than genuinely updating, or
+     * attribute the report to a system other than the configured autopilot. */
     void
-    sendPosition (int32_t lat, int32_t lon)
+    sendPosition (int32_t lat, int32_t lon, uint8_t sysid = 1)
     {
         mavlink_message_t msg;
-        mavlink_msg_global_position_int_pack_chan (1, 1, autopilot_tx_channel, &msg, 0, lat, lon,
+        mavlink_msg_global_position_int_pack_chan (sysid, 1, autopilot_tx_channel, &msg, 0, lat, lon,
                                                    /*alt mm*/ 100000, /*rel alt mm*/ 100000, 0, 0, 0, /*hdg*/ 0);
         sendMsg (msg);
     }
@@ -204,12 +207,13 @@ class MavLoopbackServer
     /* Send a GPS_RAW_INT with the given fix_type (todo/68) — e.g.
      * GPS_FIX_TYPE_NO_FIX — as ArduPilot would report GPS health directly
      * (distinct from GLOBAL_POSITION_INT, which carries the EKF's position
-     * estimate and has no fix-validity field of its own). */
+     * estimate and has no fix-validity field of its own). A non-default sysid
+     * (todo/83) stands in for another vehicle or GCS sharing the link. */
     void
-    sendGpsRawInt (uint8_t fix_type)
+    sendGpsRawInt (uint8_t fix_type, uint8_t sysid = 1)
     {
         mavlink_message_t msg;
-        mavlink_msg_gps_raw_int_pack_chan (1, 1, autopilot_tx_channel, &msg, /*time_usec*/ 0, fix_type, /*lat*/ 0,
+        mavlink_msg_gps_raw_int_pack_chan (sysid, 1, autopilot_tx_channel, &msg, /*time_usec*/ 0, fix_type, /*lat*/ 0,
                                            /*lon*/ 0, /*alt*/ 0, /*eph*/ UINT16_MAX, /*epv*/ UINT16_MAX,
                                            /*vel*/ UINT16_MAX, /*cog*/ UINT16_MAX, /*satellites_visible*/ 0,
                                            /*alt_ellipsoid*/ 0, /*h_acc*/ 0, /*v_acc*/ 0, /*vel_acc*/ 0,
@@ -217,23 +221,51 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
-    /* Send a MISSION_REQUEST_INT for `seq` as the autopilot would during a
-     * mission upload (addressed to the FMU at SYS_ID/COMP_ID). */
+    /* Send a BATTERY_STATUS as ArduPilot would, with the pack voltage in cell 0
+     * (see battery-voltage.hpp). A non-default sysid (todo/83) stands in for
+     * another vehicle or GCS sharing the link. */
     void
-    sendMissionRequestInt (uint16_t seq, uint8_t mission_type)
+    sendBatteryStatus (int8_t remaining, int32_t consumed, uint16_t cell0_mv, uint8_t sysid = 1)
     {
         mavlink_message_t msg;
-        mavlink_msg_mission_request_int_pack_chan (1, 1, autopilot_tx_channel, &msg, fmu_sys_id, fmu_comp_id, seq,
+        uint16_t voltages[10] = { cell0_mv };
+        uint16_t voltages_ext[4] = {};
+        mavlink_msg_battery_status_pack_chan (sysid, 1, autopilot_tx_channel, &msg, /*id*/ 0, /*battery_function*/ 0,
+                                              /*type*/ 0, /*temperature*/ 0, voltages, /*current_battery*/ 0, consumed,
+                                              /*energy_consumed*/ -1, remaining, /*time_remaining*/ 0,
+                                              /*charge_state*/ 0, voltages_ext, /*mode*/ 0, /*fault_bitmask*/ 0);
+        sendMsg (msg);
+    }
+
+    /* Send a MISSION_ITEM_REACHED for `seq`. A non-default sysid (todo/83)
+     * stands in for another vehicle or GCS sharing the link. */
+    void
+    sendMissionItemReached (uint16_t seq, uint8_t sysid = 1)
+    {
+        mavlink_message_t msg;
+        mavlink_msg_mission_item_reached_pack_chan (sysid, 1, autopilot_tx_channel, &msg, seq);
+        sendMsg (msg);
+    }
+
+    /* Send a MISSION_REQUEST_INT for `seq` as the autopilot would during a
+     * mission upload (addressed to the FMU at SYS_ID/COMP_ID). A non-default
+     * sysid (todo/83) stands in for another vehicle or GCS sharing the link. */
+    void
+    sendMissionRequestInt (uint16_t seq, uint8_t mission_type, uint8_t sysid = 1)
+    {
+        mavlink_message_t msg;
+        mavlink_msg_mission_request_int_pack_chan (sysid, 1, autopilot_tx_channel, &msg, fmu_sys_id, fmu_comp_id, seq,
                                                    mission_type);
         sendMsg (msg);
     }
 
-    /* Acknowledge a completed mission upload as accepted. */
+    /* Acknowledge a completed mission upload as accepted. A non-default sysid
+     * (todo/83) stands in for another vehicle or GCS sharing the link. */
     void
-    sendMissionAck (uint8_t mission_type)
+    sendMissionAck (uint8_t mission_type, uint8_t sysid = 1)
     {
         mavlink_message_t msg;
-        mavlink_msg_mission_ack_pack_chan (1, 1, autopilot_tx_channel, &msg, fmu_sys_id, fmu_comp_id,
+        mavlink_msg_mission_ack_pack_chan (sysid, 1, autopilot_tx_channel, &msg, fmu_sys_id, fmu_comp_id,
                                            MAV_MISSION_ACCEPTED, mission_type, 0);
         sendMsg (msg);
     }
@@ -274,12 +306,26 @@ class MavLoopbackServer
     }
 
     /* Read and parse inbound MAVLink from the FMU until a message of `want`
-     * arrives (skipping heartbeats, mode sets, etc.) or the timeout elapses. */
+     * arrives (skipping heartbeats, mode sets, etc.) or the timeout elapses.
+     * The FMU can emit two messages back-to-back (e.g. MISSION_SET_CURRENT
+     * immediately followed by SET_MODE) that land in the same recv() chunk;
+     * any bytes after the match are stashed in `leftover` for the next call
+     * instead of being silently discarded, so a subsequent recvMessage() for
+     * that trailing message cannot flake depending on kernel buffering. */
     auto
     recvMessage (uint32_t want, mavlink_message_t &out, std::chrono::milliseconds timeout) -> bool
     {
-        const auto deadline = std::chrono::steady_clock::now () + timeout;
         mavlink_status_t status;
+        while (!this->leftover.empty ())
+        {
+            uint8_t c = this->leftover.front ();
+            this->leftover.erase (this->leftover.begin ());
+            if (mavlink_parse_char (autopilot_rx_channel, c, &out, &status) && out.msgid == want)
+            {
+                return true;
+            }
+        }
+        const auto deadline = std::chrono::steady_clock::now () + timeout;
         while (std::chrono::steady_clock::now () < deadline)
         {
             int fd = this->client_fd.load ();
@@ -298,6 +344,7 @@ class MavLoopbackServer
             {
                 if (mavlink_parse_char (autopilot_rx_channel, buf[i], &out, &status) && out.msgid == want)
                 {
+                    this->leftover.insert (this->leftover.end (), buf + i + 1, buf + n);
                     return true;
                 }
             }
@@ -358,6 +405,11 @@ class MavLoopbackServer
     std::atomic<int> client_fd{ -1 };
     std::atomic<int> accept_count{ 0 };
     std::thread accept_thread{};
+    /* Bytes already read from the socket but not yet consumed by a
+     * recvMessage() call, since a match returns as soon as it is found and
+     * must not drop whatever followed it in the same recv() chunk. Only
+     * ever touched from the (single) test thread, so it needs no lock. */
+    std::vector<uint8_t> leftover{};
 };
 
 /* Thread-safe record of the comms-status callbacks (invoked from the FMU's
@@ -495,6 +547,70 @@ class PositionRecorder
     std::atomic<int> count{ 0 };
     std::mutex mtx{};
     PositionData last{};
+};
+
+/* Thread-safe counter of battery callbacks (todo/83: proves a foreign sysid's
+ * BATTERY_STATUS never reaches it). */
+class BatteryRecorder
+{
+  public:
+    void
+    record (const BatteryData &bd)
+    {
+        {
+            const std::lock_guard<std::mutex> lk (this->mtx);
+            this->last = bd;
+        }
+        this->count.fetch_add (1);
+    }
+    auto
+    count_now () const -> int
+    {
+        return this->count.load ();
+    }
+    auto
+    lastBattery () -> BatteryData
+    {
+        const std::lock_guard<std::mutex> lk (this->mtx);
+        return this->last;
+    }
+
+  private:
+    std::atomic<int> count{ 0 };
+    std::mutex mtx{};
+    BatteryData last{};
+};
+
+/* Thread-safe counter of reached-point callbacks (todo/83: proves a foreign
+ * sysid's MISSION_ITEM_REACHED never reaches it). */
+class ReachedRecorder
+{
+  public:
+    void
+    record (int point)
+    {
+        {
+            const std::lock_guard<std::mutex> lk (this->mtx);
+            this->last = point;
+        }
+        this->count.fetch_add (1);
+    }
+    auto
+    count_now () const -> int
+    {
+        return this->count.load ();
+    }
+    auto
+    lastPoint () -> int
+    {
+        const std::lock_guard<std::mutex> lk (this->mtx);
+        return this->last;
+    }
+
+  private:
+    std::atomic<int> count{ 0 };
+    std::mutex mtx{};
+    int last{ -1 };
 };
 
 /* Establish a real down->up edge and wait for it: the comms-status callback
@@ -1514,4 +1630,217 @@ TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged ea
         REQUIRE (pd.getP ().getLongitude () == Catch::Approx (172.6));
     }
     REQUIRE (positions.count_now () >= 5);
+}
+
+TEST_CASE ("A heartbeat from a system other than the configured autopilot does not affect comms health or a "
+           "deferred mode (todo/83)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* Cold start: no heartbeat from any system yet. */
+    REQUIRE (
+        MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
+
+    /* Defer an RTL while the autopilot type is unknown (the todo/82 deferred-
+     * mode path): resolve_mav_mode(unknown, rtl) has no mapping, so the
+     * SET_MODE is held until a heartbeat resolves the airframe type. */
+    conn.commandRTL ();
+
+    mavlink_message_t msg;
+    /* A ground control station and a second vehicle sharing this link both
+     * heartbeat. Neither may report comms up or resolve the deferred RTL —
+     * only the configured autopilot system (sysid 1) may. */
+    constexpr uint8_t gcs_sysid = 255;
+    constexpr uint8_t other_vehicle_sysid = 2;
+    for (int i = 0; i < 3; i++)
+    {
+        server.sendHeartbeat (MAV_TYPE_GCS, gcs_sysid);
+        server.sendHeartbeat (MAV_TYPE_QUADROTOR, other_vehicle_sysid);
+    }
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, no_message_timeout));
+    REQUIRE (recorder.lastStatus () == MavCommsStatus::failure);
+
+    /* The real autopilot's heartbeat now resolves both: comms reports up and
+     * the deferred RTL is finally sent. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendHeartbeat ();
+            return recorder.lastStatus () == MavCommsStatus::ok;
+        },
+        io_timeout));
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, io_timeout));
+    REQUIRE (mavlink_msg_set_mode_get_custom_mode (&msg) == COPTER_MODE_RTL);
+}
+
+TEST_CASE ("A GLOBAL_POSITION_INT or GPS_RAW_INT from a system other than the configured autopilot has no effect "
+           "(todo/83)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    auto waitForEchoedPosition = [&] (int32_t lat_e7, int32_t lon_e7) -> PositionData
+    {
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPosition (lat_e7, lon_e7);
+                PositionData last = positions.lastPosition ();
+                return last.getP ().getLatitude () == Catch::Approx (lat_e7 * 1e-7)
+                       && last.getP ().getLongitude () == Catch::Approx (lon_e7 * 1e-7);
+            },
+            io_timeout));
+        return positions.lastPosition ();
+    };
+
+    /* Establish a good fix from the real autopilot. */
+    server.sendGpsRawInt (GPS_FIX_TYPE_3D_FIX);
+    PositionData pd_good = waitForEchoedPosition (-435000000, 1726000000);
+    REQUIRE ((pd_good.getFlags () & POSITION_FLAG_VALID_COORDS) != 0);
+
+    /* A second vehicle on the same link reports a wildly different position
+     * and a lost fix. Neither may be observed anywhere: not the position
+     * callback, not getLastPosition(), and not the next real report's
+     * validity flag (which is driven by gps_fix_type). A strict callback-
+     * count check would be racy here — a duplicate re-send of the prior
+     * real position (from waitForEchoedPosition's retry loop) can still be
+     * in flight and land during this window — so check content instead: the
+     * foreign (0, 0) coordinates must never be observed. */
+    constexpr uint8_t other_vehicle_sysid = 2;
+    const auto deadline = std::chrono::steady_clock::now () + no_message_timeout;
+    while (std::chrono::steady_clock::now () < deadline)
+    {
+        server.sendPosition (0, 0, other_vehicle_sysid);
+        server.sendGpsRawInt (GPS_FIX_TYPE_NO_FIX, other_vehicle_sysid);
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+    REQUIRE (positions.lastPosition ().getP ().getLatitude () == Catch::Approx (-43.5));
+    REQUIRE (positions.lastPosition ().getP ().getLongitude () == Catch::Approx (172.6));
+    REQUIRE (conn.getLastPosition ().getLatitude () == Catch::Approx (-43.5));
+    REQUIRE (conn.getLastPosition ().getLongitude () == Catch::Approx (172.6));
+
+    /* The real autopilot's next report is still flagged valid — proving the
+     * foreign GPS_RAW_INT(NO_FIX) never touched gps_fix_type. */
+    PositionData pd_after = waitForEchoedPosition (-436000000, 1727000000);
+    REQUIRE ((pd_after.getFlags () & POSITION_FLAG_VALID_COORDS) != 0);
+}
+
+TEST_CASE ("A BATTERY_STATUS or MISSION_ITEM_REACHED from a system other than the configured autopilot produces no "
+           "callback (todo/83)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    BatteryRecorder battery;
+    ReachedRecorder reached;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerBatteryCB ([&battery] (const BatteryData &bd) { battery.record (bd); });
+    conn.registerReachedCB ([&reached] (int point) { reached.record (point); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    constexpr uint8_t other_vehicle_sysid = 2;
+    constexpr uint16_t reached_seq = 3;
+
+    /* A second vehicle on the same link reports its own battery status and
+     * mission progress. Neither callback may fire. */
+    const int before_battery = battery.count_now ();
+    const int before_reached = reached.count_now ();
+    const auto deadline = std::chrono::steady_clock::now () + no_message_timeout;
+    while (std::chrono::steady_clock::now () < deadline)
+    {
+        server.sendBatteryStatus (/*remaining*/ 5, /*consumed*/ 100, /*cell0_mv*/ 10000, other_vehicle_sysid);
+        server.sendMissionItemReached (reached_seq, other_vehicle_sysid);
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+    REQUIRE (battery.count_now () == before_battery);
+    REQUIRE (reached.count_now () == before_reached);
+
+    /* The real autopilot's equivalent reports still reach both callbacks. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendBatteryStatus (50, 500, 12000);
+            return battery.count_now () > before_battery;
+        },
+        io_timeout));
+    REQUIRE (battery.lastBattery ().getRemaining () == 50);
+
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendMissionItemReached (reached_seq);
+            return reached.count_now () > before_reached;
+        },
+        io_timeout));
+    REQUIRE (reached.lastPoint () == static_cast<int> (reached_seq) - search_first_point_seq + 1);
+}
+
+TEST_CASE ("A MISSION_REQUEST_INT or MISSION_ACK from a system other than the configured autopilot has no mission "
+           "side effects (todo/83)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    conn.commandGoto (Point (-43.5, 172.6));
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
+    const uint8_t mission_type = mavlink_msg_mission_count_get_mission_type (&msg);
+    const uint16_t count = mavlink_msg_mission_count_get_count (&msg);
+
+    constexpr uint8_t other_vehicle_sysid = 2;
+
+    /* A second vehicle's request for the first item is not served — the
+     * upload only responds to the configured autopilot. */
+    server.sendMissionRequestInt (0, mission_type, other_vehicle_sysid);
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_MISSION_ITEM_INT, msg, no_message_timeout));
+
+    /* The real autopilot's requests still drive the upload to completion. */
+    for (uint16_t seq = 0; seq < count; seq++)
+    {
+        server.sendMissionRequestInt (seq, mission_type);
+        REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_ITEM_INT, msg, io_timeout));
+    }
+
+    /* A second vehicle's accepted ack must not select current or engage AUTO. */
+    server.sendMissionAck (mission_type, other_vehicle_sysid);
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, no_message_timeout));
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, no_message_timeout));
+
+    /* The real autopilot's accepted ack still completes the upload. */
+    server.sendMissionAck (mission_type);
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, io_timeout));
+    REQUIRE (mavlink_msg_mission_set_current_get_seq (&msg) == 0);
+    expect_auto_mode (server);
 }
