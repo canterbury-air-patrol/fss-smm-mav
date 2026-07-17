@@ -504,6 +504,18 @@ SMM::doReachedPoint (int point)
     if (held != nullptr && held->reachedPoint (point))
     {
         this->publishSearch (nullptr);
+        /* Nothing is held now, so the FMU has nothing to search: report the
+         * same outcome as a failed (re)acquire (todo/70) so the state
+         * machine moves to waiting-for-tasking immediately, rather than only
+         * once the next opportunistic acquire attempt (still retried, since
+         * search_active is deliberately left untouched here) eventually
+         * fails. Covered end-to-end by the CAP Tier-3 suite (test_b06,
+         * todo/77); SMMSearch::reachedPoint()'s completion branch cannot be
+         * driven from a unit test without a live SMM search handle. */
+        if (this->rtl_cb)
+        {
+            this->rtl_cb ();
+        }
     }
 }
 
