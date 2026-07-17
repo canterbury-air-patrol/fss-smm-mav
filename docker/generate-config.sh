@@ -67,6 +67,24 @@ if [ "${SERVER1_PORT}" -lt 1 ] || [ "${SERVER1_PORT}" -gt 65535 ]; then
     exit 1
 fi
 
+# SERVER2_ADDR/PORT are optional: a second, independent FSS server for
+# redundancy deployments. The FSS client already supports an arbitrary
+# "servers" list (each connection managed and reconnected independently),
+# this just exposes a second entry the same way SERVER1 does. Unset
+# SERVER2_ADDR reproduces the single-server config exactly as before.
+if [ -n "${SERVER2_ADDR}" ]; then
+    case "${SERVER2_PORT}" in
+        '' | *[!0-9]*)
+            echo "Error: SERVER2_PORT must be set to a numeric port" >&2
+            exit 1
+            ;;
+    esac
+    if [ "${SERVER2_PORT}" -lt 1 ] || [ "${SERVER2_PORT}" -gt 65535 ]; then
+        echo "Error: SERVER2_PORT must be between 1 and 65535 (got ${SERVER2_PORT})" >&2
+        exit 1
+    fi
+fi
+
 # LOG_DIR is optional (todo/78): the image creates and owns the cap-fmu
 # default (/var/log/cap-fmu) so logging works out of the box, but a
 # deployment that wants logs to survive container recreation can set LOG_DIR
@@ -80,10 +98,16 @@ LOG_DIR="${LOG_DIR:-}"
 # containing a quote, backslash, or newline cannot break the document or
 # inject a field), and the ports are passed with --argjson so they land as
 # JSON numbers, matching the numeric fields loadFmuConfig expects.
+# server2_addr defaults to "" (rather than leaving --arg unset) so the jq
+# filter can key the second servers[] entry on it being non-empty; its port
+# is only ever read when server2_addr is non-empty, so an unset/zero
+# server2_port there is inert.
 jq -n \
     --arg name "${NAME}" \
     --arg server_addr "${SERVER1_ADDR}" \
     --argjson server_port "${SERVER1_PORT}" \
+    --arg server2_addr "${SERVER2_ADDR:-}" \
+    --argjson server2_port "${SERVER2_PORT:-0}" \
     --arg mav_host "${MAVPROXY_HOST}" \
     --argjson mav_port "${MAVPROXY_PORT}" \
     --arg log_dir "${LOG_DIR}" \
@@ -94,9 +118,10 @@ jq -n \
             client_private_key: ("/certs/" + $name + ".private.pem"),
             client_public_key: ("/certs/" + $name + ".public.pem")
         },
-        servers: [
-            { address: $server_addr, port: $server_port }
-        ],
+        servers: (
+            [{ address: $server_addr, port: $server_port }]
+            + (if $server2_addr != "" then [{ address: $server2_addr, port: $server2_port }] else [] end)
+        ),
         fmu: ({
             mav_address: $mav_host,
             mav_port: $mav_port
