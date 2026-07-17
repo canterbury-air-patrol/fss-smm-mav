@@ -312,6 +312,31 @@ TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms rec
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
+TEST_CASE ("a waiting_for_tasking RTL that failed to send is replayed once MAV comms report okay again (todo/46/70)",
+           "[state_machine][replay]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 1);
+
+    mav->send_succeeds = false;
+    sm->SMMNewCommand (smm_cmd_mission_complete);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    const int calls_before = mav->set_mode_calls;
+
+    /* Unlike low_battery/terminate, waiting_for_tasking is not a latch: a
+     * genuine comms down->up cycle would itself re-drive the send via the
+     * ordinary transition path (out to failsafe and back), not the replay
+     * mechanism. So exercise the mechanism directly with a redundant "comms
+     * still okay" edge, which reports no transition and must fall back to
+     * replaying the still-pending send. */
+    mav->send_succeeds = true;
+    sm->setMavCommsFailure (false);
+    REQUIRE (mav->set_mode_calls == calls_before + 1);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
 TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (todo/46)",
            "[state_machine][replay][TC-FS-005]")
 {
@@ -390,16 +415,23 @@ TEST_CASE ("continue after a hold re-invokes the search so it can resume", "[sta
  * priority input (an explicit FSS command, low battery, or comms failure) takes
  * over an active search. These cover the transitions into/out of searching; the
  * pause/resume behaviour of the search itself is tracked separately (todo/50). */
-TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL", "[state_machine]")
+TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL, without cancelling the search role (todo/70)",
+           "[state_machine]")
 {
     auto [mav, smm, sm] = make_sm ();
 
     sm->FSSNewCommand (fss_cmd_continue);
     REQUIRE (smm->search_calls == 1);
 
-    /* SMM reports the search done: the FMU leaves searching for RTL. */
+    /* SMM reports the search done: the FMU leaves searching for
+     * waiting_for_tasking, the same RTL flight mode as a real RTL. */
     sm->SMMNewCommand (smm_cmd_mission_complete);
     REQUIRE (mav->last_mode == flight_mode_rtl);
+    /* Unlike a real RTL, this must NOT cancel the SMM searching role: the
+     * acquire-retry loop must keep running so a freshly reacquired search
+     * auto-engages with no operator action (todo/77). Contrast with "low
+     * battery forces RTL out of an active search" below. */
+    REQUIRE (smm->cancel_calls == 0);
 }
 
 TEST_CASE ("an explicit FSS command overrides an active SMM search", "[state_machine]")
@@ -430,6 +462,10 @@ TEST_CASE ("low battery forces RTL out of an active search", "[state_machine]")
 
     latch_low_battery (sm);
     REQUIRE (mav->last_mode == flight_mode_rtl);
+    /* Contrast with "smm_cmd_mission_complete ... without cancelling the
+     * search role" above: a genuine latch-driven RTL DOES cancel the SMM
+     * searching role. */
+    REQUIRE (smm->cancel_calls >= 1);
 }
 
 TEST_CASE ("comms failure forces RTL out of an active search", "[state_machine][TC-MAV-004][TC-MAV-005]")
@@ -2325,19 +2361,73 @@ TEST_CASE ("EventDispatcher gates SmmLoadSearch on isSearching()", "[event_dispa
     REQUIRE (f.mav->load_search_calls == 1);
 }
 
-TEST_CASE ("EventDispatcher gates SmmRtl on isSearching()", "[event_dispatcher]")
+TEST_CASE ("EventDispatcher routes SmmRtl through the state machine's own arbitration (todo/70)", "[event_dispatcher]")
 {
     auto f = make_dispatcher ();
 
-    event not_searching = SmmRtl{};
-    f.dispatcher->dispatch (not_searching);
-    REQUIRE (f.mav->set_mode_calls == 0);
+    /* A higher-priority FSS command already in effect. Suppression is now
+     * performed by SMMNewCommand's own priority arbitration inside
+     * FMUStateMachine, not an isSearching() guard in this handler, so this is
+     * exercised with a real command in effect rather than the bare
+     * "dispatch before any FSS command" setup the old guard-based test used
+     * -- that setup only worked because of an unrelated pre-existing quirk
+     * (an uncommanded fss_command defaults to fss_cmd_unknown, which itself
+     * maps to searching, same as "fss_cmd_continue with smm_cmd_abandon_search
+     * leads to searching" above exploits) that real production sequencing can
+     * never reach SmmRtl through, since SMM can only fire it once the FMU has
+     * already been in fmu_state_searching at least once. */
+    f.sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (f.mav->last_mode == flight_mode_hold);
+    int calls_before = f.mav->set_mode_calls;
+
+    event suppressed = SmmRtl{};
+    f.dispatcher->dispatch (suppressed);
+    REQUIRE (f.mav->set_mode_calls == calls_before);
+    REQUIRE (f.mav->last_mode == flight_mode_hold);
+
+    /* While genuinely searching, SmmRtl really does take effect: the FMU
+     * moves to waiting_for_tasking (RTL flight mode) without cancelling the
+     * searching role (todo/77). */
+    f.sm->FSSNewCommand (fss_cmd_continue);
+    int cancel_calls_before = f.smm->cancel_calls;
+    event real_rtl = SmmRtl{};
+    f.dispatcher->dispatch (real_rtl);
+    REQUIRE (f.mav->last_mode == flight_mode_rtl);
+    REQUIRE (f.smm->cancel_calls == cancel_calls_before);
+}
+
+TEST_CASE (
+    "EventDispatcher auto-reacquires a search while waiting_for_tasking, without a duplicate upload (todo/70/77)",
+    "[event_dispatcher]")
+{
+    auto f = make_dispatcher ();
 
     f.sm->FSSNewCommand (fss_cmd_continue);
-    event while_searching = SmmRtl{};
-    f.dispatcher->dispatch (while_searching);
-    REQUIRE (f.mav->set_mode_calls == 1);
+    REQUIRE (f.smm->search_calls == 1);
+
+    event rtl_evt = SmmRtl{};
+    f.dispatcher->dispatch (rtl_evt);
     REQUIRE (f.mav->last_mode == flight_mode_rtl);
+    REQUIRE (f.smm->cancel_calls == 0);
+
+    /* SMM's background retry (kept alive above) reacquires a search and
+     * reports it -- no operator action (no FSSNewCommand call here). The
+     * first SmmLoadSearch while waiting_for_tasking must not upload directly
+     * (that would double-upload against the real SMM's own resume re-issue,
+     * see the SmmLoadSearch handler's comment) -- it resumes searching
+     * instead. */
+    event ls1 = SmmLoadSearch{ nullptr };
+    f.dispatcher->dispatch (ls1);
+    REQUIRE (f.mav->load_search_calls == 0);
+    REQUIRE (f.smm->search_calls == 2);
+    REQUIRE (f.smm->cancel_calls == 0);
+
+    /* The real SMM's resume path re-fires load_search_cb once more with the
+     * same search, now that the FMU is genuinely searching again -- this is
+     * the one that actually uploads. */
+    event ls2 = SmmLoadSearch{ nullptr };
+    f.dispatcher->dispatch (ls2);
+    REQUIRE (f.mav->load_search_calls == 1);
 }
 
 TEST_CASE ("EventDispatcher never classifies an unknown battery reading as low, but still feeds the debounce",
