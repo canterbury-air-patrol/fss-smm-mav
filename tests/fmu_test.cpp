@@ -1342,6 +1342,87 @@ TEST_CASE ("an altitude command with a different value within the window actuate
     REQUIRE (changed.disposition == CommandAckGroup<int>::Disposition::actuate);
 }
 
+/* todo/86 (retry-suppression half): a server_command_id lets a connection's
+ * redelivery of the SAME operator action be told apart from that connection
+ * delivering a genuinely NEW action with identical command/payload — the
+ * upstream (flight-safety-system todo/49) contract cap-fmu was blocked on. */
+
+TEST_CASE ("a same-command retry with a fresh server command id re-actuates a resolved command",
+           "[command_ack][group][TC-MAV-006]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_goto = 3;
+    constexpr uint64_t connection_a = 1;
+    const auto target = CommandPayload::forPosition (-43.5, 172.6);
+
+    auto first = group.onDelivery (cmd_goto, 1000, 1, target, /*server_command_id=*/100, connection_a);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+    group.resolve (first.epoch, actioned ());
+
+    /* Same connection, same command/payload/timestamp window, but the goto's
+     * upload never completed and the operator retried: the server assigns a
+     * fresh DB row, so a new server_command_id arrives. That must reach the
+     * state machine again, not replay the stale cached ack. */
+    auto retry = group.onDelivery (cmd_goto, 1000, 2, target, /*server_command_id=*/101, connection_a);
+    REQUIRE (retry.disposition == CommandAckGroup<int>::Disposition::actuate);
+}
+
+TEST_CASE ("a same-command redelivery with the same server command id still dedups", "[command_ack][group][TC-MAV-006]")
+{
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_hold = 5;
+    constexpr uint64_t connection_a = 1;
+
+    auto first = group.onDelivery (cmd_hold, 1000, 1, {}, /*server_command_id=*/100, connection_a);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+
+    /* Same id from the same connection (resend window, reconnect identify,
+     * server bounce): still the same operator action, not a retry. */
+    auto redelivery = group.onDelivery (cmd_hold, 1000, 2, {}, /*server_command_id=*/100, connection_a);
+    REQUIRE (redelivery.disposition == CommandAckGroup<int>::Disposition::pending);
+
+    group.resolve (first.epoch, actioned ());
+    auto late_redelivery = group.onDelivery (cmd_hold, 1000, 3, {}, /*server_command_id=*/100, connection_a);
+    REQUIRE (late_redelivery.disposition == CommandAckGroup<int>::Disposition::already_resolved);
+}
+
+TEST_CASE ("a second connection's first copy is still a duplicate, not a retry, even with its own id",
+           "[command_ack][group][TC-MAV-006]")
+{
+    /* Ids are only comparable within one connection (upstream contract): a
+     * second server's first delivery of the same operator action carries its
+     * OWN id (a different DB row on that server), which must not be mistaken
+     * for a retry just because it has never been seen before. */
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_hold = 5;
+    constexpr uint64_t connection_a = 1;
+    constexpr uint64_t connection_b = 2;
+
+    auto first = group.onDelivery (cmd_hold, 1000, 1, {}, /*server_command_id=*/100, connection_a);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+
+    auto second = group.onDelivery (cmd_hold, 1000, 2, {}, /*server_command_id=*/555, connection_b);
+    REQUIRE (second.disposition == CommandAckGroup<int>::Disposition::pending);
+}
+
+TEST_CASE ("a server command id of zero never overrides the timestamp-window heuristic",
+           "[command_ack][group][TC-MAV-006]")
+{
+    /* 0 means "not reported" (legacy peer, or the connection did not negotiate
+     * FSS_FEATURE_SERVER_COMMAND_ID): behaviour must stay exactly the
+     * pre-todo/86-fix timestamp-window dedup. */
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_hold = 5;
+    constexpr uint64_t connection_a = 1;
+
+    auto first = group.onDelivery (cmd_hold, 1000, 1, {}, /*server_command_id=*/0, connection_a);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+    group.resolve (first.epoch, actioned ());
+
+    auto redelivery = group.onDelivery (cmd_hold, 1000, 2, {}, /*server_command_id=*/0, connection_a);
+    REQUIRE (redelivery.disposition == CommandAckGroup<int>::Disposition::already_resolved);
+}
+
 TEST_CASE ("altitude unit helpers convert between metres, feet and MAVLink mm", "[altitude_units]")
 {
     /* 1 foot is exactly 0.3048 m, so 100 m is ~328.084 ft. */

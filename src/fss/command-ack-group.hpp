@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -139,18 +140,47 @@ template <typename Target> class CommandAckGroup
      * for equality; `t_payload` is the payload for payload-bearing commands,
      * matched via CommandPayload::sameAs (so a changed goto target / altitude is a
      * new logical command, not a duplicate); `t_timestamp` is matched within the
-     * tolerance. */
+     * tolerance.
+     *
+     * `t_server_command_id`/`t_connection_key` are the todo/86 retry-vs-redundant
+     * signal: the dispatching server's per-connection command identifier (0 = not
+     * reported, e.g. a legacy peer or the capability was not negotiated) and an
+     * opaque identifier for the connection it arrived on (e.g. the originating
+     * fss_server, stable across reconnects). Per the upstream contract, ids are
+     * comparable only within one connection, never across connections — so this
+     * only ever compares a delivery's id against what THAT SAME connection last
+     * reported for the active group, never against another connection's id. */
     auto
-    onDelivery (int t_command, uint64_t t_timestamp, Target copy, const CommandPayload &t_payload = {})
-        -> DeliveryResult
+    onDelivery (int t_command, uint64_t t_timestamp, Target copy, const CommandPayload &t_payload = {},
+                uint64_t t_server_command_id = 0, uint64_t t_connection_key = 0) -> DeliveryResult
     {
         const std::scoped_lock lock (this->mtx);
         DeliveryResult result;
 
         const bool same_logical_command = this->command == t_command && this->payload.sameAs (t_payload);
 
-        if (this->active && same_logical_command && withinTolerance (t_timestamp))
+        /* A deliberate operator retry: this connection previously reported a
+         * different id for the currently active group. A fresh id from a
+         * connection we have NOT yet seen this epoch is not a retry — it is the
+         * expected first copy of the same operator action arriving from another
+         * server (ids are not comparable across connections, so there is nothing
+         * to compare it against). */
+        bool deliberate_retry = false;
+        if (this->active && t_server_command_id != 0)
         {
+            auto seen = this->last_id_by_connection.find (t_connection_key);
+            if (seen != this->last_id_by_connection.end () && seen->second != t_server_command_id)
+            {
+                deliberate_retry = true;
+            }
+        }
+
+        if (this->active && same_logical_command && !deliberate_retry && withinTolerance (t_timestamp))
+        {
+            if (t_server_command_id != 0)
+            {
+                this->last_id_by_connection[t_connection_key] = t_server_command_id;
+            }
             /* Redundant re-delivery of the command already being handled. */
             if (this->resolution.has_value ())
             {
@@ -165,7 +195,7 @@ template <typename Target> class CommandAckGroup
             return result;
         }
 
-        if (this->active && !same_logical_command && t_timestamp < this->timestamp)
+        if (this->active && !same_logical_command && !deliberate_retry && t_timestamp < this->timestamp)
         {
             /* Older, different command (different type or different payload): the
              * newer one is already in effect. This is deliberately NOT bounded by
@@ -181,9 +211,13 @@ template <typename Target> class CommandAckGroup
             return result;
         }
 
-        /* A new logical command supersedes the current group. Hand back any copies
-         * of the old command that never resolved so the caller acks them as
-         * superseded, then open a fresh group with this copy as its first member. */
+        /* A new logical command supersedes the current group — either a different
+         * command/payload/newer timestamp, or (todo/86) the same command/payload
+         * but a fresh id from a connection that already reported a different one
+         * for the active group, i.e. a deliberate operator retry. Hand back any
+         * copies of the old command that never resolved so the caller acks them
+         * as superseded, then open a fresh group with this copy as its first
+         * member. */
         result.superseded = std::move (this->pending);
         this->active = true;
         this->epoch++;
@@ -193,6 +227,11 @@ template <typename Target> class CommandAckGroup
         this->pending.clear ();
         this->pending.push_back (std::move (copy));
         this->resolution.reset ();
+        this->last_id_by_connection.clear ();
+        if (t_server_command_id != 0)
+        {
+            this->last_id_by_connection[t_connection_key] = t_server_command_id;
+        }
         result.disposition = Disposition::actuate;
         result.epoch = this->epoch;
         return result;
@@ -233,4 +272,10 @@ template <typename Target> class CommandAckGroup
     uint64_t timestamp{ 0 };
     std::vector<Target> pending{};
     std::optional<FSSCommandResolution> resolution{};
+    /* todo/86: last server_command_id reported by each connection (keyed by the
+     * caller's opaque `t_connection_key`) for the currently active group. Reset
+     * whenever a new logical command opens, since ids from a superseded group
+     * are no longer meaningful. Only ever compared within the same key — never
+     * across keys — because ids are not comparable across connections. */
+    std::unordered_map<uint64_t, uint64_t> last_id_by_connection{};
 };

@@ -147,8 +147,16 @@ fss_client_ssl::handleCommandFrom (
     /* The FMU is connected to all FSS servers and the web frontend pushes the same
      * command to each, so this logical command arrives once per connection. The
      * group decides whether to action it (new command), queue/replay its ack
-     * (redundant delivery), or reject it as stale. */
-    auto delivery = this->command_group.onDelivery (static_cast<int> (raw_command), ts, this_copy, payload);
+     * (redundant delivery), or reject it as stale.
+     *
+     * `origin` identifies the connection this copy arrived on: fss_server objects
+     * are one-per-configured-server and persist across reconnects (only the
+     * underlying socket is replaced), so it is a stable per-connection key for
+     * the lifetime of this client (todo/86). server_command_id is 0 when the peer
+     * did not negotiate FSS_FEATURE_SERVER_COMMAND_ID; the group treats that as
+     * "no evidence" and falls back to the pre-todo/86 timestamp-window dedup. */
+    auto delivery = this->command_group.onDelivery (static_cast<int> (raw_command), ts, this_copy, payload,
+                                                    msg->getServerCommandId (), reinterpret_cast<uintptr_t> (origin));
 
     switch (delivery.disposition)
     {
