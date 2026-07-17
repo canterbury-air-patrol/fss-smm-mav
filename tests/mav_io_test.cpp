@@ -76,12 +76,24 @@ constexpr mavlink_channel_t autopilot_rx_channel = MAVLINK_COMM_3;
 class MavLoopbackServer
 {
   public:
-    MavLoopbackServer ()
+    /* `listen_recv_buf_bytes`, if non-zero, shrinks the receive buffer on the
+     * *listening* socket before bind()/listen() (todo/84): every accepted
+     * connection inherits it, so the TCP window advertised in that
+     * connection's very first SYN-ACK is already small. Doing this on the
+     * per-connection fd after accept() is too late — the initial window was
+     * already advertised using whatever the default was at handshake time,
+     * and a receiver that never reads never sends a window update to shrink
+     * it further. */
+    explicit MavLoopbackServer (int listen_recv_buf_bytes = 0)
     {
         this->listen_fd = socket (AF_INET, SOCK_STREAM, 0);
         REQUIRE (this->listen_fd >= 0);
         int one = 1;
         setsockopt (this->listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof (one));
+        if (listen_recv_buf_bytes > 0)
+        {
+            setsockopt (this->listen_fd, SOL_SOCKET, SO_RCVBUF, &listen_recv_buf_bytes, sizeof (listen_recv_buf_bytes));
+        }
 
         struct sockaddr_in addr = {};
         addr.sin_family = AF_INET;
@@ -803,6 +815,51 @@ TEST_CASE ("start() does not block beyond the configured connect deadline agains
      * (multi-second-to-minutes) OS-level connect timeout. */
     REQUIRE (elapsed < std::chrono::seconds (2));
     REQUIRE (capture.containsSubstring ("timed out"));
+}
+
+TEST_CASE ("a send to a peer that stops reading is bounded by the configured send timeout (todo/84)", "[mav_io]")
+{
+    reset_mav_parser ();
+    /* Shrink the listening socket's receive buffer before any connection
+     * exists, so the accepted connection's very first SYN-ACK already
+     * advertises a small window — shrinking it afterwards is too late (see
+     * MavLoopbackServer's constructor comment). The server never reads once
+     * connected, so that small window is never replenished. */
+    MavLoopbackServer server (1);
+    CapturingLogger capture;
+
+    MavParams send_bound_params = test_mav_params;
+    send_bound_params.mav_send_timeout_ms = 500;
+
+    mav_connection conn ("127.0.0.1", server.port (), send_bound_params, capture);
+    conn.start ();
+
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* Empirically, ~21500 unread 46-byte MAVLink frames (~1MB) are enough to
+     * exhaust the local send buffer plus the near-zero receive window on this
+     * kernel before a blocking send() has nowhere left to put more data;
+     * comfortably overshoot that so the bound is exercised regardless of
+     * exact OS buffer sizing. Once one call blocks and times out,
+     * TCP_USER_TIMEOUT aborts the connection, so the remaining calls in the
+     * loop fail fast rather than each re-blocking for 500ms. */
+    char callsign[9] = "TEST0000";
+    auto t0 = std::chrono::steady_clock::now ();
+    for (int i = 0; i < 60000; i++)
+    {
+        conn.sendADSB (0x123456, -35.0, 149.0, 100.0, 0, 0, 0, 0, callsign, 0, 0, 0, 0);
+    }
+    auto elapsed = std::chrono::steady_clock::now () - t0;
+
+    /* The definitive proof the bound engaged: sendMavLinkMsgLocked logs on
+     * any failed send, which only happens once SO_SNDTIMEO/TCP_USER_TIMEOUT
+     * make a blocking send() fail instead of hanging. */
+    REQUIRE (capture.containsSubstring ("MAV send() failed"));
+    /* Backstop on wall-clock time too: only the one call that finds the
+     * buffer genuinely full should block for up to ~500ms (observed up to
+     * ~2x that in practice); a generous margin absorbs scheduling/TSan noise
+     * without masking a regression to unbounded blocking. */
+    REQUIRE (elapsed < std::chrono::seconds (10));
 }
 
 TEST_CASE ("mav_connection recovers the link after a mid-stream drop and reconnect", "[mav_io]")
