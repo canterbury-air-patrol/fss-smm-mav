@@ -16,15 +16,7 @@ EventDispatcher::EventDispatcher (FMUStateMachine &t_state_machine, IMAV &t_mav,
     : state_machine (t_state_machine), mav (t_mav), smm (t_smm), fss (t_fss), logger (t_logger),
       asset_name (std::move (t_asset_name)), lowbat_threshold (t_lowbat_threshold)
 {
-    state_machine.setStateChangeCB (
-        [this] (FMUState s)
-        {
-            logger.log (std::string ("STATE ") + fmu_state_name (s));
-            if (s != fmu_state_searching)
-            {
-                smm_rtl_replay_pending = false;
-            }
-        });
+    state_machine.setStateChangeCB ([this] (FMUState s) { logger.log (std::string ("STATE ") + fmu_state_name (s)); });
 }
 
 void
@@ -60,15 +52,12 @@ EventDispatcher::dispatch (const event &e)
             [&] (MavCommsStatus status)
             {
                 logger.log (std::string ("COMMS mav ") + (status == MavCommsStatus::failure ? "failure" : "okay"));
+                /* A failed SMM-driven RTL (waiting_for_tasking) send is
+                 * replayed here too: it is now tracked in the state
+                 * machine's own pending_replay_state like every other
+                 * safety-critical state (todo/46, todo/70), so no separate
+                 * handling is needed in this handler. */
                 state_machine.setMavCommsFailure (status == MavCommsStatus::failure);
-                /* Replay an SmmRtl whose send failed while the link was down
-                 * (todo/71), the same recovery point the state machine's own
-                 * pending_replay_state uses (todo/46). */
-                if (status == MavCommsStatus::ok && smm_rtl_replay_pending && state_machine.isSearching ())
-                {
-                    logger.log ("CMD smm rtl (replay)");
-                    smm_rtl_replay_pending = !mav.setMode (flight_mode_rtl);
-                }
             },
             [&] (SMMSettings settings)
             {
@@ -98,37 +87,45 @@ EventDispatcher::dispatch (const event &e)
             },
             [&] (const SmmLoadSearch &ls)
             {
-                /* The SMM worker acquired/resumed a search. Only load it onto the
-                 * autopilot if the FMU is still searching: a command/latch that
+                /* The SMM worker acquired/resumed a search. A command/latch that
                  * took over since the acquire started (rtl/terminate/etc.) must
                  * win, and this outcome is dropped rather than overriding it
-                 * (todo/33). */
+                 * (todo/33) -- neither branch below fires in that case. */
                 if (state_machine.isSearching ())
                 {
                     mav.loadSearch (ls.search);
                 }
+                else if (state_machine.isWaitingForTasking ())
+                {
+                    /* SMM's background retry (kept alive by waiting_for_tasking
+                     * not cancelling the searching role, todo/70/77) reacquired
+                     * a search with no operator action. Resume via SMMNewCommand
+                     * rather than uploading ls.search here: that transitions
+                     * waiting_for_tasking -> searching, whose actionState()
+                     * re-invokes SMM::doSearch()'s already-held-search resume
+                     * path (todo/50) -- the same one "continue after a hold"
+                     * uses -- which re-fires load_search_cb with the same
+                     * search, landing in the isSearching() branch above. Doing
+                     * both here (this upload AND the SMMNewCommand reset) would
+                     * double-upload the same mission. */
+                    state_machine.SMMNewCommand (smm_cmd_none);
+                }
             },
             [&] (const SmmRtl &)
             {
-                /* SMM could not acquire/accept a search and wants to fly home.
-                 * Same guard as SmmLoadSearch: suppress it if a higher-priority
-                 * command/latch already took over. This commands the MAV
-                 * directly rather than going through the state machine (todo/70
-                 * tracks folding it in); current_state intentionally stays
-                 * fmu_state_searching for the duration — same as the mission's
-                 * own RTL terminator flying home after a completed search
-                 * (README: continue mode auto-acquires the next search) — so
-                 * this is a deliberate choice, not an oversight. */
-                if (state_machine.isSearching ())
-                {
-                    logger.log ("CMD smm rtl");
-                    bool sent = mav.setMode (flight_mode_rtl);
-                    if (!sent)
-                    {
-                        logger.log ("COMMS mav rtl send failed, will replay on link recovery");
-                    }
-                    smm_rtl_replay_pending = !sent;
-                }
+                /* SMM has nothing to search right now -- either a held search's
+                 * last waypoint completed with none queued behind it, or the
+                 * next acquire attempt failed. Route through the state machine
+                 * (todo/70) rather than commanding the MAV directly: its own
+                 * priority arbitration already no-ops this call whenever a
+                 * higher-priority FSS command or latch is in control (commandedState()
+                 * only ever consults the SMM command when the FSS command alone
+                 * maps to searching), so the isSearching() guard this used to
+                 * need here is now redundant. Maps to fmu_state_waiting_for_tasking,
+                 * not fmu_state_rtl: same RTL flight mode, but this must not
+                 * cancel SMM's background acquire-retry loop (todo/77). */
+                logger.log ("CMD smm rtl");
+                state_machine.SMMNewCommand (smm_cmd_mission_complete);
             },
             [&] (BatteryData bd)
             {

@@ -69,9 +69,7 @@ class App
     {
         FMUStateMachine state_machine{ *mav, *smm, low_battery_latch_count };
         /* Constructing this registers it as the state machine's state-change
-         * callback (todo/76): the event-dispatch policy owns clearing
-         * smm_rtl_replay_pending on leaving fmu_state_searching, alongside the
-         * STATE log line. */
+         * callback (todo/76), logging the STATE line on every transition. */
         EventDispatcher dispatcher{ state_machine, *mav, *smm, *fss, logger, asset_name, lowbat_threshold };
         logger.log ("START " + asset_name);
 
