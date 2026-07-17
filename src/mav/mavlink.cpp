@@ -680,6 +680,23 @@ mav_connection::requestStream (int sysid, int compid, uint32_t command, uint32_t
     this->sendMavLinkMsgLocked (&msg);
 }
 
+auto
+mav_connection::isFromAutopilot (const mavlink_message_t *msg) -> bool
+{
+    if (msg->sysid == TARGET_SYS_ID)
+    {
+        return true;
+    }
+    /* Component ID is deliberately not restricted here: nothing else in this
+     * file pins the autopilot to a single component (requestStream targets
+     * whichever compid's message completed setup), so sysid alone is the
+     * vehicle-identity boundary worth enforcing. */
+    this->logger.log (LogLevel::debug, "Ignoring MAVLink msg id " + std::to_string (msg->msgid) + " from sysid "
+                                           + std::to_string (msg->sysid) + " (not the configured autopilot system "
+                                           + std::to_string (TARGET_SYS_ID) + ")");
+    return false;
+}
+
 void
 mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status __attribute__ ((unused)))
 {
@@ -712,6 +729,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
     {
         case MAVLINK_MSG_ID_HEARTBEAT:
         {
+            if (!this->isFromAutopilot (msg))
+            {
+                break;
+            }
             /* Record the autopilot metadata BEFORE the receipt timestamp. The
              * comms-up signal is driven off last_heartbeat_ts by heartbeat_loop(),
              * the single owner of the comms status; recording the type first means
@@ -727,6 +748,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_GLOBAL_POSITION_INT:
         {
+            if (!this->isFromAutopilot (msg))
+            {
+                break;
+            }
             /* New position data */
             int32_t lat = mavlink_msg_global_position_int_get_lat (msg);
             int32_t lng = mavlink_msg_global_position_int_get_lon (msg);
@@ -752,6 +777,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_BATTERY_STATUS:
         {
+            if (!this->isFromAutopilot (msg))
+            {
+                break;
+            }
             /* Battery Status */
             int32_t current_consumed = mavlink_msg_battery_status_get_current_consumed (msg);
             int8_t remaining = mavlink_msg_battery_status_get_battery_remaining (msg);
@@ -762,6 +791,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_MISSION_ITEM_REACHED:
         {
+            if (!this->isFromAutopilot (msg))
+            {
+                break;
+            }
             /* Reached a new waypoint, update the current search progress */
             uint16_t seq = mavlink_msg_mission_item_reached_get_seq (msg);
             this->report_reached (seq);
@@ -769,7 +802,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_MISSION_REQUEST:
         {
-            if (mavlink_msg_mission_request_get_target_system (msg) == SYS_ID
+            if (this->isFromAutopilot (msg) && mavlink_msg_mission_request_get_target_system (msg) == SYS_ID
                 && mavlink_msg_mission_request_get_target_component (msg) == COMP_ID)
             {
                 /* Getting asked for a specific point in mission */
@@ -781,7 +814,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_MISSION_REQUEST_INT:
         {
-            if (mavlink_msg_mission_request_int_get_target_system (msg) == SYS_ID
+            if (this->isFromAutopilot (msg) && mavlink_msg_mission_request_int_get_target_system (msg) == SYS_ID
                 && mavlink_msg_mission_request_int_get_target_component (msg) == COMP_ID)
             {
                 /* Getting asked for a specific point in mission */
@@ -793,7 +826,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_MISSION_ACK:
         {
-            if (mavlink_msg_mission_ack_get_target_system (msg) == SYS_ID
+            if (this->isFromAutopilot (msg) && mavlink_msg_mission_ack_get_target_system (msg) == SYS_ID
                 && mavlink_msg_mission_ack_get_target_component (msg) == COMP_ID)
             {
                 /* Our mission was acknowledged */
@@ -803,6 +836,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         break;
         case MAVLINK_MSG_ID_GPS_RAW_INT:
         {
+            if (!this->isFromAutopilot (msg))
+            {
+                break;
+            }
             /* The autopilot's own no-fix/2D/3D health indicator, tracked for
              * the next GLOBAL_POSITION_INT's fix-validity flag (todo/79). */
             this->gps_fix_type = mavlink_msg_gps_raw_int_get_fix_type (msg);
