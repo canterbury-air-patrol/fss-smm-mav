@@ -117,6 +117,22 @@ jobs:
         fi
         test ! -e "${CONFIG_FILE}"
 
+        # SERVER2_ADDR/PORT (Path D redundancy): optional second server,
+        # appended as a second servers[] entry.
+        rm -f "${CONFIG_FILE}"
+        SERVER2_ADDR=fss2.example.org SERVER2_PORT=20203 ./docker/generate-config.sh
+        test "$(jq -r '.servers | length' "${CONFIG_FILE}")" = "2"
+        test "$(jq -r '.servers[1].address' "${CONFIG_FILE}")" = "fss2.example.org"
+        test "$(jq -r '.servers[1].port' "${CONFIG_FILE}")" = "20203"
+
+        # An invalid SERVER2_PORT must fail early too, same as SERVER1_PORT.
+        rm -f "${CONFIG_FILE}"
+        if SERVER2_ADDR=fss2.example.org SERVER2_PORT=not-a-port ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric SERVER2_PORT" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
+
   distcheck:
     runs-on: ubuntu-latest
     container: debian:trixie
