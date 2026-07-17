@@ -219,6 +219,14 @@ class mav_connection
      * mid-upload so the wording stays identical. Must be called without
      * state_lock held. */
     void logUploadInvalidated (const std::string &action_name);
+    /* Whether `msg` originates from the configured autopilot system
+     * (TARGET_SYS_ID). Flight-critical message handling — heartbeat,
+     * position, GPS fix, battery, mission progress/requests/acks — must
+     * gate on this so any other system sharing this MAVLink link (a GCS, a
+     * companion computer, or a second vehicle) cannot influence FMU state
+     * (todo/83). Non-matching traffic is expected on a shared link, not
+     * anomalous, so a rejection is logged at debug rather than warn/error. */
+    auto isFromAutopilot (const mavlink_message_t *msg) -> bool;
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     void connect_to_mav ();
     void disconnect_from_mav ();
