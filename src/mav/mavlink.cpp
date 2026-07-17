@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -1096,6 +1097,22 @@ mav_connection::connect_to_mav ()
     /* Wake recv() periodically so the thread can notice fd being torn down. */
     struct timeval rcv_timeout = { .tv_sec = 1, .tv_usec = 0 };
     setsockopt (new_fd, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof (rcv_timeout));
+
+    /* Bound a blocking send() the same way: a peer that stops reading, or a
+     * network path that silently disappears, must not pin a sender —
+     * including the event-loop thread issuing a safety command — indefinitely
+     * (todo/84). SO_SNDTIMEO bounds each blocking send() call; TCP_USER_TIMEOUT
+     * additionally bounds data that is locally "sent" but never acknowledged
+     * (or never even transmitted, e.g. a zero window), which SO_SNDTIMEO alone
+     * does not cover. Guarded by #ifdef because TCP_USER_TIMEOUT is
+     * Linux-specific. */
+    struct timeval snd_timeout = { .tv_sec = static_cast<time_t> (this->send_timeout_ms / 1000),
+                                   .tv_usec = static_cast<suseconds_t> ((this->send_timeout_ms % 1000) * 1000) };
+    setsockopt (new_fd, SOL_SOCKET, SO_SNDTIMEO, &snd_timeout, sizeof (snd_timeout));
+#ifdef TCP_USER_TIMEOUT
+    unsigned int user_timeout_ms = this->send_timeout_ms;
+    setsockopt (new_fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout_ms, sizeof (user_timeout_ms));
+#endif
 
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
