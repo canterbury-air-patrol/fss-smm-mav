@@ -1,10 +1,13 @@
 #pragma once
 
+#include <condition_variable>
 #include <cstddef>
+#include <deque>
 #include <fstream>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "fmu-core-types.hpp"
 #include "fmu-state-types.hpp"
@@ -69,6 +72,15 @@ fss_cmd_name (FSSCommand cmd)
     return "unknown";
 }
 
+/* Every diagnostic (STATE/CMD/COMMS/BATTERY/...) formats and enqueues a line
+ * from log() and returns immediately; a dedicated worker thread does the
+ * actual write/flush/rotation. This mirrors SMM's and FSS's worker pattern
+ * (todo/33, todo/51): several EventDispatcher branches call log() before the
+ * state-machine method that commands the autopilot (e.g. the FSS command
+ * event logs before FSSNewCommand(), which is what sends rtl/terminate/etc.),
+ * so a blocking log() — a full disk, a wedged network log_dir, an in-flight
+ * rotation — would otherwise stall the event-loop thread that arbitrates
+ * every flight-safety command (todo/88). */
 class Logger : public ILogger
 {
   public:
@@ -78,35 +90,76 @@ class Logger : public ILogger
 
     explicit Logger (std::string_view dir, LogLevel level = LogLevel::info,
                      std::size_t max_bytes = default_max_log_bytes);
-    ~Logger () override = default;
+    Logger (const Logger &) = delete;
+    Logger (Logger &&) = delete;
+    auto operator= (const Logger &) -> Logger & = delete;
+    auto operator= (Logger &&) -> Logger & = delete;
+    /* Stops and joins the worker thread, draining any lines still queued
+     * (same drain-on-shutdown pattern as SMM/FSS) before the file is closed. */
+    ~Logger () override;
 
     using ILogger::log;
 
-    /* Log at an explicit level; emitted only if it passes the configured
-     * verbosity. */
+    /* Format the line (timestamp + message; no I/O) and enqueue it for the
+     * worker thread. Emitted only if msg_level passes the configured
+     * verbosity. Never blocks on disk I/O. */
     void log (LogLevel msg_level, std::string_view msg) override;
+
+    /* Test-only synchronization point: block until every line enqueued so far
+     * has actually been written to disk. Production code never calls this —
+     * log() intentionally returns without waiting on I/O — but a test that
+     * reads the log file right after logging needs to know the worker has
+     * caught up. */
+    void flush ();
 
   private:
     static std::string timestamp ();
     static void rotate (const std::string &base, int rotation_count);
     /* Close, rotate, and reopen the log file, resetting the byte counter.
-     * Shared by the constructor's startup rotation and log()'s in-flight
-     * rotation once max_log_bytes is exceeded. */
+     * Shared by the constructor's startup rotation and the worker's in-flight
+     * rotation once max_log_bytes is exceeded. Worker-thread-only once the
+     * worker has started (see workerLoop). */
     void openFresh ();
+    /* Runs on the dedicated worker thread for the lifetime of the Logger:
+     * dequeues one formatted line at a time and writes it, so log() itself
+     * never touches `file`. */
+    void workerLoop ();
 
+  protected:
+    /* The actual blocking write/flush/rotation for one already-formatted
+     * line. Worker-thread-only. Virtual, mirroring SMM's fetchSearch/
+     * commitSearch seams: a test can override it to observe or gate a write
+     * (e.g. to prove log() itself never waits on one) without a real slow
+     * disk. The default does the real write. */
+    virtual void writeLine (const std::string &line);
+
+  private:
     static constexpr int max_rotations = 5;
 
     std::string log_path;
     std::ofstream file;
-    std::mutex lock;
     LogLevel level;
     /* A long-running process would otherwise append to a single file
      * forever (rotation previously only ran at startup, so the "5
      * rotations" retention was really "5 process starts", not a size or
-     * time bound). Once the current file reaches this many bytes, log()
-     * rotates it like a restart would. */
+     * time bound). Once the current file reaches this many bytes, the
+     * worker rotates it like a restart would. */
     std::size_t max_log_bytes;
     /* Bytes written to the current file, tracked incrementally rather than
-     * stat-ing the file on every log() call. */
+     * stat-ing the file on every write. Worker-thread-only. */
     std::size_t bytes_written{ 0 };
+
+    /* Guards line_queue and busy (see below); queue_cv wakes the worker on a
+     * new line or shutdown, idle_cv wakes flush() once the worker has fully
+     * caught up. */
+    std::mutex queue_lock{};
+    std::condition_variable queue_cv{};
+    std::condition_variable idle_cv{};
+    std::deque<std::string> line_queue{};
+    bool worker_running{ true };
+    /* True while the worker is between dequeuing a line and finishing its
+     * write, so flush() can tell "queue empty" from "queue empty because the
+     * last line is still being written" apart. Guarded by queue_lock. */
+    bool busy{ false };
+    std::thread worker_thread{};
 };

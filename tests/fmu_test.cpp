@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <limits>
 #include <memory>
 #include <string>
@@ -2330,6 +2331,9 @@ TEST_CASE ("Logger rotates in-flight once the size threshold is exceeded", "[log
     {
         logger.log ("line " + std::to_string (i));
     }
+    /* log() only enqueues (todo/88); wait for the worker to catch up before
+     * inspecting the file it writes. */
+    logger.flush ();
 
     /* The pre-rotation content moved to .1; the live file is fresh (small). */
     REQUIRE (std::filesystem::exists (dir.logFile ()));
@@ -2349,11 +2353,77 @@ TEST_CASE ("Logger in-flight rotation keeps writing after rotating", "[logger]")
 
     /* Several rotations should have occurred; the live file must still be
      * open and accepting writes (not left closed after a failed reopen). */
+    logger.flush ();
     REQUIRE (std::filesystem::exists (dir.logFile ()));
     logger.log ("still alive");
+    logger.flush ();
     std::ifstream check (dir.logFile ());
     std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
     REQUIRE (content.find ("still alive") != std::string::npos);
+}
+
+namespace
+{
+/* Test-only Logger that gates the write for one line behind a promise the
+ * test controls, so a stalled disk can be simulated deterministically
+ * (todo/88) instead of relying on real I/O being slow. Overrides the
+ * protected writeLine() seam (mirroring SMM's fetchSearch/commitSearch test
+ * seams) rather than the disk itself. */
+class BlockingLogger : public Logger
+{
+  public:
+    using Logger::Logger;
+    std::atomic<bool> write_started{ false };
+    std::promise<void> release_write{};
+
+  protected:
+    void
+    writeLine (const std::string &line) override
+    {
+        write_started.store (true);
+        release_write.get_future ().wait ();
+        Logger::writeLine (line);
+    }
+};
+} // namespace
+
+/* todo/88 regression: log() must return without waiting on the write, even
+ * when the write is stalled (a full/read-only disk, a wedged network log_dir,
+ * an in-flight rotation). If log() regressed to a synchronous write, this
+ * test would hang (the write is only ever released further down) rather than
+ * reach the assertions below. */
+TEST_CASE ("Logger::log() does not block on a stalled write", "[logger]")
+{
+    TempLogDir dir;
+    BlockingLogger logger (dir.str ());
+
+    /* Reaching this line at all is the primary proof: log() enqueues and
+     * returns immediately, well before the gated write below is released. */
+    logger.log ("hello");
+
+    /* Wait for the worker to actually reach the gated write (bounded: it is
+     * only waiting on the queue_cv wakeup, not on anything external), so the
+     * content check below is not racing the worker's own wakeup latency. */
+    while (!logger.write_started.load ())
+    {
+        std::this_thread::yield ();
+    }
+
+    /* The write is still gated: the line must not have reached disk yet. */
+    {
+        std::ifstream check (dir.logFile ());
+        std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
+        REQUIRE (content.find ("hello") == std::string::npos);
+    }
+
+    logger.release_write.set_value ();
+    logger.flush ();
+
+    {
+        std::ifstream check (dir.logFile ());
+        std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
+        REQUIRE (content.find ("hello") != std::string::npos);
+    }
 }
 
 /* todo/59 acceptance: a subsystem's runtime diagnostic must reach the
@@ -2368,6 +2438,7 @@ TEST_CASE ("known_aircraft diagnostics reach the persistent log file", "[aircraf
     known_aircraft ka (logger);
 
     ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "LOGTEST", 0, 0, 1000, 0, 0, 0));
+    logger.flush ();
 
     std::ifstream check (dir.logFile ());
     std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());

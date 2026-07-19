@@ -8,7 +8,7 @@
 #include <sstream>
 
 Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes)
-    : log_path{}, file{}, lock{}, level (t_level), max_log_bytes (max_bytes)
+    : log_path{}, file{}, level (t_level), max_log_bytes (max_bytes)
 {
     std::string log_dir (dir);
     log_path = log_dir + "/fmu.log";
@@ -21,7 +21,27 @@ Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes)
         return;
     }
 
+    /* Single-threaded so far (the worker below does not exist yet): safe to
+     * open/rotate directly here. */
     openFresh ();
+    this->worker_thread = std::thread (&Logger::workerLoop, this);
+}
+
+Logger::~Logger ()
+{
+    /* Signal shutdown and join: workerLoop() keeps draining line_queue even
+     * after worker_running is false (its exit condition is "not running AND
+     * empty"), so every line already enqueued before this destructor runs is
+     * still written before the file is closed. */
+    {
+        std::lock_guard<std::mutex> lk (this->queue_lock);
+        this->worker_running = false;
+    }
+    this->queue_cv.notify_one ();
+    if (this->worker_thread.joinable ())
+    {
+        this->worker_thread.join ();
+    }
 }
 
 void
@@ -84,12 +104,24 @@ Logger::log (LogLevel msg_level, std::string_view msg)
     {
         return;
     }
-    std::lock_guard<std::mutex> lk (lock);
+    /* Formatting is pure CPU work (chrono + gmtime_r + ostringstream), not
+     * I/O: safe to do on the caller's thread. The write itself is not
+     * (todo/88), so only the formatted line crosses onto the queue. */
+    std::string line = timestamp () + ' ' + std::string (msg) + '\n';
+    {
+        std::lock_guard<std::mutex> lk (this->queue_lock);
+        this->line_queue.push_back (std::move (line));
+    }
+    this->queue_cv.notify_one ();
+}
+
+void
+Logger::writeLine (const std::string &line)
+{
     if (!file.is_open ())
     {
         return;
     }
-    std::string line = timestamp () + ' ' + std::string (msg) + '\n';
     file << line;
     file.flush ();
     bytes_written += line.size ();
@@ -102,4 +134,40 @@ Logger::log (LogLevel msg_level, std::string_view msg)
     {
         openFresh ();
     }
+}
+
+void
+Logger::workerLoop ()
+{
+    while (true)
+    {
+        std::string line;
+        {
+            std::unique_lock<std::mutex> lk (this->queue_lock);
+            this->queue_cv.wait (lk, [this] { return !this->line_queue.empty () || !this->worker_running; });
+            if (!this->worker_running && this->line_queue.empty ())
+            {
+                return;
+            }
+            line = std::move (this->line_queue.front ());
+            this->line_queue.pop_front ();
+            this->busy = true;
+        }
+        this->writeLine (line);
+        {
+            std::lock_guard<std::mutex> lk (this->queue_lock);
+            this->busy = false;
+            if (this->line_queue.empty ())
+            {
+                this->idle_cv.notify_all ();
+            }
+        }
+    }
+}
+
+void
+Logger::flush ()
+{
+    std::unique_lock<std::mutex> lk (this->queue_lock);
+    this->idle_cv.wait (lk, [this] { return this->line_queue.empty () && !this->busy; });
 }
