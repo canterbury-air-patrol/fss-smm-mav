@@ -1981,6 +1981,11 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
 {
     NullLogger null_logger;
     known_aircraft ka (null_logger);
+    /* Debounce/eviction are driven by known_aircraft's own local clock, not
+     * the report's wire timestamp (todo/89); inject a fake one so the test
+     * does not depend on real wall-clock timing. */
+    uint64_t now = 1000;
+    ka.setNowMsFn ([&now] { return now; });
     std::string callsign = "TEST123";
 
     uint32_t icao1 = ka.getAircraftICAOAddress (callsign);
@@ -1990,7 +1995,7 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
     REQUIRE (icao1 == icao2);
 
     PositionData pd;
-    pd = PositionData (0, 0, 0, 0, 0, 0, callsign, 0, 0, 1000, 0, 0, 0);
+    pd = PositionData (0, 0, 0, 0, 0, 0, callsign, 0, 0, 0, 0, 0, 0);
     ka.newPositionReport (pd);
 
     uint32_t icao3 = ka.getAircraftICAOAddress (callsign);
@@ -2002,15 +2007,19 @@ TEST_CASE ("known_aircraft evicts aircraft that go quiet past the eviction windo
     NullLogger null_logger;
     known_aircraft ka (null_logger);
     const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
+    /* todo/89: the sweep clock is known_aircraft's own now_ms_fn, not the
+     * report's wire timestamp; a fake clock keeps this deterministic. */
+    uint64_t now = 1000;
+    ka.setNowMsFn ([&now] { return now; });
 
     /* Establish aircraft A at t=1000 and capture its synthetic ICAO. */
-    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "A", 0, 0, 1000, 0, 0, 0));
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "A", 0, 0, 0, 0, 0, 0));
     const uint32_t icao_a_first = ka.getAircraftICAOAddress ("A");
 
     /* A different aircraft reports well past the eviction window. That report
      * drives the sweep, which must reclaim the now-stale entry for A. */
-    const uint64_t late = 1000 + window_ms + 1000;
-    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "B", 0, 0, late, 0, 0, 0));
+    now = 1000 + window_ms + 1000;
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "B", 0, 0, 0, 0, 0, 0));
 
     /* Re-introducing the previously-seen callsign A must allocate a fresh
      * synthetic ICAO, proving the old entry was evicted rather than retained. */
@@ -2023,18 +2032,60 @@ TEST_CASE ("known_aircraft keeps actively-reporting aircraft across the window",
     NullLogger null_logger;
     known_aircraft ka (null_logger);
     const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
+    /* todo/89: fake clock, same reasoning as the eviction test above. */
+    uint64_t now = 1000;
+    ka.setNowMsFn ([&now] { return now; });
 
-    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "C", 0, 0, 1000, 0, 0, 0));
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "C", 0, 0, 0, 0, 0, 0));
     const uint32_t icao_c_first = ka.getAircraftICAOAddress ("C");
 
     /* C keeps reporting; each report refreshes its timestamp, so it must never
      * be evicted and must retain its original synthetic ICAO. */
-    for (uint64_t t = 1000 + window_ms; t <= 1000 + (3 * window_ms); t += window_ms)
+    for (now = 1000 + window_ms; now <= 1000 + (3 * window_ms); now += window_ms)
     {
-        ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "C", 0, 0, t, 0, 0, 0));
+        ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "C", 0, 0, 0, 0, 0, 0));
     }
 
     REQUIRE (ka.getAircraftICAOAddress ("C") == icao_c_first);
+}
+
+/* todo/89 regression: a peer's self-reported wire timestamp must not drive
+ * known_aircraft's debounce or eviction. Before the fix, a single report
+ * carrying a wildly bogus (e.g. far-future) timestamp would jam that
+ * aircraft's own `ts` forward, permanently rejecting every later genuine
+ * report from it, and would separately drive the eviction sweep's "now" to
+ * that same bogus value, evicting every other tracked aircraft in the same
+ * call. */
+TEST_CASE ("known_aircraft ignores a peer's self-reported timestamp for debounce/eviction", "[aircraft]")
+{
+    NullLogger null_logger;
+    known_aircraft ka (null_logger);
+    uint64_t now = 1000;
+    ka.setNowMsFn ([&now] { return now; });
+
+    /* A peer with no NTP, a stuck RTC, or a glitching ADS-B decoder — no
+     * malice required — could report this. */
+    constexpr uint64_t bogus_future_ts = 1'000'000'000'000ULL;
+
+    /* D's first report, with the bogus wire timestamp. */
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "D", 0, 0, bogus_future_ts, 0, 0, 0));
+
+    /* E is unrelated and reports on the real (fake) local clock. */
+    ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "E", 0, 0, 0, 0, 0, 0));
+    const uint32_t icao_e_first = ka.getAircraftICAOAddress ("E");
+
+    /* Local time advances normally (1.5s); D reports again, still with the
+     * same bogus wire timestamp. If the wire timestamp still drove the
+     * debounce, D's `ts` would have jumped to bogus_future_ts on the first
+     * call, and this genuine, well-spaced local update would be rejected
+     * forever after. */
+    now += 1500;
+    REQUIRE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "D", 0, 0, bogus_future_ts, 0, 0, 0)));
+
+    /* E must survive: if the bogus wire timestamp drove the eviction sweep's
+     * "now" (as it did before the fix), it would have evicted every other
+     * tracked aircraft, including E, in D's very first call above. */
+    REQUIRE (ka.getAircraftICAOAddress ("E") == icao_e_first);
 }
 
 TEST_CASE ("next_synthetic_icao advances and wraps at the 24-bit ceiling", "[aircraft]")

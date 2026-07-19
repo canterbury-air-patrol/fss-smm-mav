@@ -1,7 +1,9 @@
 #pragma once
 #include "fmu-types.hpp"
 #include "ilogger.hpp"
+#include "util.hpp"
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -43,13 +45,21 @@ class aircraft_details
     {
         return this->icao_address;
     };
+    /* Debounce to at most one accepted update per second, keyed off the
+     * caller's local "now" (todo/89) -- deliberately NOT the reporting
+     * peer's own self-reported timestamp, which is untrusted, unvalidated
+     * wire data (a peer with a wrong clock, no NTP, or a glitching ADS-B
+     * decoder can send anything). A bad peer timestamp used to be able to
+     * jam `ts` far into the future, after which no genuine subsequent
+     * report from that same aircraft would ever satisfy `ts + 1s <= new_ts`
+     * again -- permanently silencing it for the life of the process. */
     auto
-    acceptableUpdate (uint64_t t_new_timestamp) -> bool
+    acceptableUpdate (uint64_t now_ms) -> bool
     {
-        const std::chrono::milliseconds new_ts{ t_new_timestamp };
-        if (this->ts + this->ts_1sec_interval <= new_ts)
+        const std::chrono::milliseconds now{ now_ms };
+        if (this->ts + this->ts_1sec_interval <= now)
         {
-            this->ts = new_ts;
+            this->ts = now;
             return true;
         }
         return false;
@@ -75,6 +85,16 @@ class known_aircraft
     uint32_t lastAllocatedICAO{ first_icao_address_for_unknown_aircraft };
     std::map<std::string, std::shared_ptr<aircraft_details>> aircraft{};
     ILogger &logger;
+    /* Local "now" source (milliseconds since some fixed epoch), driving both
+     * aircraft_details::acceptableUpdate()'s debounce and evictStaleLocked()'s
+     * sweep below. Defaults to the FMU's own clock; overridable for tests
+     * (mirrors EventDispatcher::now_ms_fn, todo/81). Deliberately NOT the
+     * reporting peer's own PositionData::getTimeStamp() -- todo/89: trusting
+     * a peer's self-reported clock let one bad/skewed report either
+     * permanently silence that aircraft's own future updates (see
+     * acceptableUpdate) or evict every other tracked aircraft in the same
+     * evictStaleLocked() call. */
+    std::function<uint64_t ()> now_ms_fn{ current_timestamp_ms };
     auto
     findAircraft (const std::string &t_call_sign, uint32_t t_icao_address) -> std::shared_ptr<aircraft_details>
     {
@@ -97,7 +117,7 @@ class known_aircraft
 
     /* Reclaim aircraft that have gone quiet for longer than the eviction window
      * so the map stays bounded over a long-running mission. Must be called with
-     * `lock` held. `now` is the timestamp of the report driving the sweep, in
+     * `lock` held. `now` is the local "now" (now_ms_fn()) driving the sweep, in
      * the same clock as aircraft_details::ts. */
     void
     evictStaleLocked (std::chrono::milliseconds now)
@@ -117,16 +137,27 @@ class known_aircraft
 
   public:
     explicit known_aircraft (ILogger &t_logger) : logger (t_logger) {}
+
+    /* Test seam (todo/89): inject a fake "now" source, mirroring
+     * EventDispatcher::setNowMsFn (todo/81). Production code never calls
+     * this; the default (current_timestamp_ms) is used unless overridden. */
+    void
+    setNowMsFn (std::function<uint64_t ()> fn)
+    {
+        this->now_ms_fn = std::move (fn);
+    }
+
     auto
     newPositionReport (PositionData pd) -> bool
     {
         std::lock_guard<std::mutex> lk (this->lock);
         auto ad = this->findAircraft (pd.getCallSign (), pd.getICAOAddress ());
-        const bool accepted = ad->acceptableUpdate (pd.getTimeStamp ());
+        const uint64_t now_ms = this->now_ms_fn ();
+        const bool accepted = ad->acceptableUpdate (now_ms);
         /* Sweep stale aircraft on every report so the map stays bounded. The
-         * entry just touched above carries the current timestamp, so it is
+         * entry just touched above carries the current local time, so it is
          * never evicted by its own report. */
-        this->evictStaleLocked (std::chrono::milliseconds{ pd.getTimeStamp () });
+        this->evictStaleLocked (std::chrono::milliseconds{ now_ms });
         return accepted;
     }
     auto
