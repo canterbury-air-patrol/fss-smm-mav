@@ -133,6 +133,18 @@ class Logger : public ILogger
      * disk. The default does the real write. */
     virtual void writeLine (const std::string &line);
 
+    /* Stops and joins the worker thread if not already done; idempotent.
+     * Logger::~Logger() calls this. A subclass that overrides writeLine()
+     * and owns state the override reads/writes (e.g. a test double gating a
+     * write on its own member) MUST call this as the very first statement
+     * in its own destructor, before any of its members are destroyed:
+     * writeLine() is virtual and runs on the worker thread, which is not
+     * guaranteed stopped until this returns, so the worker could otherwise
+     * still be inside the override while the derived object's own
+     * destructor is tearing down the members it reads (a background-thread-
+     * vs-destructor race — flagged in PR 220 review). */
+    void stopWorker ();
+
   private:
     static constexpr int max_rotations = 5;
 
@@ -157,6 +169,11 @@ class Logger : public ILogger
     std::condition_variable idle_cv{};
     std::deque<std::string> line_queue{};
     bool worker_running{ true };
+    /* Set by stopWorker() so a second call (e.g. Logger::~Logger() after a
+     * subclass destructor already called it) is a no-op rather than trying
+     * to join an already-joined thread (which would throw). Guarded by
+     * queue_lock. */
+    bool worker_stopped{ false };
     /* True while the worker is between dequeuing a line and finishing its
      * write, so flush() can tell "queue empty" from "queue empty because the
      * last line is still being written" apart. Guarded by queue_lock. */

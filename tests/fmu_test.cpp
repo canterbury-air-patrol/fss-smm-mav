@@ -2375,13 +2375,43 @@ class BlockingLogger : public Logger
     using Logger::Logger;
     std::atomic<bool> write_started{ false };
     std::promise<void> release_write{};
+    /* std::promise::get_future() may only be called once (a second call
+     * throws std::future_error); wrap it in a shared_future, retrieved once
+     * here, so writeLine() can wait() on it regardless of how many times it
+     * runs (PR 220 review). */
+    std::shared_future<void> release_write_future{ release_write.get_future ().share () };
+
+    /* Release the gate and stop the worker before our own members above are
+     * destroyed. Two things this guards against (PR 220 review):
+     *  - Without releasing first: if a test never reaches
+     *    release_write.set_value() (e.g. an earlier REQUIRE failed and
+     *    unwound the stack), stopWorker()'s join() would wait forever on a
+     *    worker blocked in writeLine()'s wait() below.
+     *  - Without calling stopWorker() before returning: writeLine() is
+     *    virtual and runs on the worker thread, which Logger::~Logger()
+     *    alone would not join until after write_started/release_write/
+     *    release_write_future are already destroyed — a background-thread-
+     *    vs-destructor race. stopWorker() is idempotent, so ~Logger()
+     *    calling it again afterwards is a no-op. */
+    ~BlockingLogger () override
+    {
+        try
+        {
+            release_write.set_value ();
+        }
+        catch (const std::future_error &)
+        {
+            /* Already released by the test; nothing to do. */
+        }
+        stopWorker ();
+    }
 
   protected:
     void
     writeLine (const std::string &line) override
     {
         write_started.store (true);
-        release_write.get_future ().wait ();
+        release_write_future.wait ();
         Logger::writeLine (line);
     }
 };
