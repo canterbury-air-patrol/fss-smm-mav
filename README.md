@@ -45,9 +45,20 @@ Create a client.json file that refers to your server(s):
                         "address": "localhost",
                         "port": 20202
                 }
-        ]
+        ],
+        "tcp_user_timeout_ms": 30000
 }
 ```
+
+`tcp_user_timeout_ms` is optional and read directly by the FSS client
+library (it is a top-level key, not part of the `fmu` block below): the
+`TCP_USER_TIMEOUT` applied to every FSS server connection, bounding how long
+a blocking send can stall into a half-dead FSS peer before the kernel errors
+the connection out. Defaults to 30000 (30s, the flight-safety-system
+library default) if omitted. A wedged FSS send only blocks the dedicated FSS
+worker thread, not the event loop (see the `fmu` block's `mav_send_timeout_s`
+for the equivalent MAV-side bound), but a tighter value here still recovers
+a dead-peer send sooner.
 
 #### Optional FMU configuration
 
