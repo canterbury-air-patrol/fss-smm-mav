@@ -27,14 +27,24 @@ Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes)
     this->worker_thread = std::thread (&Logger::workerLoop, this);
 }
 
-Logger::~Logger ()
+Logger::~Logger () { this->stopWorker (); }
+
+void
+Logger::stopWorker ()
 {
-    /* Signal shutdown and join: workerLoop() keeps draining line_queue even
-     * after worker_running is false (its exit condition is "not running AND
-     * empty"), so every line already enqueued before this destructor runs is
-     * still written before the file is closed. */
+    /* Idempotent: a subclass destructor may have already called this (see
+     * the doc on the declaration) before this runs again from ~Logger(). */
     {
         std::lock_guard<std::mutex> lk (this->queue_lock);
+        if (this->worker_stopped)
+        {
+            return;
+        }
+        this->worker_stopped = true;
+        /* Signal shutdown: workerLoop() keeps draining line_queue even after
+         * worker_running is false (its exit condition is "not running AND
+         * empty"), so every line already enqueued before this call is still
+         * written before the file is closed. */
         this->worker_running = false;
     }
     this->queue_cv.notify_one ();
