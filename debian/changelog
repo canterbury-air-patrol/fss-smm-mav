@@ -1,3 +1,42 @@
+cap-fmu (1.2.0) unstable; urgency=medium
+
+  * Route SMM-triggered RTL and load-search outcomes through the flight
+    state machine instead of updating flight mode directly, adding an
+    explicit "waiting for tasking" state.
+  * Reject an invalid latitude/longitude before it reaches a flight-critical
+    path: a malformed FSS goto, an SMM search containing a bad waypoint, and
+    an ADS-B report with an invalid coordinate are now rejected instead of
+    being acted on or rebroadcast.
+  * Correlate MISSION_ACK with the upload it actually acknowledges, instead
+    of accepting the next MISSION_ACK for whatever upload is pending,
+    closing a race that could misattribute an ack to the wrong mission.
+  * Filter flight-critical MAVLink input by the configured autopilot system
+    ID, so messages from a foreign MAVLink system sharing the same link
+    cannot influence the FMU state machine.
+  * Tell a genuine operator command retry apart from a redundant
+    cross-server replay of the same command, using the upstream
+    server_command_id support (requires libfss-client-ssl and
+    libfss-transport >= 1.2.0) instead of relying solely on a
+    timestamp-window heuristic; also stop a stale, superseded command from
+    being actuated as if it were new.
+  * Bound the MAVLink TCP connection with a configurable connect deadline
+    (mav_connect_timeout_s) and send timeout (mav_send_timeout_s via
+    SO_SNDTIMEO/TCP_USER_TIMEOUT), and retire and reconnect a half-open
+    link on heartbeat timeout instead of leaving it stuck. Signal handling
+    is now installed before the MAV connection is opened, so a stuck
+    connect attempt can still be interrupted cleanly.
+  * Move the Logger's disk I/O off the event-loop thread so a slow or
+    blocked filesystem cannot stall MAV/FSS/SMM processing.
+  * Stop trusting a peer's self-reported timestamp for known-aircraft
+    tracking: debounce and stale-entry eviction now use the FMU's own
+    clock, so a peer with a bad clock (no NTP, a stuck RTC, a glitching
+    ADS-B decoder) cannot jam an aircraft's tracking state or evict every
+    other tracked aircraft.
+  * Docker: support an optional second FSS server (SERVER2_ADDR/
+    SERVER2_PORT) for redundant reporting.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sun, 19 Jul 2026 15:30:04 +1200
+
 cap-fmu (1.1.0) unstable; urgency=medium
 
   * Fix intermittent failure to re-engage AUTO after a fresh mission upload
