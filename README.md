@@ -60,6 +60,17 @@ worker thread, not the event loop (see the `fmu` block's `mav_send_timeout_s`
 for the equivalent MAV-side bound), but a tighter value here still recovers
 a dead-peer send sooner.
 
+`clock_offset_ms` is likewise optional and top-level, also read directly by
+the FSS client library: a signed millisecond offset applied to every
+wall-clock-stamped outbound FSS message (RTT response, position report).
+Defaults to 0 (no skew) if omitted. Intended for testing an FMU against a
+deliberately skewed idea of wall-clock time without touching the host's real
+`CLOCK_REALTIME`, which is a single non-namespaced kernel-global value that
+`--cap-add=SYS_TIME` + `date -s` inside a container would skew for every
+other container sharing that kernel. Set via the Docker image's
+`CLOCK_OFFSET_MS` environment variable (see `docker/generate-config.sh`); the
+FMU's own code never touches this key, the FSS client library parses it.
+
 #### Optional FMU configuration
 
 The `client.json` file itself is required and must be a valid, openable JSON
