@@ -13,6 +13,7 @@
 #include "fmu-state-types.hpp"
 #include "fss/fmu-fss-types.hpp"
 #include "ilogger.hpp"
+#include "smm/smm-command.hpp"
 
 inline const char *
 fmu_state_name (FMUState s)
@@ -68,6 +69,21 @@ fss_cmd_name (FSSCommand cmd)
             return "disarm";
         case fss_cmd_terminate:
             return "terminate";
+    }
+    return "unknown";
+}
+
+inline const char *
+smm_cmd_name (SMMCommand cmd)
+{
+    switch (cmd)
+    {
+        case smm_cmd_none:
+            return "none";
+        case smm_cmd_abandon_search:
+            return "abandon_search";
+        case smm_cmd_mission_complete:
+            return "mission_complete";
     }
     return "unknown";
 }

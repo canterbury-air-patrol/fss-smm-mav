@@ -2629,6 +2629,45 @@ TEST_CASE ("EventDispatcher routes SmmRtl through the state machine's own arbitr
     REQUIRE (f.smm->cancel_calls == cancel_calls_before);
 }
 
+TEST_CASE ("EventDispatcher routes an operator SmmOperatorCommand through SMMNewCommand (todo/90)",
+           "[event_dispatcher]")
+{
+    auto f = make_dispatcher ();
+
+    /* A higher-priority FSS command already in effect: an operator
+     * mission-complete command must not override it, exactly like SmmRtl
+     * above -- both flow through the same SMMNewCommand arbitration. */
+    f.sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (f.mav->last_mode == flight_mode_hold);
+    int calls_before = f.mav->set_mode_calls;
+
+    event suppressed = SmmOperatorCommand{ smm_cmd_mission_complete };
+    f.dispatcher->dispatch (suppressed);
+    REQUIRE (f.mav->set_mode_calls == calls_before);
+    REQUIRE (f.mav->last_mode == flight_mode_hold);
+
+    /* While genuinely searching, an operator mission-complete command really
+     * does take effect: the FMU moves to waiting_for_tasking (RTL flight
+     * mode) without cancelling the searching role (todo/77), same as the
+     * internal SmmRtl outcome. */
+    f.sm->FSSNewCommand (fss_cmd_continue);
+    int cancel_calls_before = f.smm->cancel_calls;
+    event mc = SmmOperatorCommand{ smm_cmd_mission_complete };
+    f.dispatcher->dispatch (mc);
+    REQUIRE (f.mav->last_mode == flight_mode_rtl);
+    REQUIRE (f.smm->cancel_calls == cancel_calls_before);
+
+    /* An operator abandon-search command arriving on top of that in-flight
+     * waiting_for_tasking resumes searching (map_smm_state() maps
+     * abandon_search to fmu_state_searching) rather than being suppressed by
+     * it -- the deliberate interaction the todo calls for confirming rather
+     * than assuming. */
+    int search_calls_before = f.smm->search_calls;
+    event as = SmmOperatorCommand{ smm_cmd_abandon_search };
+    f.dispatcher->dispatch (as);
+    REQUIRE (f.smm->search_calls > search_calls_before);
+}
+
 TEST_CASE (
     "EventDispatcher auto-reacquires a search while waiting_for_tasking, without a duplicate upload (todo/70/77)",
     "[event_dispatcher]")

@@ -29,9 +29,9 @@ extern "C"
  * thread: the public methods only enqueue a task and return immediately, so a
  * slow or hung SMM endpoint can never stall queued FSS commands (rtl/terminate)
  * (todo/33). Any resulting flight action is reported back through the
- * load-search / RTL callbacks, which the App routes through the event queue so
- * it is applied on the event-loop thread (where the state machine arbitrates
- * priority). The worker itself never commands MAV.
+ * load-search / RTL / operator-command callbacks, which the App routes through
+ * the event queue so it is applied on the event-loop thread (where the state
+ * machine arbitrates priority). The worker itself never commands MAV.
  *
  * See docs/threading.md for the full thread inventory, data ownership, and
  * lock-ordering model this worker/queue is one piece of. */
@@ -82,11 +82,24 @@ class SMM : public ISMM
     std::atomic<bool> search_active{ false };
     uint64_t search_retry_ts{ 0 };
     static constexpr uint64_t search_retry_interval_ms{ 5000 };
+    /* The operator command last acted on (todo/90), worker-thread-only (like
+     * search_retry_ts). smm_asset_last_command() keeps reporting the same value
+     * on every position-report response until the operator issues a different
+     * one -- there is no per-command id/consumption in the library -- so this
+     * is compared against the freshly read value in checkOperatorCommand() to
+     * edge-trigger: act once per distinct command, not once per second for as
+     * long as it remains current. */
+    smm_asset_command last_seen_operator_command{ SMM_COMMAND_UNKNOWN };
 
     /* Flight-action callbacks invoked by the worker. The App wires these to the
      * event queue so the action is applied on the event-loop thread. */
     std::function<void (std::shared_ptr<SMMSearch>)> load_search_cb{};
     std::function<void ()> rtl_cb{};
+    /* Fires once per newly observed operator command (todo/90), routed through
+     * the event queue to FMUStateMachine::SMMNewCommand -- the state machine
+     * stays the sole decision maker rather than SMM commanding MAV/search state
+     * directly. */
+    std::function<void (SMMCommand)> operator_command_cb{};
 
     /* Worker thread + its task queue. The queue is a deque so reportPosition can
      * coalesce (drop a superseded queued report) and retryPendingSearch can
@@ -129,6 +142,10 @@ class SMM : public ISMM
     void doReportPosition (PositionData t_pd);
     void doReachedPoint (int point);
     void doSearch (Point current_pos);
+    /* Check for a newly observed operator command (todo/90) and act on it;
+     * called from doReportPosition() right after reportPositionToSmm(), per
+     * the library doc comment ("checked after smm_asset_report_position"). */
+    void checkOperatorCommand ();
     /* Acquire a search only if one is wanted (search_active) and none is held —
      * the shared guard behind both retry triggers (fresh position / reconnect
      * timer). */
@@ -146,6 +163,7 @@ class SMM : public ISMM
     virtual auto fetchSearch (double lat, double lon) -> smm_search;
     virtual auto commitSearch (SMMSearch &candidate) -> bool;
     virtual void reportPositionToSmm (double lat, double lon, int32_t alt, int heading);
+    virtual auto lastOperatorCommand () -> smm_asset_command;
 
   public:
     /* The tuning parameters (report interval, connect/transfer timeouts) have no
@@ -165,6 +183,10 @@ class SMM : public ISMM
      * once before SMM activity begins. */
     void registerLoadSearchCB (std::function<void (std::shared_ptr<SMMSearch>)> cb);
     void registerRtlCB (std::function<void ()> cb);
+    /* Register the operator-command callback (todo/90): fires with the mapped
+     * SMMCommand once per newly observed 'AS'/'MC' from smm_asset_last_command().
+     * Call once before SMM activity begins. */
+    void registerOperatorCommandCB (std::function<void (SMMCommand)> cb);
     void connect (const std::string &host, const flight_safety_system::secure_string &user,
                   const flight_safety_system::secure_string &pass, const std::string &asset_name) override;
     void search (Point current_pos) override;

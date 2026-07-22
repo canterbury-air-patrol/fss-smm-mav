@@ -1378,6 +1378,11 @@ class TestSMM : public SMM
     std::atomic<int> report_calls{ 0 };
     std::atomic<bool> fetch_entered{ false };
     std::atomic<bool> block_fetch{ false };
+    /* Test-controlled stand-in for smm_asset_last_command() (todo/90): no
+     * live SMM server to make the C library return a real operator command
+     * from, so this seam lets a test set what checkOperatorCommand() sees on
+     * the next reportPosition(). */
+    std::atomic<smm_asset_command> next_operator_command{ SMM_COMMAND_UNKNOWN };
 
     void
     releaseFetch ()
@@ -1412,6 +1417,11 @@ class TestSMM : public SMM
     reportPositionToSmm (double /*lat*/, double /*lon*/, int32_t /*alt*/, int /*heading*/) override
     {
         this->report_calls++;
+    }
+    auto
+    lastOperatorCommand () -> smm_asset_command override
+    {
+        return this->next_operator_command.load ();
     }
 
   private:
@@ -1592,6 +1602,116 @@ TEST_CASE ("SMM does not accept a search if the searching role is revoked mid-fe
     REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 1; }, io_timeout));
     REQUIRE (smm.commit_calls.load () == 0);
     REQUIRE (rtl.load () == 0);
+}
+
+TEST_CASE ("SMM drops a held search and reattempts acquisition on an operator abandon-search command, once per "
+           "distinct command (todo/90)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
+
+    int dummy = 0;
+    /* A short report interval (rather than the usual test_smm_report_interval_ms)
+     * so two real position reports land far enough apart to each clear the
+     * rate-limit gate checkOperatorCommand() sits behind, without a
+     * second-scale sleep in this test. */
+    TestSMM smm (mav, test_logger, test_altitude_cap_m, test_altitude_floor_m, 90.0, 10, test_smm_connect_timeout_s,
+                 test_smm_transfer_timeout_s);
+    smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});
+    smm.registerRtlCB ([] {});
+    std::mutex cmds_mtx;
+    std::vector<SMMCommand> operator_cmds;
+    smm.registerOperatorCommandCB (
+        [&] (SMMCommand cmd)
+        {
+            std::lock_guard<std::mutex> lk (cmds_mtx);
+            operator_cmds.push_back (cmd);
+        });
+    SMMTestAccess::setAsset (smm, reinterpret_cast<smm_asset> (&dummy));
+    SMMTestAccess::setSearchActive (smm, true);
+    SMMTestAccess::setSearch (smm, std::make_shared<SMMSearch> ());
+
+    smm.next_operator_command = SMM_COMMAND_ABANDON_SEARCH;
+    smm.reportPosition (PositionData (-43.5, 172.6, 50.0, 0, 0, 0));
+
+    /* The held search is dropped (without completing it -- SMMSearch's
+     * destructor only ever calls smm_search_destroy, never smm_search_complete)
+     * and maybeAcquire(), called right after in doReportPosition(), attempts a
+     * fresh fetch since nothing is held any more. */
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.fetch_calls.load () >= 1; }, io_timeout));
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&]
+        {
+            std::lock_guard<std::mutex> lk (cmds_mtx);
+            return operator_cmds.size () == 1;
+        },
+        io_timeout));
+    {
+        std::lock_guard<std::mutex> lk (cmds_mtx);
+        REQUIRE (operator_cmds[0] == smm_cmd_abandon_search);
+    }
+
+    /* A second report with the SAME operator command must not re-fire:
+     * smm_asset_last_command() keeps reporting the same value until the
+     * operator issues a different one, so without edge-triggering this would
+     * re-drop (and endlessly re-churn) whatever gets reacquired in between. */
+    std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    smm.reportPosition (PositionData (-43.5, 172.6, 50.0, 0, 0, 0));
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 2; }, io_timeout));
+    {
+        std::lock_guard<std::mutex> lk (cmds_mtx);
+        REQUIRE (operator_cmds.size () == 1);
+    }
+}
+
+TEST_CASE ("SMM reports an operator mission-complete command once, without touching the held search (todo/90)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
+
+    int dummy = 0;
+    TestSMM smm (mav, test_logger, test_altitude_cap_m, test_altitude_floor_m, 90.0, 10, test_smm_connect_timeout_s,
+                 test_smm_transfer_timeout_s);
+    smm.registerLoadSearchCB ([] (const std::shared_ptr<SMMSearch> &) {});
+    smm.registerRtlCB ([] {});
+    std::mutex cmds_mtx;
+    std::vector<SMMCommand> operator_cmds;
+    smm.registerOperatorCommandCB (
+        [&] (SMMCommand cmd)
+        {
+            std::lock_guard<std::mutex> lk (cmds_mtx);
+            operator_cmds.push_back (cmd);
+        });
+    SMMTestAccess::setAsset (smm, reinterpret_cast<smm_asset> (&dummy));
+    /* No search active/held: a mission-complete report is only about the
+     * operator-command callback, not search acquisition. */
+
+    smm.next_operator_command = SMM_COMMAND_MISSION_COMPLETE;
+    smm.reportPosition (PositionData (-43.5, 172.6, 50.0, 0, 0, 0));
+
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&]
+        {
+            std::lock_guard<std::mutex> lk (cmds_mtx);
+            return operator_cmds.size () == 1;
+        },
+        io_timeout));
+    {
+        std::lock_guard<std::mutex> lk (cmds_mtx);
+        REQUIRE (operator_cmds[0] == smm_cmd_mission_complete);
+    }
+    REQUIRE (smm.commit_calls.load () == 0);
+
+    /* Repeated reports with the same command must not re-fire. */
+    std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    smm.reportPosition (PositionData (-43.5, 172.6, 50.0, 0, 0, 0));
+    REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 2; }, io_timeout));
+    {
+        std::lock_guard<std::mutex> lk (cmds_mtx);
+        REQUIRE (operator_cmds.size () == 1);
+    }
 }
 
 /* todo/67: malformed-byte-stream robustness, the single-repo share of Tier-3
