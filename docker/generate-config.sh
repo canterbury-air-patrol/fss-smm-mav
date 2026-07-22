@@ -93,6 +93,19 @@ fi
 # duplicated literal here that could drift from it.
 LOG_DIR="${LOG_DIR:-}"
 
+# CLOCK_OFFSET_MS is optional (todo/88): a signed millisecond offset applied
+# to every wall-clock-stamped outbound FSS message, letting a test harness
+# give this FMU a deliberately skewed idea of time without touching the
+# container's real (host-kernel-global, non-namespaced) CLOCK_REALTIME.
+# Parsed entirely inside the FSS client library from a top-level
+# "clock_offset_ms" key (like tcp_user_timeout_ms, not part of the "fmu"
+# block); omitted entirely when unset, same as LOG_DIR above.
+CLOCK_OFFSET_MS="${CLOCK_OFFSET_MS:-}"
+if [ -n "${CLOCK_OFFSET_MS}" ] && ! [[ "${CLOCK_OFFSET_MS}" =~ ^-?[0-9]+$ ]]; then
+    echo "Error: CLOCK_OFFSET_MS must be an integer (milliseconds)" >&2
+    exit 1
+fi
+
 # jq -n builds the document from typed arguments: --arg values are always
 # emitted as properly-escaped JSON strings (a NAME/SERVER1_ADDR/MAVPROXY_HOST
 # containing a quote, backslash, or newline cannot break the document or
@@ -101,7 +114,10 @@ LOG_DIR="${LOG_DIR:-}"
 # server2_addr defaults to "" (rather than leaving --arg unset) so the jq
 # filter can key the second servers[] entry on it being non-empty; its port
 # is only ever read when server2_addr is non-empty, so an unset/zero
-# server2_port there is inert.
+# server2_port there is inert. clock_offset_ms defaults to null (rather than
+# leaving --argjson unset) so the top-level key can be keyed on it being
+# non-null; 0 is a valid, meaningful offset and must not be treated the same
+# as unset.
 jq -n \
     --arg name "${NAME}" \
     --arg server_addr "${SERVER1_ADDR}" \
@@ -111,6 +127,7 @@ jq -n \
     --arg mav_host "${MAVPROXY_HOST}" \
     --argjson mav_port "${MAVPROXY_PORT}" \
     --arg log_dir "${LOG_DIR}" \
+    --argjson clock_offset_ms "${CLOCK_OFFSET_MS:-null}" \
     '{
         name: $name,
         ssl: {
@@ -121,7 +138,8 @@ jq -n \
         servers: (
             [{ address: $server_addr, port: $server_port }]
             + (if $server2_addr != "" then [{ address: $server2_addr, port: $server2_port }] else [] end)
-        ),
+        )
+    } + (if $clock_offset_ms != null then { clock_offset_ms: $clock_offset_ms } else {} end) + {
         fmu: ({
             mav_address: $mav_host,
             mav_port: $mav_port

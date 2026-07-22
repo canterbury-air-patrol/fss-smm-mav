@@ -133,6 +133,28 @@ jobs:
         fi
         test ! -e "${CONFIG_FILE}"
 
+        # clock_offset_ms (todo/88) is omitted unless CLOCK_OFFSET_MS is set,
+        # reproducing today's config byte-for-byte.
+        rm -f "${CONFIG_FILE}"
+        ./docker/generate-config.sh
+        test "$(jq -r 'has("clock_offset_ms")' "${CONFIG_FILE}")" = "false"
+
+        # CLOCK_OFFSET_MS, when set (including to a negative skew), must
+        # appear verbatim as a top-level integer key, not inside "fmu".
+        rm -f "${CONFIG_FILE}"
+        CLOCK_OFFSET_MS=-300000 ./docker/generate-config.sh
+        test "$(jq -r '.clock_offset_ms' "${CONFIG_FILE}")" = "-300000"
+        test "$(jq -r 'has("clock_offset_ms")' "${CONFIG_FILE}")" = "true"
+
+        # An invalid CLOCK_OFFSET_MS must fail early, not write a config with
+        # a non-numeric clock_offset_ms.
+        rm -f "${CONFIG_FILE}"
+        if CLOCK_OFFSET_MS=not-a-number ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric CLOCK_OFFSET_MS" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
+
   distcheck:
     runs-on: ubuntu-latest
     container: debian:trixie
