@@ -291,6 +291,20 @@ SMM::doReportPosition (PositionData t_pd)
         uint64_t curr_ts = current_timestamp_ms ();
         if (this->position_report_last_ts + this->position_report_interval_ms <= curr_ts)
         {
+            /* smm_asset_last_command() reads a value cached on the asset from
+             * the last position-report response (the library doc comment: "is
+             * set in response to a position report; normally this is checked
+             * after smm_asset_report_position"), so checking the cached value
+             * from the PREVIOUS report here -- rather than after the call
+             * below -- costs at most one report interval of extra latency
+             * (operator commands are latched server-side and are not
+             * sub-second time-critical), in exchange for keeping this the
+             * only virtual call in this block before the one report_calls-style
+             * test doubles (mav_io_test.cpp's TestSMM) synchronise on: putting
+             * it after would leave a virtual dispatch racing a test's
+             * destructor the instant reportPositionToSmm() returns (todo/90). */
+            this->checkOperatorCommand ();
+
             Point p = t_pd.getP ();
             /* SMM expects altitude in metres, which is also PositionData's unit,
              * so it is forwarded directly. std::lround on a non-finite double is
@@ -300,11 +314,6 @@ SMM::doReportPosition (PositionData t_pd)
             int32_t alt = std::isfinite (alt_m) ? static_cast<int32_t> (std::lround (alt_m)) : 0;
             this->reportPositionToSmm (p.getLatitude (), p.getLongitude (), alt, t_pd.getHeading () / 100);
             this->position_report_last_ts = curr_ts;
-            /* smm_asset_last_command() "is set in response to a position
-             * report; normally this is checked after
-             * smm_asset_report_position" (library doc comment), so check it
-             * right here rather than on a separate cadence (todo/90). */
-            this->checkOperatorCommand ();
         }
     }
     /* Opportunistic retry: a fresh position arrived, so use it to (re)attempt
