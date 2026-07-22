@@ -63,6 +63,12 @@ SMM::registerRtlCB (std::function<void ()> cb)
     this->rtl_cb = std::move (cb);
 }
 
+void
+SMM::registerOperatorCommandCB (std::function<void (SMMCommand)> cb)
+{
+    this->operator_command_cb = std::move (cb);
+}
+
 auto
 SMM::fetchSearch (double lat, double lon) -> smm_search
 {
@@ -79,6 +85,12 @@ void
 SMM::reportPositionToSmm (double lat, double lon, int32_t alt, int heading)
 {
     smm_asset_report_position (this->asset, lat, lon, alt, heading, 3);
+}
+
+auto
+SMM::lastOperatorCommand () -> smm_asset_command
+{
+    return smm_asset_last_command (this->asset);
 }
 
 void
@@ -288,13 +300,64 @@ SMM::doReportPosition (PositionData t_pd)
             int32_t alt = std::isfinite (alt_m) ? static_cast<int32_t> (std::lround (alt_m)) : 0;
             this->reportPositionToSmm (p.getLatitude (), p.getLongitude (), alt, t_pd.getHeading () / 100);
             this->position_report_last_ts = curr_ts;
+            /* smm_asset_last_command() "is set in response to a position
+             * report; normally this is checked after
+             * smm_asset_report_position" (library doc comment), so check it
+             * right here rather than on a separate cadence (todo/90). */
+            this->checkOperatorCommand ();
         }
     }
     /* Opportunistic retry: a fresh position arrived, so use it to (re)attempt
      * acquisition. This is one of two retry triggers; retryPendingSearch() drives
      * the other off the reconnect timer so a search is still retried when position
-     * reports stop (see todo/41). */
+     * reports stop (see todo/41). checkOperatorCommand() above may just have
+     * dropped a held search (abandon-search), so this also serves as its
+     * immediate reacquire attempt. */
     this->maybeAcquire (t_pd.getP ());
+}
+
+void
+SMM::checkOperatorCommand ()
+{
+    smm_asset_command cmd = this->lastOperatorCommand ();
+    if (cmd == this->last_seen_operator_command)
+    {
+        /* Not a new command: smm_asset_last_command() keeps reporting the same
+         * value on every report until the operator issues a different one, so
+         * without this guard an abandon-search would re-fire (and re-drop a
+         * freshly (re)acquired search) once per second for as long as it
+         * remains the server's last recorded command. */
+        return;
+    }
+    this->last_seen_operator_command = cmd;
+    switch (cmd)
+    {
+        case SMM_COMMAND_ABANDON_SEARCH:
+            /* Drop the held search without completing it server-side (an
+             * explicit smm_search_complete would mark it finished, which an
+             * abandon does not mean) -- maybeAcquire(), called right after this
+             * returns in doReportPosition(), picks up whatever SMM offers next
+             * for this asset. Reset the retry backoff too, so this is retried
+             * immediately rather than waiting out a stale failed-acquire
+             * backoff. */
+            this->publishSearch (nullptr);
+            this->search_retry_ts = 0;
+            if (this->operator_command_cb)
+            {
+                this->operator_command_cb (smm_cmd_abandon_search);
+            }
+            break;
+        case SMM_COMMAND_MISSION_COMPLETE:
+            if (this->operator_command_cb)
+            {
+                this->operator_command_cb (smm_cmd_mission_complete);
+            }
+            break;
+        default:
+            /* NONE, and every command outside this pass's scope (circle/rtl/
+             * goto/continue/unknown -- see smm-command.hpp), is a no-op. */
+            break;
+    }
 }
 
 void

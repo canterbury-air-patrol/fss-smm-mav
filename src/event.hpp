@@ -34,6 +34,17 @@ struct SmmRtl
 {
 };
 
+/* An operator-issued SMM command ('AS'/'MC' via smm_asset_last_command(),
+ * todo/90), fed back the same way: through the event queue to
+ * FMUStateMachine::SMMNewCommand, whose existing priority arbitration (todo/70)
+ * resolves any conflict with an in-flight acquire-failure RTL, keeping the
+ * state machine the sole decision maker rather than SMM commanding it
+ * directly. */
+struct SmmOperatorCommand
+{
+    SMMCommand command;
+};
+
 /* An FSS command together with the responder that acks its resolution back to
  * FSS. The responder is carried through the event queue so the ack is sent from
  * the same thread that runs the state machine, once the command resolves. */
@@ -48,4 +59,4 @@ struct FSSCommandEvent
 };
 
 using event = std::variant<FSSCommandEvent, FSSCommsStatus, MavCommsStatus, SMMSettings, PositionData, BatteryData,
-                           ReachedPoint, OtherAircraftReport, SmmLoadSearch, SmmRtl, Nudge>;
+                           ReachedPoint, OtherAircraftReport, SmmLoadSearch, SmmRtl, SmmOperatorCommand, Nudge>;

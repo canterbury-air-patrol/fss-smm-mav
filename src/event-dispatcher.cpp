@@ -127,6 +127,16 @@ EventDispatcher::dispatch (const event &e)
                 logger.log ("CMD smm rtl");
                 state_machine.SMMNewCommand (smm_cmd_mission_complete);
             },
+            [&] (const SmmOperatorCommand &oc)
+            {
+                /* An operator-issued 'AS'/'MC' command (todo/90), routed
+                 * through the state machine's own arbitration exactly like
+                 * SmmRtl above rather than acted on directly: any conflict
+                 * with an in-flight acquire-failure RTL is resolved by
+                 * SMMNewCommand's existing priority logic (todo/70). */
+                logger.log (std::string ("CMD smm ") + smm_cmd_name (oc.command));
+                state_machine.SMMNewCommand (oc.command);
+            },
             [&] (BatteryData bd)
             {
                 auto remaining = bd.getRemaining ();

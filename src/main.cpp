@@ -109,6 +109,8 @@ class App
         smm->registerLoadSearchCB ([this] (const std::shared_ptr<SMMSearch> &search)
                                    { enqueue_event (std::make_shared<event> (SmmLoadSearch{ search })); });
         smm->registerRtlCB ([this] { enqueue_event (std::make_shared<event> (SmmRtl{})); });
+        smm->registerOperatorCommandCB ([this] (SMMCommand cmd)
+                                        { enqueue_event (std::make_shared<event> (SmmOperatorCommand{ cmd })); });
 
         /* Start signal handling before any potentially long external operation
          * (todo/84): SIGINT/SIGTERM are already blocked process-wide (see
