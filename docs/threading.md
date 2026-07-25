@@ -26,7 +26,7 @@ That is 7 threads, matching the count referenced in todo/62 and elsewhere.
 |---|---|---|
 | `App::main_lock` + `main_cv` | `App::event_queue` | Event loop (consumer), every callback that calls `enqueue_event` (producers: MAV recv/heartbeat threads, SMM worker via its callbacks, FSS send worker, signal waiter, FSS reconnector). |
 | `App::reconnect_lock` + `reconnect_cv` | Only the reconnector's own wait timer | FSS reconnector thread, woken early by the signal waiter. |
-| `FMUStateMachine::lock` | `fss_command`, `smm_command`, `fss_command_target`, `low_battery`, `low_battery_count`, `current_state`, `fss_comms_lost`, `mav_comms_lost`, `pending_replay_state` | Event loop only (todo/52's `assert_event_loop_thread()` enforces this in debug builds) — see "Single-event-loop-thread invariant" below. |
+| `FMUStateMachine::lock` | `fss_command`, `smm_command`, `fss_command_target`, `low_battery`, `low_battery_count`, `altitude_breach`, `altitude_breach_count`, `altitude_clear_count`, `current_state`, `fss_comms_lost`, `mav_comms_lost`, `pending_replay_state` | Event loop only (todo/52's `assert_event_loop_thread()` enforces this in debug builds) — see "Single-event-loop-thread invariant" below. |
 | `mav_connection::send_lock` | The socket fd's lifetime (open/close) and the per-channel MAVLink pack/transmit state (the generated `*_pack_chan()` calls mutate global per-channel sequence/status, so packing and sending must be serialised) | Any thread that sends: event loop (via `MAV`/`IMAV` action methods), MAV heartbeat thread, MAV recv thread (mission handshake replies, ADS-B rebroadcast). |
 | `mav_connection::state_lock` | `last_position`, `search`, `search_loaded`, `search_loading`, `goto_active`, `goto_position`, `goto_ack_pending`, `pending_mode_command`, `retry_count`, `last_tried` | MAV recv thread (parses inbound MAVLink and updates upload/search state), event loop (issues commands), FSS reconnector (`attemptReconnect`). |
 | `mav_connection::heartbeat_mutex` + `heartbeat_cv` | Only the heartbeat loop's own 1-second wait timer | MAV heartbeat thread, woken early by `stopping`. |
@@ -61,8 +61,8 @@ never both at once.
 ## Single-event-loop-thread invariant
 
 Every state-mutating `FMUStateMachine` method (`FSSNewCommand`,
-`SMMNewCommand`, `setLowBattery`, `setCommsFailure`, `setMavCommsFailure`)
-and the work they drive (`updateState`/`actionState`, which touch `mav`,
+`SMMNewCommand`, `setLowBattery`, `setCommsFailure`, `setMavCommsFailure`,
+`setCurrentAltitude`) and the work they drive (`updateState`/`actionState`, which touch `mav`,
 `smm`, and `state_change_cb`) must run on the event-loop thread. All
 external inputs — FSS/SMM/MAV callbacks, which fire on their own threads —
 are funnelled through `App`'s event queue and applied on the event-loop

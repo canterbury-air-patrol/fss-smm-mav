@@ -58,9 +58,13 @@ fss_command_ack_reason_for (const FSSCommandResolution &res) -> flight_safety_sy
         case fmu_state_failsafe:
             return flight_safety_system::transport::supersede_comms_loss;
         default:
-            /* No other state should reach here: only the low-battery and
-             * comms-failsafe latches supersede an FSS command (terminate is a
-             * command in its own right, not a latch that drops another). */
+            /* Also reached by fmu_state_rtl when an altitude-cap breach
+             * (todo/92) supersedes an FSS command: the transport enum has no
+             * dedicated supersede_altitude_cap reason (a cross-repo protocol
+             * addition, out of scope for todo/92), so it falls back to
+             * supersede_none like terminate already does here, for a
+             * different reason (terminate is a command in its own right, not
+             * a latch that drops another). */
             return flight_safety_system::transport::supersede_none;
     }
 }
