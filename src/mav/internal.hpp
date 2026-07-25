@@ -163,9 +163,16 @@ class mav_connection
     mav_systems systems{};
     /* state_lock guards: last_position, search, search_loaded,
      * search_loading, goto_active, goto_position, goto_ack_pending,
-     * retry_count, last_tried. Never held at the same time as send_lock (see
-     * docs/threading.md for the full cross-thread ownership/lock-ordering
-     * model this connection is one piece of). */
+     * pending_mode_command, retry_count, last_tried. Never held at the same
+     * time as send_lock. docs/threading.md's "Data ownership and locks" table
+     * is the canonical version of this list (and of the whole cross-thread
+     * ownership/lock-ordering model this connection is one piece of): a field
+     * added here needs a matching update there, or the document contributors
+     * reason from before running TSan drifts out of date (todo/95). Fields
+     * below that are thread-owned (gps_fix_type) or immutable after
+     * construction (goto_altitude_m, altitude_floor_m/cap_m, the stream
+     * intervals) are deliberately absent from both lists; each says so at its
+     * own declaration. */
     std::mutex state_lock{};
     Point last_position{};
     std::shared_ptr<SMMSearch> search{ nullptr };
