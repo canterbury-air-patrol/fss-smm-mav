@@ -64,7 +64,7 @@ EventDispatcher::dispatch (const event &e)
                 logger.log ("SMM connect " + settings.getURL ());
                 smm.connect (settings.getURL (), settings.getUsername (), settings.getPassword (), asset_name);
             },
-            [&] (PositionData pd)
+            [&] (const PositionData &pd)
             {
                 /* Feed the continuous altitude-cap enforcement latch on every
                  * own-ship position report (todo/92), mirroring BatteryData's
