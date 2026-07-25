@@ -213,9 +213,18 @@ class MavLoopbackServer
     void
     sendPosition (int32_t lat, int32_t lon, uint8_t sysid = 1)
     {
+        sendPosition (lat, lon, /*alt mm*/ 100000, /*rel alt mm*/ 100000, sysid);
+    }
+
+    /* Same, with alt (MSL) and relative_alt (AGL) set independently (todo/92):
+     * every other overload above packs both to the same value, so no test
+     * using them can distinguish which field a consumer actually read. */
+    void
+    sendPosition (int32_t lat, int32_t lon, int32_t alt_mm, int32_t relative_alt_mm, uint8_t sysid = 1)
+    {
         mavlink_message_t msg;
-        mavlink_msg_global_position_int_pack_chan (sysid, 1, autopilot_tx_channel, &msg, 0, lat, lon,
-                                                   /*alt mm*/ 100000, /*rel alt mm*/ 100000, 0, 0, 0, /*hdg*/ 0);
+        mavlink_msg_global_position_int_pack_chan (sysid, 1, autopilot_tx_channel, &msg, 0, lat, lon, alt_mm,
+                                                   relative_alt_mm, 0, 0, 0, /*hdg*/ 0);
         sendMsg (msg);
     }
 
@@ -1969,6 +1978,45 @@ TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag (
     server.sendGpsRawInt (GPS_FIX_TYPE_3D_FIX);
     PositionData pd_good_fix = waitForEchoedPosition (-437000000, 1728000000);
     REQUIRE ((pd_good_fix.getFlags () & POSITION_FLAG_VALID_COORDS) != 0);
+}
+
+/* todo/92: GLOBAL_POSITION_INT carries two altitude fields -- alt (MSL) and
+ * relative_alt (AGL, relative to home) -- and PositionData now carries both
+ * separately (alt_m / alt_agl_m). This proves the recv path reads each field
+ * into the right one, by setting them to different values: if the
+ * implementation accidentally read alt for both, this test would fail. */
+TEST_CASE ("GLOBAL_POSITION_INT's alt and relative_alt populate separate PositionData fields (todo/92)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* alt (MSL) = 500m, relative_alt (AGL) = 80m -- deliberately different. */
+    constexpr int32_t alt_mm = 500000;
+    constexpr int32_t relative_alt_mm = 80000;
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition (-435000000, 1726000000, alt_mm, relative_alt_mm);
+            return positions.count_now () > 0;
+        },
+        io_timeout));
+
+    PositionData pd = positions.lastPosition ();
+    /* Regression guard: this change did not touch alt_m's existing MSL
+     * semantics. */
+    REQUIRE (pd.getAltitudeMetres () == Catch::Approx (500.0));
+    /* The specific bug-shaped assertion: alt_agl_m reflects relative_alt, not
+     * alt -- if the implementation read alt twice, this would read 500.0. */
+    REQUIRE (pd.getAltitudeAGLMetres () == Catch::Approx (80.0));
 }
 
 TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged each time (todo/68)", "[mav_io]")
