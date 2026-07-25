@@ -63,6 +63,13 @@ class FMUStateMachine
      * cross-thread misuse it is meant to detect. */
     const std::thread::id event_loop_thread_id{ std::this_thread::get_id () };
 #endif
+    /* The state fields below are all accessed under this->lock (declared with
+     * the rest of the members further down). docs/threading.md's "Data
+     * ownership and locks" table is the canonical inventory of what that lock
+     * guards: adding a field here means adding it there too, or the document
+     * that contributors are told to reason from before running TSan quietly
+     * stops being the complete map it claims to be (todo/95, which is exactly
+     * how `terminated` came to be missing from it). */
     FMUState current_state{ fmu_state_manual };
     /* A safety-critical state (RTL / failsafe / low-battery / terminate /
      * waiting-for-tasking) whose MAV command could not be transmitted (link
