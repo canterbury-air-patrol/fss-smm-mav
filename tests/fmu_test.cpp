@@ -11,6 +11,7 @@
 #include "fss/ifss.hpp"
 #include "logger.hpp"
 #include "mav/battery-voltage.hpp"
+#include "mav/failsafe-params.hpp"
 #include "mav/internal.hpp"
 #include "mav/latlon-encoding.hpp"
 #include "mav/mav-comms.hpp"
@@ -21,6 +22,7 @@
 #include "smm/search-acquire.hpp"
 #include "smm/search-altitude.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -1697,6 +1699,53 @@ TEST_CASE ("resolve_mav_mode maps supported airframes to command modes", "[mav]"
     REQUIRE (resolve_mav_mode (MAV_TYPE_FIXED_WING, MavModeCommand::rtl) == PLANE_MODE_RTL);
     REQUIRE (resolve_mav_mode (MAV_TYPE_QUADROTOR, MavModeCommand::hold) == COPTER_MODE_POSHOLD);
     REQUIRE (resolve_mav_mode (MAV_TYPE_GROUND_ROVER, MavModeCommand::auto_mode) == ROVER_MODE_AUTO);
+}
+
+TEST_CASE ("resolve_gcs_failsafe_param_name maps supported airframes, and returns nullopt for unknown ones (todo/91)",
+           "[mav]")
+{
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_FIXED_WING) == std::optional<const char *> ("FS_GCS_ENABL"));
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_QUADROTOR) == std::optional<const char *> ("FS_GCS_ENABLE"));
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_COAXIAL) == std::optional<const char *> ("FS_GCS_ENABLE"));
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_HELICOPTER) == std::optional<const char *> ("FS_GCS_ENABLE"));
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_HEXAROTOR) == std::optional<const char *> ("FS_GCS_ENABLE"));
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_OCTOROTOR) == std::optional<const char *> ("FS_GCS_ENABLE"));
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_TRICOPTER) == std::optional<const char *> ("FS_GCS_ENABLE"));
+    REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_GROUND_ROVER) == std::optional<const char *> ("FS_GCS_ENABLE"));
+    REQUIRE (!resolve_gcs_failsafe_param_name (0).has_value ());
+    REQUIRE (!resolve_gcs_failsafe_param_name (MAV_TYPE_GCS).has_value ());
+}
+
+TEST_CASE ("expected_failsafe_params only requests AFS_ENABLE/AFS_TERM_ACTION for terminate_action::terminate "
+           "(todo/91)",
+           "[mav]")
+{
+    auto has_param = [] (const std::vector<FailsafeParamCheck> &params, const std::string &name)
+    { return std::any_of (params.begin (), params.end (), [&] (const auto &p) { return name == p.name; }); };
+
+    auto none_params = expected_failsafe_params (MAV_TYPE_QUADROTOR, terminate_action::none);
+    REQUIRE (!has_param (none_params, "AFS_ENABLE"));
+    REQUIRE (!has_param (none_params, "AFS_TERM_ACTION"));
+    REQUIRE (has_param (none_params, "FS_GCS_ENABLE"));
+
+    auto disarm_params = expected_failsafe_params (MAV_TYPE_QUADROTOR, terminate_action::disarm);
+    REQUIRE (!has_param (disarm_params, "AFS_ENABLE"));
+    REQUIRE (!has_param (disarm_params, "AFS_TERM_ACTION"));
+    REQUIRE (has_param (disarm_params, "FS_GCS_ENABLE"));
+
+    auto terminate_params = expected_failsafe_params (MAV_TYPE_QUADROTOR, terminate_action::terminate);
+    REQUIRE (has_param (terminate_params, "AFS_ENABLE"));
+    REQUIRE (has_param (terminate_params, "AFS_TERM_ACTION"));
+    REQUIRE (has_param (terminate_params, "FS_GCS_ENABLE"));
+}
+
+TEST_CASE ("expected_failsafe_params omits the GCS-failsafe entry for an unrecognised airframe (todo/91)", "[mav]")
+{
+    auto params = expected_failsafe_params (0, terminate_action::terminate);
+    REQUIRE (std::any_of (params.begin (), params.end (),
+                          [] (const auto &p) { return std::string (p.name) == "AFS_ENABLE"; }));
+    REQUIRE (std::none_of (params.begin (), params.end (),
+                           [] (const auto &p) { return std::string (p.name) == "FS_GCS_ENABLE"; }));
 }
 
 TEST_CASE ("mission_item_for lays out a goto mission", "[mission]")

@@ -251,6 +251,28 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
+    /* Send a PARAM_VALUE reply for `name` (todo/91), as ArduPilot would reply
+     * to a PARAM_REQUEST_READ — always a float on the wire regardless of the
+     * declared param_type. A non-default sysid (todo/83) stands in for
+     * another vehicle or GCS sharing the link. */
+    void
+    sendParamValue (const char *name, float value, uint8_t sysid = 1)
+    {
+        /* param_id is a fixed 16-byte field, not a NUL-terminated C string;
+         * mavlink_msg_param_value_pack_chan always reads 16 bytes from the
+         * pointer it is given, so a `name` shorter than that must first be
+         * copied into a buffer that size, zero-padded, or the call reads out
+         * of bounds. memcpy (not strncpy) because the field genuinely need
+         * not be NUL-terminated at 16/16 bytes, which trips
+         * -Wstringop-truncation on strncpy. */
+        char param_id_buf[MAVLINK_MSG_PARAM_VALUE_FIELD_PARAM_ID_LEN] = { 0 };
+        std::memcpy (param_id_buf, name, std::min (std::strlen (name), sizeof (param_id_buf)));
+        mavlink_message_t msg;
+        mavlink_msg_param_value_pack_chan (sysid, 1, autopilot_tx_channel, &msg, param_id_buf, value,
+                                           MAV_PARAM_TYPE_REAL32, /*param_count*/ 1, /*param_index*/ 0);
+        sendMsg (msg);
+    }
+
     /* Send a MISSION_ITEM_REACHED for `seq`. A non-default sysid (todo/83)
      * stands in for another vehicle or GCS sharing the link. */
     void
@@ -2199,4 +2221,143 @@ TEST_CASE ("A MISSION_REQUEST_INT or MISSION_ACK from a system other than the co
     REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_SET_CURRENT, msg, io_timeout));
     REQUIRE (mavlink_msg_mission_set_current_get_seq (&msg) == 0);
     expect_auto_mode (server);
+}
+
+TEST_CASE ("todo/91: --terminate-action=terminate against AFS_ENABLE=0 logs a distinct failsafe-config warning",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::terminate);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    server.sendParamValue ("AFS_ENABLE", 0.0F);
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("AFS_ENABLE=0"); }, io_timeout));
+}
+
+TEST_CASE ("todo/91: --terminate-action=terminate against a matching AFS config stays silent", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::terminate);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    server.sendParamValue ("AFS_ENABLE", 1.0F);
+    server.sendParamValue ("AFS_TERM_ACTION", 1.0F);
+    /* Prove the param values above were fully processed before checking for
+     * absence of a warning: TCP delivery is ordered and mav_connection
+     * processes on a single recv thread, so once a position sent after them
+     * is echoed back to the callback, any warning they would have triggered
+     * has already been logged (or not). */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition ();
+            return positions.count_at_least (1);
+        },
+        io_timeout));
+    REQUIRE_FALSE (capture.containsSubstring ("AFS_ENABLE"));
+    REQUIRE_FALSE (capture.containsSubstring ("AFS_TERM_ACTION"));
+}
+
+TEST_CASE ("todo/91: --terminate-action=disarm never requests AFS params, but still checks the GCS failsafe",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::disarm);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
+    std::vector<std::string> requested;
+    {
+        char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
+        mavlink_msg_param_request_read_get_param_id (&msg, buf);
+        requested.emplace_back (buf);
+    }
+    while (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, no_message_timeout))
+    {
+        char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
+        mavlink_msg_param_request_read_get_param_id (&msg, buf);
+        requested.emplace_back (buf);
+    }
+
+    REQUIRE (std::find (requested.begin (), requested.end (), "AFS_ENABLE") == requested.end ());
+    REQUIRE (std::find (requested.begin (), requested.end (), "AFS_TERM_ACTION") == requested.end ());
+    /* waitForColdStartThenUp's heartbeats default to MAV_TYPE_QUADROTOR. */
+    REQUIRE (std::find (requested.begin (), requested.end (), "FS_GCS_ENABLE") != requested.end ());
+}
+
+TEST_CASE ("todo/91: the GCS-failsafe param name requested is airframe-specific", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::none);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* Cold start: no heartbeat yet, so the first one sent below is genuinely
+     * the one that resolves the airframe type and drives the todo/91 check
+     * (mirroring the other-system heartbeat test above, not
+     * waitForColdStartThenUp, since that helper's heartbeats are always
+     * MAV_TYPE_QUADROTOR). */
+    REQUIRE (
+        MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendHeartbeat (MAV_TYPE_FIXED_WING);
+            return recorder.lastStatus () == MavCommsStatus::ok;
+        },
+        io_timeout));
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
+    char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
+    mavlink_msg_param_request_read_get_param_id (&msg, buf);
+    REQUIRE (std::string (buf) == "FS_GCS_ENABL");
+}
+
+TEST_CASE ("todo/91: a disabled GCS/telemetry failsafe on the autopilot logs a distinct warning", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::none);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* waitForColdStartThenUp's heartbeats default to MAV_TYPE_QUADROTOR, which
+     * resolves to FS_GCS_ENABLE. */
+    server.sendParamValue ("FS_GCS_ENABLE", 0.0F);
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("FS_GCS_ENABLE=0"); }, io_timeout));
 }
