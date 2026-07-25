@@ -1346,6 +1346,21 @@ TEST_CASE ("ack mapping: comms-loss supersede carries the comms-loss reason", "[
     REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_comms_loss);
 }
 
+/* The transport enum has no dedicated reason for an altitude-cap breach
+ * (todo/92) -- adding one is a cross-repo protocol change, out of scope
+ * here. It falls back to supersede_none, the same fallback as terminate. Pin
+ * this current (imperfect) behavior so a future protocol addition is a
+ * deliberate, visible diff rather than a silent behavior change. */
+TEST_CASE ("ack mapping: altitude-cap breach supersede falls back to no reason", "[command_ack][mapping][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    latch_altitude_breach (sm);
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (fss_command_ack_outcome_for (res) == fsst::command_ack_superseded);
+    REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_none);
+}
+
 /* The phase-2 ack responder built in handleCommandFrom is invoked later, from
  * the event-loop thread, after the originating fss_server may have been
  * destroyed (comms-loss teardown / updateServers). The fix carries the

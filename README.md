@@ -4,7 +4,7 @@ This is the Flight Management Unit that [Canterbury Air Patrol](https://canterbu
 
 It will obey commands set for the asset in flight safety system and when in continue mode will perform a search from search management map as applicable.
 
-There is a built-in RTL on low battery or complete loss of communication with the Flight Safety System.
+There is a built-in RTL on low battery, complete loss of communication with the Flight Safety System, or a sustained breach of the regulatory altitude cap.
 
 ## Basic Setup
 #### Dependencies
@@ -89,6 +89,7 @@ absent entirely):
                 "mav_connect_timeout_s": 5,
                 "mav_send_timeout_s": 2,
                 "altitude_cap_ft": 400,
+                "altitude_breach_latch_count": 5,
                 "altitude_floor_ft": 33,
                 "goto_altitude_ft": 165,
                 "camera_fov_deg": 90.0,
@@ -114,6 +115,7 @@ absent entirely):
 | `mav_send_timeout_s` | `2` | Upper bound (seconds) on a blocking MAV send (`SO_SNDTIMEO` and, where available, `TCP_USER_TIMEOUT`). A peer that stops reading, or a network path that silently disappears, cannot pin a sender — including the event-loop thread issuing a safety command — beyond this. Kept tighter than `mav_connect_timeout_s`: unlike a slow connect, a blocked send runs on/behind the live event loop and directly extends comms-failure detection latency. Range 1–10. |
 | `altitude_cap_m` | `122` | Regulatory ceiling for the derived search altitude, in metres AGL. |
 | `altitude_cap_ft` | – | The same ceiling expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
+| `altitude_breach_latch_count` | `5` | Number of consecutive over-/under-cap AGL `GLOBAL_POSITION_INT` readings required to trip, or clear, the continuous altitude-cap enforcement RTL (see intro). Range 1–100. Symmetric: the same count debounces both directions. Unlike the low-battery latch below, this one is self-clearing — once altitude drops back under the cap for this many consecutive readings, control returns to whatever FSS/SMM command is current. |
 | `altitude_floor_m` | `10` | Minimum search altitude, in metres AGL. The derived altitude is never flown below this, so a tiny or zero sweep width cannot put the aircraft at ground level. Clamped to be no greater than the altitude cap. |
 | `altitude_floor_ft` | – | The floor expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
 | `goto_altitude_m` | `50` | Altitude (metres AGL, relative to home) a `goto` command is flown at. A goto carries only a target position, so the FMU supplies this altitude. Clamped into the `[floor, cap]` range, so a goto can never be flown above the ceiling or into the ground. |
