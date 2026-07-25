@@ -181,6 +181,11 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
     {
         setRangedInt (cfg.low_battery_latch_count, "low_battery_latch_count", fmu["low_battery_latch_count"], 1, 100);
     }
+    if (fmu.isMember ("altitude_breach_latch_count"))
+    {
+        setRangedInt (cfg.altitude_breach_latch_count, "altitude_breach_latch_count",
+                      fmu["altitude_breach_latch_count"], 1, 100);
+    }
     if (fmu.isMember ("reconnect_interval_s"))
     {
         setRangedInt (cfg.reconnect_interval_s, "reconnect_interval_s", fmu["reconnect_interval_s"], 1, 3600);

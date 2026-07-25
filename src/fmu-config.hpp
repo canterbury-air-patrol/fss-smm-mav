@@ -16,6 +16,16 @@ struct FmuConfig
     /* Regulatory ceiling for derived search altitude, metres AGL
      * (400ft ~= 122m). */
     uint16_t altitude_cap_m{ 122 };
+    /* Number of consecutive over-/under-cap AGL readings required to trip, or
+     * clear, the continuous altitude-cap enforcement latch (todo/92,
+     * FMUStateMachine::setCurrentAltitude). Symmetric: the same count
+     * debounces both directions. A single noisy EKF altitude sample must not
+     * trip a hard RTL, nor must a single dip back under the cap release one
+     * prematurely. Its real-world duration scales with
+     * position_stream_interval_ms (default 200ms * 5 = ~1s) -- much tighter
+     * than low_battery_latch_count's, since an altitude-ceiling violation is
+     * time-critical in a way a battery reading is not. */
+    int altitude_breach_latch_count{ 5 };
     /* Minimum search altitude, metres AGL. The derived altitude is never
      * flown below this, so a tiny/zero sweep width cannot put the aircraft at
      * ground level. Held <= altitude_cap_m. */

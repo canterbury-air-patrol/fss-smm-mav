@@ -51,6 +51,7 @@ class App
     App (const char *config_file, terminate_action ta, const FmuConfig &cfg, Logger &t_logger)
         : event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, logger (t_logger),
           lowbat_threshold (cfg.lowbat_threshold), low_battery_latch_count (cfg.low_battery_latch_count),
+          altitude_cap_m (cfg.altitude_cap_m), altitude_breach_latch_count (cfg.altitude_breach_latch_count),
           reconnect_interval_s (cfg.reconnect_interval_s), aircraft (logger), fss (std::make_unique<FSS> (config_file)),
           mav (std::make_unique<MAV> (cfg.mav_address, static_cast<uint16_t> (cfg.mav_port), ta,
                                       MavParams{ cfg.goto_altitude_m, cfg.altitude_floor_m, cfg.altitude_cap_m,
@@ -69,7 +70,8 @@ class App
     void
     run ()
     {
-        FMUStateMachine state_machine{ *mav, *smm, low_battery_latch_count };
+        FMUStateMachine state_machine{ *mav, *smm, low_battery_latch_count, altitude_cap_m,
+                                       altitude_breach_latch_count };
         /* Constructing this registers it as the state machine's state-change
          * callback (todo/76), logging the STATE line on every transition. */
         EventDispatcher dispatcher{ state_machine, *mav, *smm, *fss, logger, asset_name, lowbat_threshold };
@@ -237,6 +239,8 @@ class App
     Logger &logger;
     int lowbat_threshold;
     int low_battery_latch_count;
+    uint16_t altitude_cap_m;
+    int altitude_breach_latch_count;
     int reconnect_interval_s;
     known_aircraft aircraft;
 
