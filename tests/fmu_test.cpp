@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "aircraft.hpp"
+#include "altitude-cap.hpp"
 #include "altitude-units.hpp"
 #include "event-dispatcher.hpp"
 #include "fmu-config.hpp"
@@ -241,11 +242,14 @@ class MockFSSReporter : public IFSSReporter
 using SM = std::tuple<std::shared_ptr<MockMAV>, std::shared_ptr<MockSMM>, std::shared_ptr<FMUStateMachine>>;
 
 static auto
-make_sm (int low_battery_latch_count = FMUStateMachine::default_low_battery_latch_count) -> SM
+make_sm (int low_battery_latch_count = FMUStateMachine::default_low_battery_latch_count,
+         uint16_t altitude_cap_m = FMUStateMachine::default_altitude_cap_m,
+         int altitude_breach_latch_count = FMUStateMachine::default_altitude_breach_latch_count) -> SM
 {
     auto mav = std::make_shared<MockMAV> ();
     auto smm = std::make_shared<MockSMM> ();
-    auto sm = std::make_shared<FMUStateMachine> (*mav, *smm, low_battery_latch_count);
+    auto sm = std::make_shared<FMUStateMachine> (*mav, *smm, low_battery_latch_count, altitude_cap_m,
+                                                 altitude_breach_latch_count);
     return { mav, smm, sm };
 }
 
@@ -258,6 +262,19 @@ latch_low_battery (const std::shared_ptr<FMUStateMachine> &sm)
     for (int i = 0; i < FMUStateMachine::default_low_battery_latch_count; i++)
     {
         sm->setLowBattery (true);
+    }
+}
+
+/* Mirrors latch_low_battery: drives exactly default_altitude_breach_latch_count
+ * over-cap, valid-fix readings so tests that assume an engaged altitude
+ * breach stay correct if the count changes. 200m is comfortably over the
+ * default 122m cap. */
+static void
+latch_altitude_breach (const std::shared_ptr<FMUStateMachine> &sm, double over_cap_altitude_agl_m = 200.0)
+{
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count; i++)
+    {
+        sm->setCurrentAltitude (true, over_cap_altitude_agl_m);
     }
 }
 
@@ -773,6 +790,271 @@ TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[st
     sm->FSSNewCommand (fss_cmd_hold);
     REQUIRE (mav->last_mode == flight_mode_rtl);
     REQUIRE (mav->set_mode_calls == 1);
+}
+
+/* Design decision: the altitude-cap breach latch is debounced exactly like
+ * low-battery (todo/92). A single noisy over-cap EKF sample must not ground
+ * the mission. */
+TEST_CASE ("altitude breach does not latch before the debounce count", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count - 1; i++)
+    {
+        sm->setCurrentAltitude (true, 200.0);
+    }
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    sm->setCurrentAltitude (true, 200.0);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("an under-cap reading resets the altitude breach trip-side debounce", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count - 1; i++)
+    {
+        sm->setCurrentAltitude (true, 200.0);
+    }
+    /* An under-cap reading clears the run, so the trip-side count restarts. */
+    sm->setCurrentAltitude (true, 50.0);
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count - 1; i++)
+    {
+        sm->setCurrentAltitude (true, 200.0);
+    }
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    sm->setCurrentAltitude (true, 200.0);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+/* altitude_breach_latch_count is configurable, matching low_battery_latch_count
+ * (todo/54): a non-default count must actually change the debounce. */
+TEST_CASE ("a configured altitude_breach_latch_count changes the debounce", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm]
+        = make_sm (FMUStateMachine::default_low_battery_latch_count, FMUStateMachine::default_altitude_cap_m, 2);
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    sm->setCurrentAltitude (true, 200.0);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    sm->setCurrentAltitude (true, 200.0);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+/* Unlike low_battery, the altitude breach latch is self-clearing (todo/92):
+ * once altitude drops back under the cap for the debounce window, control
+ * returns to whatever FSS/SMM command is current -- here, a resumed search. */
+TEST_CASE ("altitude breach self-clears once altitude drops back under the cap", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    FMUState last_state = fmu_state_manual;
+    sm->setStateChangeCB ([&] (FMUState s) { last_state = s; });
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (last_state == fmu_state_searching);
+
+    latch_altitude_breach (sm);
+    REQUIRE (last_state == fmu_state_rtl);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count; i++)
+    {
+        sm->setCurrentAltitude (true, 50.0);
+    }
+    REQUIRE (last_state == fmu_state_searching);
+}
+
+TEST_CASE ("an invalid fix never trips the altitude breach latch", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+    sm->FSSNewCommand (fss_cmd_hold);
+
+    for (int i = 0; i < 1000; i++)
+    {
+        sm->setCurrentAltitude (false, 200.0);
+    }
+    REQUIRE (mav->last_mode == flight_mode_hold);
+}
+
+/* A garbled (NaN/Inf) reading must not trip the latch (over_altitude_cap's
+ * strict '>' comparison against NaN is always false, so an unguarded caller
+ * would silently treat it as under-cap) nor, symmetrically, clear one that is
+ * already engaged. Negative readings are deliberately NOT covered here --
+ * they are legitimate AGL data, not garbage, and are exercised as ordinary
+ * under-cap readings elsewhere (e.g. the self-clearing test uses 50.0, but
+ * see mav_io_test.cpp for the real-world negative-AGL note). */
+TEST_CASE ("a non-finite altitude reading is ignored like an invalid fix", "[state_machine][altitude_cap]")
+{
+    double nan = std::numeric_limits<double>::quiet_NaN ();
+    double inf = std::numeric_limits<double>::infinity ();
+
+    {
+        auto [mav, smm, sm] = make_sm ();
+        sm->FSSNewCommand (fss_cmd_hold);
+        for (int i = 0; i < 1000; i++)
+        {
+            sm->setCurrentAltitude (true, nan);
+        }
+        REQUIRE (mav->last_mode == flight_mode_hold);
+    }
+    {
+        auto [mav, smm, sm] = make_sm ();
+        sm->FSSNewCommand (fss_cmd_hold);
+        for (int i = 0; i < 1000; i++)
+        {
+            sm->setCurrentAltitude (true, inf);
+        }
+        REQUIRE (mav->last_mode == flight_mode_hold);
+    }
+    {
+        /* Does not clear an already-engaged latch either. */
+        auto [mav, smm, sm] = make_sm ();
+        latch_altitude_breach (sm);
+        REQUIRE (mav->last_mode == flight_mode_rtl);
+        for (int i = 0; i < 1000; i++)
+        {
+            sm->setCurrentAltitude (true, nan);
+        }
+        REQUIRE (mav->last_mode == flight_mode_rtl);
+    }
+}
+
+TEST_CASE ("an invalid fix never clears an engaged altitude breach latch", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+    sm->FSSNewCommand (fss_cmd_hold);
+    latch_altitude_breach (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    for (int i = 0; i < 1000; i++)
+    {
+        sm->setCurrentAltitude (false, 50.0);
+    }
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    /* A subsequent valid-fix under-cap run does clear it. */
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count; i++)
+    {
+        sm->setCurrentAltitude (true, 50.0);
+    }
+    REQUIRE (mav->last_mode == flight_mode_hold);
+}
+
+TEST_CASE ("an invalid fix reading mid-run does not corrupt the altitude breach debounce",
+           "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+    sm->FSSNewCommand (fss_cmd_hold);
+
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count - 1; i++)
+    {
+        sm->setCurrentAltitude (true, 200.0);
+    }
+    /* Skipped entirely, not treated as a reset. */
+    sm->setCurrentAltitude (false, 200.0);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+
+    sm->setCurrentAltitude (true, 200.0);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("altitude breach latch saturates and stays engaged over a long run", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    for (int i = 0; i < 1000; i++)
+    {
+        sm->setCurrentAltitude (true, 200.0);
+    }
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    REQUIRE (mav->set_mode_calls == 1);
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    REQUIRE (mav->set_mode_calls == 1);
+}
+
+TEST_CASE ("terminate overrides an active altitude breach", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    latch_altitude_breach (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    REQUIRE (!mav->terminated);
+
+    sm->FSSNewCommand (fss_cmd_terminate);
+    REQUIRE (mav->terminated);
+}
+
+TEST_CASE ("low battery overrides an active altitude breach", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    latch_altitude_breach (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    FMUState last_state = fmu_state_manual;
+    sm->setStateChangeCB ([&] (FMUState s) { last_state = s; });
+    latch_low_battery (sm);
+    REQUIRE (last_state == fmu_state_low_battery);
+}
+
+TEST_CASE ("mav comms failure overrides an active altitude breach", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    latch_altitude_breach (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    FMUState last_state = fmu_state_manual;
+    sm->setStateChangeCB ([&] (FMUState s) { last_state = s; });
+    sm->setMavCommsFailure (true);
+    REQUIRE (last_state == fmu_state_failsafe);
+}
+
+/* An altitude breach that engages internally while comms are already lost
+ * must not force an extra reaction (comms failsafe already has it in RTL);
+ * once comms recover, the still-engaged breach (never cleared -- no
+ * under-cap readings arrived) keeps it in RTL via its own priority slot,
+ * not the comms-failsafe one. */
+TEST_CASE ("an altitude breach persists across a mav comms outage", "[state_machine][altitude_cap]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    FMUState last_state = fmu_state_manual;
+    sm->setStateChangeCB ([&] (FMUState s) { last_state = s; });
+
+    sm->setMavCommsFailure (true);
+    REQUIRE (last_state == fmu_state_failsafe);
+
+    latch_altitude_breach (sm);
+    REQUIRE (last_state == fmu_state_failsafe);
+
+    sm->setMavCommsFailure (false);
+    REQUIRE (last_state == fmu_state_rtl);
+}
+
+TEST_CASE ("an explicit FSS command during an active altitude breach resolves superseded",
+           "[state_machine][altitude_cap][command_ack]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    latch_altitude_breach (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    auto res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (res.outcome == fss_command_superseded);
+    REQUIRE (res.superseding_state == fmu_state_rtl);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
 TEST_CASE ("mav comms failure triggers failsafe RTL", "[state_machine][TC-MAV-004][TC-MAV-005]")
@@ -1581,6 +1863,24 @@ TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor,
     REQUIRE (clamp_command_altitude (65569, floor, cap) == cap);
     /* The maximum wire value stays pinned to the cap. */
     REQUIRE (clamp_command_altitude (UINT32_MAX, floor, cap) == cap);
+}
+
+TEST_CASE ("over_altitude_cap compares AGL altitude against the cap", "[altitude_cap]")
+{
+    constexpr uint16_t cap = 122;
+
+    /* Just under the cap: not a breach. */
+    REQUIRE_FALSE (over_altitude_cap (121.9, cap));
+    /* Exactly at the cap: strict '>', so "at the cap" is not itself a breach
+     * -- a search/goto/direct-altitude command is legitimately clamped to
+     * fly exactly there. */
+    REQUIRE_FALSE (over_altitude_cap (122.0, cap));
+    /* Just over: a breach. */
+    REQUIRE (over_altitude_cap (122.1, cap));
+
+    /* Degenerate zero cap: any positive altitude is a breach, zero is not. */
+    REQUIRE_FALSE (over_altitude_cap (0.0, 0));
+    REQUIRE (over_altitude_cap (0.1, 0));
 }
 
 TEST_CASE ("horizontal_velocity is a Pythagorean magnitude with no int overflow", "[mav][velocity]")
@@ -2882,16 +3182,17 @@ TEST_CASE ("EventDispatcher drops an ADS-B report with an invalid coordinate bef
     REQUIRE (f.mav->send_adsb_calls == 1);
 }
 
-/* todo/68: cap-fmu's own-aircraft PositionData event (the FMU's MAV position
- * report, distinct from OtherAircraftReport/ADS-B above) never reaches
- * FMUStateMachine at all today — EventDispatcher's handler only forwards it
- * to FSS/SMM reporting. So there is no GPS-denial reaction at the
- * state-machine level: however degenerate the coordinates (frozen/repeated,
- * as GPS-denial investigation for this todo found nothing detects), no MAV
- * command is issued and no state transition happens, whether idle, goto, or
- * searching. Pinned here so a future change that adds GPS-denial handling
- * does so deliberately rather than silently regressing this gap further. */
-TEST_CASE ("EventDispatcher never reacts to PositionData regardless of FMU state (todo/68)", "[event_dispatcher]")
+/* todo/68 (now narrowed by todo/92): cap-fmu's own-aircraft PositionData event
+ * (the FMU's MAV position report, distinct from OtherAircraftReport/ADS-B
+ * above) only reaches FMUStateMachine for the altitude-cap breach check
+ * (todo/92) -- and only when the position carries a valid fix
+ * (POSITION_FLAG_VALID_COORDS). An invalid-fix reading (e.g. GPS-denial,
+ * the 6-arg ctor below with no flags set) is fed to setCurrentAltitude but
+ * ignored there, so it still causes no MAV reaction at all, however
+ * degenerate the coordinates. Pinned here so a future change to GPS-denial
+ * handling does so deliberately rather than silently regressing this gap
+ * further. */
+TEST_CASE ("EventDispatcher never reacts to an invalid-fix PositionData (todo/68)", "[event_dispatcher]")
 {
     auto f = make_dispatcher ();
 
@@ -2906,8 +3207,9 @@ TEST_CASE ("EventDispatcher never reacts to PositionData regardless of FMU state
 
         /* Still reported to FSS (that part is unaffected)... */
         REQUIRE (f.fss->report_position_calls == report_calls_before + 1);
-        /* ...but no MAV command was issued and the mode is unchanged: the
-         * state machine has no reaction to a position report at all. */
+        /* ...but no MAV command was issued and the mode is unchanged: an
+         * invalid-fix reading is not trusted for the altitude-cap check
+         * either. */
         REQUIRE (f.mav->set_mode_calls == mode_calls_before);
         REQUIRE (f.mav->last_mode == last_mode_before);
     };
@@ -2922,4 +3224,43 @@ TEST_CASE ("EventDispatcher never reacts to PositionData regardless of FMU state
     /* goto */
     f.sm->FSSNewCommand (fss_cmd_goto, FSSCommandTarget{ Point{}, 100 });
     assert_no_reaction ();
+}
+
+/* Acceptance-level proof for todo/92: a sequence of valid-fix, over-cap
+ * GLOBAL_POSITION_INT-derived PositionData events, dispatched exactly as
+ * main.cpp's registerPositionCB would enqueue them, eventually forces RTL --
+ * exercised through EventDispatcher::dispatch() (not FMUStateMachine
+ * directly), proving the wiring, not just the state-machine unit. */
+TEST_CASE ("EventDispatcher drives the altitude-cap breach latch from over-cap PositionData (todo/92)",
+           "[event_dispatcher][altitude_cap]")
+{
+    auto f = make_dispatcher ();
+    f.sm->FSSNewCommand (fss_cmd_hold);
+
+    /* PositionData(lat, lng, alt_m, hdg, vel_hor, vel_ver, flags, alt_agl_m):
+     * alt_m (MSL) is left at a harmless value; only alt_agl_m matters here. */
+    for (int i = 0; i < FMUStateMachine::default_altitude_breach_latch_count - 1; i++)
+    {
+        event e = PositionData (-43.5, 172.6, 50.0, 0, 0, 0, POSITION_FLAG_VALID_COORDS, 200.0);
+        f.dispatcher->dispatch (e);
+    }
+    REQUIRE (f.mav->last_mode == flight_mode_hold);
+
+    event last = PositionData (-43.5, 172.6, 50.0, 0, 0, 0, POSITION_FLAG_VALID_COORDS, 200.0);
+    f.dispatcher->dispatch (last);
+    REQUIRE (f.mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("EventDispatcher does not react to valid-fix, under-cap PositionData", "[event_dispatcher][altitude_cap]")
+{
+    auto f = make_dispatcher ();
+    f.sm->FSSNewCommand (fss_cmd_hold);
+
+    for (int i = 0; i < 20; i++)
+    {
+        event e = PositionData (-43.5, 172.6, 50.0, 0, 0, 0, POSITION_FLAG_VALID_COORDS, 50.0);
+        f.dispatcher->dispatch (e);
+    }
+    REQUIRE (f.mav->last_mode == flight_mode_hold);
+    REQUIRE (f.fss->report_position_calls == 20);
 }
