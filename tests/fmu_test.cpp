@@ -1744,6 +1744,8 @@ TEST_CASE ("expected_failsafe_params omits the GCS-failsafe entry for an unrecog
     auto params = expected_failsafe_params (0, terminate_action::terminate);
     REQUIRE (std::any_of (params.begin (), params.end (),
                           [] (const auto &p) { return std::string (p.name) == "AFS_ENABLE"; }));
+    REQUIRE (std::any_of (params.begin (), params.end (),
+                          [] (const auto &p) { return std::string (p.name) == "AFS_TERM_ACTION"; }));
     REQUIRE (std::none_of (params.begin (), params.end (),
                            [] (const auto &p) { return std::string (p.name) == "FS_GCS_ENABLE"; }));
 }

@@ -3,6 +3,7 @@
 
 #include "ilogger.hpp"
 #include "mav/internal.hpp"
+#include "mav/mav-comms.hpp"
 #include "mav/mav.hpp"
 #include "mav/mission-plan.hpp"
 #include "smm/smm.hpp"
@@ -262,11 +263,10 @@ class MavLoopbackServer
          * mavlink_msg_param_value_pack_chan always reads 16 bytes from the
          * pointer it is given, so a `name` shorter than that must first be
          * copied into a buffer that size, zero-padded, or the call reads out
-         * of bounds. memcpy (not strncpy) because the field genuinely need
-         * not be NUL-terminated at 16/16 bytes, which trips
-         * -Wstringop-truncation on strncpy. */
-        char param_id_buf[MAVLINK_MSG_PARAM_VALUE_FIELD_PARAM_ID_LEN] = { 0 };
-        std::memcpy (param_id_buf, name, std::min (std::strlen (name), sizeof (param_id_buf)));
+         * of bounds (pack_fixed_width_field(), mav-comms.hpp — shared with
+         * mav_connection::checkFailsafeConfig()'s identical need, todo/91). */
+        char param_id_buf[MAVLINK_MSG_PARAM_VALUE_FIELD_PARAM_ID_LEN];
+        pack_fixed_width_field (param_id_buf, sizeof (param_id_buf), name);
         mavlink_message_t msg;
         mavlink_msg_param_value_pack_chan (sysid, 1, autopilot_tx_channel, &msg, param_id_buf, value,
                                            MAV_PARAM_TYPE_REAL32, /*param_count*/ 1, /*param_index*/ 0);
@@ -2341,6 +2341,38 @@ TEST_CASE ("todo/91: the GCS-failsafe param name requested is airframe-specific"
     char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
     mavlink_msg_param_request_read_get_param_id (&msg, buf);
     REQUIRE (std::string (buf) == "FS_GCS_ENABL");
+}
+
+TEST_CASE ("todo/91: the failsafe-config check re-runs if a later heartbeat reports a different autopilot type",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::none);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    /* First heartbeat: MAV_TYPE_QUADROTOR, resolving to FS_GCS_ENABLE. */
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
+    char buf1[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
+    mavlink_msg_param_request_read_get_param_id (&msg, buf1);
+    REQUIRE (std::string (buf1) == "FS_GCS_ENABLE");
+
+    /* MAV_TYPE is fixed by firmware and never changes at runtime for a
+     * genuine autopilot; this stands in for the todo/97 residual risk (a
+     * second vehicle sharing this sysid on a hub) to prove the check
+     * doesn't stay silent forever once latched for the first-seen type. */
+    server.sendHeartbeat (MAV_TYPE_FIXED_WING);
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
+    char buf2[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
+    mavlink_msg_param_request_read_get_param_id (&msg, buf2);
+    REQUIRE (std::string (buf2) == "FS_GCS_ENABL");
 }
 
 TEST_CASE ("todo/91: a disabled GCS/telemetry failsafe on the autopilot logs a distinct warning", "[mav_io]")

@@ -1,5 +1,26 @@
 #pragma once
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+
+/* Copy `name` into the fixed-width `dest` (size `dest_len`), zero-padding any
+ * remainder. For MAVLink fixed-width char[] fields (e.g. param_id) that are
+ * NOT NUL-terminated when full — memcpy, not strncpy, since a source exactly
+ * dest_len long has no room left for a terminator (strncpy's
+ * -Wstringop-truncation flags that as a mistake, which for this field it is
+ * not: the field is a fixed-width slot, not a C string). Shared by every
+ * caller that packs a MAVLink param_id (checkFailsafeConfig() and the
+ * mav_io_test.cpp loopback server's sendParamValue(), todo/91) so the
+ * out-of-bounds-read hazard of passing a short literal straight to a
+ * mavlink_msg_*_pack_chan() call (which always reads dest_len bytes from its
+ * source pointer) is fixed in exactly one place. */
+inline void
+pack_fixed_width_field (char *dest, std::size_t dest_len, const char *name)
+{
+    std::memset (dest, 0, dest_len);
+    std::memcpy (dest, name, std::min (std::strlen (name), dest_len));
+}
 
 /* Pure decision for whether the autopilot (MAVLink) link is currently up,
  * factored out of mav_connection::heartbeat_loop() so the cold-start and
