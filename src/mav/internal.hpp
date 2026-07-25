@@ -46,6 +46,7 @@ class mav_sys
     std::atomic<uint8_t> flight_mode{ 0 };
     std::atomic<bool> setup{ false };
     std::atomic<bool> failsafe_checked{ false };
+    std::atomic<uint8_t> failsafe_checked_type{ 0 };
 
   public:
     explicit mav_sys (uint8_t t_sysid) : sysid (t_sysid) {};
@@ -87,16 +88,23 @@ class mav_sys
         this->setup.store (true);
     };
     /* Whether the todo/91 failsafe-config sanity check has already been
-     * issued for this system (once per heartbeat-resolved autopilot type,
-     * not once per param). */
+     * issued for this system for the given (heartbeat-reported) `type`.
+     * MAV_TYPE is fixed by firmware and does not change at runtime for a
+     * genuine autopilot, so in practice this only ever fires once; it is
+     * keyed on `type` (not a plain done/not-done flag) so that if it ever
+     * does differ on a later heartbeat — e.g. a second vehicle sharing this
+     * sysid on a hub (todo/97) — the check re-runs for whichever type is now
+     * claiming this system, rather than staying silent forever on the
+     * first-seen type. */
     auto
-    checkedFailsafe () -> bool
+    checkedFailsafeFor (uint8_t type) -> bool
     {
-        return this->failsafe_checked.load ();
+        return this->failsafe_checked.load () && this->failsafe_checked_type.load () == type;
     };
     void
-    markFailsafeChecked ()
+    markFailsafeCheckedFor (uint8_t type)
     {
+        this->failsafe_checked_type.store (type);
         this->failsafe_checked.store (true);
     };
 };

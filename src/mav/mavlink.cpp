@@ -705,12 +705,11 @@ mav_connection::checkFailsafeConfig (uint8_t autopilot_type)
          * mavlink_msg_param_request_read_pack_chan always reads 16 bytes from
          * the pointer it is given, so a source shorter than that (every name
          * here is) must first be copied into a buffer that size, zero-padded
-         * — same idiom as sendADSB()'s callsign handling in mav.cpp. Passing
-         * check.name directly would be an out-of-bounds read. memcpy (not
-         * strncpy) because the field genuinely need not be NUL-terminated at
-         * 16/16 bytes, which trips -Wstringop-truncation on strncpy. */
-        char param_id_buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN] = { 0 };
-        std::memcpy (param_id_buf, check.name, std::min (std::strlen (check.name), sizeof (param_id_buf)));
+         * (pack_fixed_width_field(), mav-comms.hpp) — same idiom as
+         * sendADSB()'s callsign handling in mav.cpp. Passing check.name
+         * directly would be an out-of-bounds read. */
+        char param_id_buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN];
+        pack_fixed_width_field (param_id_buf, sizeof (param_id_buf), check.name);
         mavlink_message_t msg;
         std::lock_guard<std::mutex> lk (this->send_lock);
         mavlink_msg_param_request_read_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, TARGET_SYS_ID,
@@ -730,6 +729,13 @@ mav_connection::checkFailsafeParamReply (const std::string &param_id, float valu
     auto params = expected_failsafe_params (sys->getAutoPilotType (), this->term_action);
     auto match = std::find_if (params.begin (), params.end (),
                                [&] (const FailsafeParamCheck &check) { return param_id == check.name; });
+    /* Exact-zero comparison is deliberate, not a float-equality footgun: every
+     * param checked here (AFS_ENABLE, AFS_TERM_ACTION, the GCS-failsafe
+     * enable) is an ArduPilot integer/enum/boolean param, and small integers
+     * are exactly representable in IEEE-754 float — there is no rounding or
+     * scaling in play, so a genuinely-disabled param always arrives as
+     * precisely 0.0F, never a near-zero value a tolerance would be needed
+     * for. */
     if (match != params.end () && value == 0.0F)
     {
         this->logger.log (LogLevel::error, match->warning);
@@ -800,10 +806,10 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             sys->setFlightMode (mavlink_msg_heartbeat_get_custom_mode (msg));
             this->last_heartbeat_ts.store (current_timestamp_ms ());
             this->replayPendingMode (autopilot_type);
-            if (!sys->checkedFailsafe ())
+            if (!sys->checkedFailsafeFor (autopilot_type))
             {
                 this->checkFailsafeConfig (autopilot_type);
-                sys->markFailsafeChecked ();
+                sys->markFailsafeCheckedFor (autopilot_type);
             }
         }
         break;
