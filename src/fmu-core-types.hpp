@@ -110,7 +110,7 @@ class PositionData
         return this->alt_m;
     };
     auto
-    getAltitudeAGLMetres () -> double
+    getAltitudeAGLMetres () const -> double
     {
         return this->alt_agl_m;
     };
@@ -150,7 +150,7 @@ class PositionData
         return this->squawk;
     };
     auto
-    getFlags () -> uint16_t
+    getFlags () const -> uint16_t
     {
         return this->flags;
     };

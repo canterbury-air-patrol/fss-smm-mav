@@ -149,10 +149,13 @@ class FMUStateMachine
     /* Report the latest own-aircraft AGL altitude reading and whether it is
      * backed by a valid fix. Called for *every* own-ship position report
      * (not just over-cap ones), mirroring setLowBattery, so the consecutive
-     * over-/under-cap runs stay accurate. A fix_valid == false reading is
-     * ignored entirely -- it neither trips nor clears the latch, and does
-     * not disturb an in-progress debounce run -- since a GPS gap must not
-     * false-trigger a breach, and must not silently clear a real one either. */
+     * over-/under-cap runs stay accurate. A fix_valid == false reading, or a
+     * non-finite altitude_agl_m (NaN/Inf), is ignored entirely -- it neither
+     * trips nor clears the latch, and does not disturb an in-progress
+     * debounce run -- since a GPS gap or a garbled sample must not
+     * false-trigger a breach, and must not silently clear a real one either.
+     * A negative altitude_agl_m is NOT rejected: AGL can be legitimately
+     * negative just after takeoff or on sloped terrain. */
     void setCurrentAltitude (bool fix_valid, double altitude_agl_m);
     /* True while the FMU is in the searching state. The event loop uses this to
      * gate SMM worker outcomes (load-search / RTL-fallback): an outcome that

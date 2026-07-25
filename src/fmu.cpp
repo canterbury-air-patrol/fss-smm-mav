@@ -1,6 +1,7 @@
 #include "fmu.hpp"
 #include "altitude-cap.hpp"
 #include <cassert>
+#include <cmath>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -364,7 +365,12 @@ FMUStateMachine::setCurrentAltitude (bool fix_valid, double altitude_agl_m)
     std::optional<FMUState> changed_to;
     {
         std::lock_guard<std::mutex> lk (this->lock);
-        if (fix_valid)
+        /* A non-finite reading (NaN/Inf) is treated the same as an invalid
+         * fix -- neither trips nor clears the latch, and does not disturb an
+         * in-progress debounce run. Deliberately NOT rejecting negative
+         * values: AGL can be legitimately negative just after takeoff or on
+         * sloped terrain, so a negative reading is real data, not garbage. */
+        if (fix_valid && std::isfinite (altitude_agl_m))
         {
             if (over_altitude_cap (altitude_agl_m, this->altitude_cap_m))
             {
