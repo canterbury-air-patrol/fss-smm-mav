@@ -1,4 +1,5 @@
 #include "fmu.hpp"
+#include "altitude-cap.hpp"
 #include <cassert>
 #include <iostream>
 #include <mutex>
@@ -84,9 +85,10 @@ FMUStateMachine::commandedState () const -> FMUState
 auto
 FMUStateMachine::updateState () -> std::optional<FMUState>
 {
-    /* Priority order: terminate > low battery > comms failure > FSS/SMM command.
-     * Comms failure maps to fmu_state_failsafe, which is the default here, so it
-     * needs no explicit branch (and the default is never an indeterminate value). */
+    /* Priority order: terminate > low battery > comms failure > altitude-cap
+     * breach > FSS/SMM command (todo/92). Comms failure maps to
+     * fmu_state_failsafe, which is the default here, so it needs no explicit
+     * branch (and the default is never an indeterminate value). */
     FMUState new_state = fmu_state_failsafe;
     if (this->fss_command == fss_cmd_terminate)
     {
@@ -104,7 +106,12 @@ FMUStateMachine::updateState () -> std::optional<FMUState>
     }
     else if (!this->fss_comms_lost && !this->mav_comms_lost)
     {
-        new_state = this->commandedState ();
+        /* A sustained breach forces RTL regardless of the commanded state,
+         * but -- unlike terminate/low-battery -- is self-clearing: once
+         * altitude drops back under the cap (its own debounce, see
+         * setCurrentAltitude), control returns to whatever FSS/SMM command
+         * is current. */
+        new_state = this->altitude_breach ? fmu_state_rtl : this->commandedState ();
     }
 
     if (new_state != this->current_state)
@@ -130,8 +137,8 @@ FMUStateMachine::resolveFSSCommand (FMUState desired, const std::optional<FMUSta
     {
         /* updateState() selected a different state than the command alone maps
          * to, which only happens when a higher-priority latch (terminate, low
-         * battery, or comms failsafe) is engaged. current_state is that latch's
-         * state.
+         * battery, comms failsafe, or a sustained altitude-cap breach) is
+         * engaged. current_state is that latch's state.
          *
          * Decision (todo/43): report "superseded" even when the command's effect
          * matches the active latch — e.g. an operator RTL while a low-battery or
@@ -351,6 +358,61 @@ FMUStateMachine::setLowBattery (bool low)
 }
 
 void
+FMUStateMachine::setCurrentAltitude (bool fix_valid, double altitude_agl_m)
+{
+    this->assert_event_loop_thread ();
+    std::optional<FMUState> changed_to;
+    {
+        std::lock_guard<std::mutex> lk (this->lock);
+        if (fix_valid)
+        {
+            if (over_altitude_cap (altitude_agl_m, this->altitude_cap_m))
+            {
+                /* Count consecutive over-cap readings, saturating at the latch
+                 * count so a long breach cannot overflow the counter. A
+                 * healthy-side run in progress is abandoned: an over-cap
+                 * reading means the aircraft has not actually cleared the cap
+                 * yet. */
+                if (this->altitude_breach_count < altitude_breach_latch_count)
+                {
+                    this->altitude_breach_count++;
+                }
+                this->altitude_clear_count = 0;
+                if (this->altitude_breach_count >= altitude_breach_latch_count && !this->altitude_breach)
+                {
+                    this->altitude_breach = true;
+                    changed_to = this->updateState ();
+                }
+            }
+            else
+            {
+                /* Mirror image: count consecutive under-cap readings to clear
+                 * the latch. Unlike low_battery, this latch is self-clearing
+                 * (todo/92) -- once altitude_breach_latch_count readings in a
+                 * row are back under the cap, control returns to whatever
+                 * FSS/SMM command is current. */
+                if (this->altitude_clear_count < altitude_breach_latch_count)
+                {
+                    this->altitude_clear_count++;
+                }
+                this->altitude_breach_count = 0;
+                if (this->altitude_clear_count >= altitude_breach_latch_count && this->altitude_breach)
+                {
+                    this->altitude_breach = false;
+                    changed_to = this->updateState ();
+                }
+            }
+        }
+        /* fix_valid == false: no trustworthy reading, so neither counter nor
+         * the latch is touched. */
+    }
+    if (changed_to)
+    {
+        this->actionState (*changed_to);
+    }
+}
+
+void
 FMUStateMachine::setCommsFailure (bool failed)
 {
     this->assert_event_loop_thread ();
@@ -412,8 +474,10 @@ FMUStateMachine::isWaitingForTasking () -> bool
     return this->current_state == fmu_state_waiting_for_tasking;
 }
 
-FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm, int t_low_battery_latch_count)
-    : low_battery_latch_count (t_low_battery_latch_count), mav (t_mav), smm (t_smm), state_change_cb{}
+FMUStateMachine::FMUStateMachine (IMAV &t_mav, ISMM &t_smm, int t_low_battery_latch_count, uint16_t t_altitude_cap_m,
+                                  int t_altitude_breach_latch_count)
+    : low_battery_latch_count (t_low_battery_latch_count), altitude_breach_latch_count (t_altitude_breach_latch_count),
+      altitude_cap_m (t_altitude_cap_m), mav (t_mav), smm (t_smm), state_change_cb{}
 {
 }
 

@@ -52,8 +52,20 @@ class PositionData
   private:
     Point p{};
     /* Altitude in metres. Each protocol boundary converts to/from its own wire
-     * unit via altitude-units.hpp (MAVLink mm, FSS feet, SMM metres). */
+     * unit via altitude-units.hpp (MAVLink mm, FSS feet, SMM metres). MSL
+     * (mean sea level) — MAVLink GLOBAL_POSITION_INT's `alt` field. NOT the
+     * same frame as altitude_cap_m/altitude_floor_m/goto_altitude_m, which are
+     * all AGL; see alt_agl_m below and todo/99. */
     double alt_m{ 0.0 };
+    /* AGL (above ground level, relative to home) altitude in metres —
+     * MAVLink GLOBAL_POSITION_INT's `relative_alt` field, the same frame
+     * altitude_cap_m uses. Only the FMU's own-aircraft report populates this
+     * (mav_connection::report_position); ADS-B peers and any other source
+     * leave it at 0.0, which is harmless since those paths never set
+     * POSITION_FLAG_VALID_COORDS from a real reading either, and the only
+     * consumer (the altitude-cap breach check, todo/92) requires a valid fix
+     * before trusting it. */
+    double alt_agl_m{ 0.0 };
     uint16_t hdg{ 0 };
     uint16_t vel_hor{ 0 };
     int16_t vel_ver{ 0 };
@@ -73,9 +85,9 @@ class PositionData
     /* Own-aircraft report with an explicit validity flags word (todo/79); ADSB
      * peers carry callsign/squawk/etc too and use the constructor below instead. */
     PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
-                  uint16_t t_flags)
-        : p (Point (t_lat, t_lng)), alt_m (t_alt_m), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver),
-          flags (t_flags) {};
+                  uint16_t t_flags, double t_alt_agl_m = 0.0)
+        : p (Point (t_lat, t_lng)), alt_m (t_alt_m), alt_agl_m (t_alt_agl_m), hdg (t_hdg), vel_hor (t_vel_hor),
+          vel_ver (t_vel_ver), flags (t_flags) {};
     PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
                   std::string t_callsign, uint16_t t_squawk, uint32_t t_icaoaddress, uint64_t t_timestamp,
                   uint16_t t_flags, uint8_t t_altitude_type, uint8_t t_emitter_type)
@@ -96,6 +108,11 @@ class PositionData
     getAltitudeMetres () -> double
     {
         return this->alt_m;
+    };
+    auto
+    getAltitudeAGLMetres () -> double
+    {
+        return this->alt_agl_m;
     };
     auto
     getHeading () -> uint16_t

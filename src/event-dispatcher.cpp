@@ -64,8 +64,18 @@ EventDispatcher::dispatch (const event &e)
                 logger.log ("SMM connect " + settings.getURL ());
                 smm.connect (settings.getURL (), settings.getUsername (), settings.getPassword (), asset_name);
             },
-            [&] (const PositionData &pd)
+            [&] (PositionData pd)
             {
+                /* Feed the continuous altitude-cap enforcement latch on every
+                 * own-ship position report (todo/92), mirroring BatteryData's
+                 * unconditional setLowBattery call below -- the state machine
+                 * debounces internally, so it must see every reading, not
+                 * just over-cap ones. Uses the AGL relative_alt-derived value
+                 * (getAltitudeAGLMetres()), not getAltitudeMetres() (MSL, see
+                 * todo/99), and the same fix_valid signal FSS reporting
+                 * already derives the same way (todo/79). */
+                bool fix_valid = (pd.getFlags () & POSITION_FLAG_VALID_COORDS) != 0;
+                state_machine.setCurrentAltitude (fix_valid, pd.getAltitudeAGLMetres ());
                 fss.reportPosition (pd);
                 smm.reportPosition (pd);
             },

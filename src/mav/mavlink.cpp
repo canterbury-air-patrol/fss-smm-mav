@@ -823,6 +823,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             int32_t lat = mavlink_msg_global_position_int_get_lat (msg);
             int32_t lng = mavlink_msg_global_position_int_get_lon (msg);
             int32_t alt = mavlink_msg_global_position_int_get_alt (msg);
+            int32_t relative_alt = mavlink_msg_global_position_int_get_relative_alt (msg);
             double latd = degE7_to_degrees (lat);
             double lngd = degE7_to_degrees (lng);
             uint16_t heading = mavlink_msg_global_position_int_get_hdg (msg);
@@ -838,8 +839,12 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
              * EKF's estimate); GPS_RAW_INT.fix_type is the autopilot's own signal
              * for whether that estimate is backed by a real GPS fix (todo/79). */
             bool fix_valid = this->gps_fix_type >= GPS_FIX_TYPE_2D_FIX;
-            /* GLOBAL_POSITION_INT.alt is millimetres; PositionData carries metres. */
-            this->report_position (latd, lngd, mav_mm_to_metres (alt), heading, vh, vz, fix_valid);
+            /* GLOBAL_POSITION_INT.alt is millimetres; PositionData carries metres.
+             * relative_alt is AGL (the frame altitude_cap_m uses), distinct from
+             * alt (MSL) — plumbed through separately for the altitude-cap breach
+             * check (todo/92); see PositionData::alt_agl_m and todo/99. */
+            this->report_position (latd, lngd, mav_mm_to_metres (alt), heading, vh, vz, fix_valid,
+                                   mav_mm_to_metres (relative_alt));
         }
         break;
         case MAVLINK_MSG_ID_BATTERY_STATUS:
@@ -1394,12 +1399,12 @@ mav_connection::report_battery_status (int8_t remaining, int32_t consumed, doubl
 
 void
 mav_connection::report_position (double lat, double lng, double alt, uint16_t hdg, uint16_t vh, int16_t vv,
-                                 bool fix_valid)
+                                 bool fix_valid, double alt_agl)
 {
     if (this->position_cb)
     {
         uint16_t flags = fix_valid ? POSITION_FLAG_VALID_COORDS : 0;
-        this->position_cb (PositionData (lat, lng, alt, hdg, vh, vv, flags));
+        this->position_cb (PositionData (lat, lng, alt, hdg, vh, vv, flags, alt_agl));
     }
 }
 

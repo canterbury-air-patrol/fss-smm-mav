@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -14,7 +15,8 @@
  * cross-thread model this is one piece of)
  * -----------------------------------
  * Every state-mutating method below (FSSNewCommand, SMMNewCommand,
- * setLowBattery, setCommsFailure, setMavCommsFailure) and the work they drive
+ * setLowBattery, setCommsFailure, setMavCommsFailure, setCurrentAltitude) and
+ * the work they drive
  * (updateState / actionState, which touch mav, smm and state_change_cb) run on
  * the ONE event-loop thread. All external inputs — FSS/SMM/MAV callbacks — are
  * funnelled through the App event queue and applied here on that thread, which
@@ -80,6 +82,17 @@ class FMUStateMachine
     int low_battery_count{ 0 };
     int low_battery_latch_count;
     bool low_battery{ false };
+    int altitude_breach_count{ 0 };
+    int altitude_clear_count{ 0 };
+    int altitude_breach_latch_count;
+    uint16_t altitude_cap_m;
+    /* Unlike low_battery/terminated, this latch is self-clearing (todo/92):
+     * a sustained run of under-cap readings clears it again, returning
+     * control to whatever FSS/SMM command is current. Modelled on the
+     * comms-failsafe precedent (fss_comms_lost/mav_comms_lost below), not
+     * the restart-only latches, per todo/17's geofence design note that a
+     * breach RTL should not be an un-overridable latch. */
+    bool altitude_breach{ false };
     /* Latches true the first time fss_command is seen as fss_cmd_terminate and
      * is never cleared (todo/63): the flight-termination action (motor cut /
      * parachute / force-disarm) is physically irreversible, so a later FSS
@@ -104,8 +117,21 @@ class FMUStateMachine
      * readings arrive in a row; one healthy reading in between resets the run.
      * Public so tests stay in step with it. */
     static constexpr int default_low_battery_latch_count = 4;
+    /* Default consecutive over-/under-cap AGL readings to trip, or clear, the
+     * altitude-cap breach latch. At the default 200ms (5Hz)
+     * GLOBAL_POSITION_INT stream that's ~1s -- tighter than
+     * default_low_battery_latch_count's ~4s (at the default 1000ms battery
+     * stream), since a ceiling violation is more time-critical than a
+     * battery reading, but still enough to reject single-sample EKF jitter.
+     * The same count debounces both directions (symmetric hysteresis)
+     * rather than adding a second knob. Public so tests stay in step. */
+    static constexpr int default_altitude_breach_latch_count = 5;
+    /* Matches FmuConfig::altitude_cap_m's default. */
+    static constexpr uint16_t default_altitude_cap_m = 122;
 
-    FMUStateMachine (IMAV &t_mav, ISMM &t_smm, int t_low_battery_latch_count = default_low_battery_latch_count);
+    FMUStateMachine (IMAV &t_mav, ISMM &t_smm, int t_low_battery_latch_count = default_low_battery_latch_count,
+                     uint16_t t_altitude_cap_m = default_altitude_cap_m,
+                     int t_altitude_breach_latch_count = default_altitude_breach_latch_count);
 
     void setStateChangeCB (std::function<void (FMUState)> cb);
     /* Apply an FSS command (carrying its own goto/altitude target, default for
@@ -120,6 +146,14 @@ class FMUStateMachine
     void setLowBattery (bool low);
     void setCommsFailure (bool failed);
     void setMavCommsFailure (bool failed);
+    /* Report the latest own-aircraft AGL altitude reading and whether it is
+     * backed by a valid fix. Called for *every* own-ship position report
+     * (not just over-cap ones), mirroring setLowBattery, so the consecutive
+     * over-/under-cap runs stay accurate. A fix_valid == false reading is
+     * ignored entirely -- it neither trips nor clears the latch, and does
+     * not disturb an in-progress debounce run -- since a GPS gap must not
+     * false-trigger a breach, and must not silently clear a real one either. */
+    void setCurrentAltitude (bool fix_valid, double altitude_agl_m);
     /* True while the FMU is in the searching state. The event loop uses this to
      * gate SMM worker outcomes (load-search / RTL-fallback): an outcome that
      * raced a higher-priority transition out of searching is dropped rather than
