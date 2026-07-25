@@ -1,5 +1,6 @@
 #include "altitude-units.hpp"
 #include "battery-voltage.hpp"
+#include "failsafe-params.hpp"
 #include "internal.hpp"
 #include "latlon-encoding.hpp"
 #include "mav-comms.hpp"
@@ -9,6 +10,7 @@
 #include "util.hpp"
 #include "velocity.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -694,6 +696,46 @@ mav_connection::requestStream (int sysid, int compid, uint32_t command, uint32_t
     this->sendMavLinkMsgLocked (&msg);
 }
 
+void
+mav_connection::checkFailsafeConfig (uint8_t autopilot_type)
+{
+    for (const auto &check : expected_failsafe_params (autopilot_type, this->term_action))
+    {
+        /* param_id is a fixed 16-byte field, not a NUL-terminated C string;
+         * mavlink_msg_param_request_read_pack_chan always reads 16 bytes from
+         * the pointer it is given, so a source shorter than that (every name
+         * here is) must first be copied into a buffer that size, zero-padded
+         * — same idiom as sendADSB()'s callsign handling in mav.cpp. Passing
+         * check.name directly would be an out-of-bounds read. memcpy (not
+         * strncpy) because the field genuinely need not be NUL-terminated at
+         * 16/16 bytes, which trips -Wstringop-truncation on strncpy. */
+        char param_id_buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN] = { 0 };
+        std::memcpy (param_id_buf, check.name, std::min (std::strlen (check.name), sizeof (param_id_buf)));
+        mavlink_message_t msg;
+        std::lock_guard<std::mutex> lk (this->send_lock);
+        mavlink_msg_param_request_read_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, TARGET_SYS_ID,
+                                                  TARGET_COMP_ID, param_id_buf, /*param_index=*/-1);
+        this->sendMavLinkMsgLocked (&msg);
+    }
+}
+
+void
+mav_connection::checkFailsafeParamReply (const std::string &param_id, float value)
+{
+    auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
+    if (!sys)
+    {
+        return;
+    }
+    auto params = expected_failsafe_params (sys->getAutoPilotType (), this->term_action);
+    auto match = std::find_if (params.begin (), params.end (),
+                               [&] (const FailsafeParamCheck &check) { return param_id == check.name; });
+    if (match != params.end () && value == 0.0F)
+    {
+        this->logger.log (LogLevel::error, match->warning);
+    }
+}
+
 auto
 mav_connection::isFromAutopilot (const mavlink_message_t *msg) -> bool
 {
@@ -758,6 +800,11 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             sys->setFlightMode (mavlink_msg_heartbeat_get_custom_mode (msg));
             this->last_heartbeat_ts.store (current_timestamp_ms ());
             this->replayPendingMode (autopilot_type);
+            if (!sys->checkedFailsafe ())
+            {
+                this->checkFailsafeConfig (autopilot_type);
+                sys->markFailsafeChecked ();
+            }
         }
         break;
         case MAVLINK_MSG_ID_GLOBAL_POSITION_INT:
@@ -859,12 +906,29 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             this->gps_fix_type = mavlink_msg_gps_raw_int_get_fix_type (msg);
         }
         break;
+        case MAVLINK_MSG_ID_PARAM_VALUE:
+        {
+            if (!this->isFromAutopilot (msg))
+            {
+                break;
+            }
+            /* param_id is a fixed 16-byte field, NOT guaranteed NUL-terminated
+             * on the wire (a full 16-char name has no terminator) — same
+             * over-read hazard as STATUSTEXT's text field below. */
+            char param_id_buf[MAVLINK_MSG_PARAM_VALUE_FIELD_PARAM_ID_LEN + 1] = { 0 };
+            mavlink_msg_param_value_get_param_id (msg, param_id_buf);
+            /* ArduPilot always transmits param_value as float on the wire,
+             * regardless of the declared param_type, including for
+             * integer/bool params like AFS_ENABLE (todo/91). */
+            float value = mavlink_msg_param_value_get_param_value (msg);
+            this->checkFailsafeParamReply (param_id_buf, value);
+        }
+        break;
         case MAVLINK_MSG_ID_ADSB_VEHICLE:
         case MAVLINK_MSG_ID_COLLISION:
         case MAVLINK_MSG_ID_COMMAND_ACK:
         case MAVLINK_MSG_ID_GPS_GLOBAL_ORIGIN:
         case MAVLINK_MSG_ID_SYS_STATUS:
-        case MAVLINK_MSG_ID_PARAM_VALUE:
         case MAVLINK_MSG_ID_TIMESYNC:
         case MAVLINK_MSG_ID_SCALED_PRESSURE2:
         case MAVLINK_MSG_ID_HOME_POSITION:
@@ -1176,13 +1240,14 @@ mav_connection::disconnect_from_mav ()
     }
 }
 
-mav_connection::mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger)
+mav_connection::mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger,
+                                terminate_action t_term_action)
     : addr (std::move (t_addr)), port (t_port), goto_altitude_m (t_params.goto_altitude_m),
       altitude_floor_m (t_params.altitude_floor_m), altitude_cap_m (t_params.altitude_cap_m),
       position_stream_interval_us (t_params.position_stream_interval_us),
       battery_stream_interval_us (t_params.battery_stream_interval_us),
       connect_timeout_ms (t_params.mav_connect_timeout_ms), send_timeout_ms (t_params.mav_send_timeout_ms),
-      logger (t_logger)
+      term_action (t_term_action), logger (t_logger)
 {
 }
 

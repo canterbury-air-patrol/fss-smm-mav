@@ -14,6 +14,7 @@
 #include "../smm/smm.hpp"
 #include "../util.hpp"
 #include "mav-params.hpp"
+#include "mav.hpp"
 #include "mode-resolve.hpp"
 
 class mav_comp
@@ -30,11 +31,12 @@ class mav_comp
     };
 };
 
-/* The autopilot_type/flight_mode/setup scalars are written on the recv thread
- * (via processMavLinkMsg) and read on the event-loop thread (getAutoPilotType()
- * in commandRTL/Hold/Manual/Auto), so they are atomic to make that cross-thread
- * access well-defined. The components list is only ever touched on the recv
- * thread (findComponent from processMavLinkMsg), so it needs no lock. */
+/* The autopilot_type/flight_mode/setup/failsafe_checked scalars are written
+ * on the recv thread (via processMavLinkMsg) and read on the event-loop
+ * thread (getAutoPilotType() in commandRTL/Hold/Manual/Auto), so they are
+ * atomic to make that cross-thread access well-defined. The components list
+ * is only ever touched on the recv thread (findComponent from
+ * processMavLinkMsg), so it needs no lock. */
 class mav_sys
 {
   private:
@@ -43,6 +45,7 @@ class mav_sys
     std::atomic<uint8_t> autopilot_type{ 0 };
     std::atomic<uint8_t> flight_mode{ 0 };
     std::atomic<bool> setup{ false };
+    std::atomic<bool> failsafe_checked{ false };
 
   public:
     explicit mav_sys (uint8_t t_sysid) : sysid (t_sysid) {};
@@ -82,6 +85,19 @@ class mav_sys
     setupComplete ()
     {
         this->setup.store (true);
+    };
+    /* Whether the todo/91 failsafe-config sanity check has already been
+     * issued for this system (once per heartbeat-resolved autopilot type,
+     * not once per param). */
+    auto
+    checkedFailsafe () -> bool
+    {
+        return this->failsafe_checked.load ();
+    };
+    void
+    markFailsafeChecked ()
+    {
+        this->failsafe_checked.store (true);
     };
 };
 
@@ -197,6 +213,11 @@ class mav_connection
      * inside connect_to_mav() when configuring the socket, so it needs no
      * locking. */
     uint32_t send_timeout_ms;
+    /* Selected --terminate-action, needed to decide which failsafe params are
+     * worth sanity-checking (todo/91). Set once at construction; read only on
+     * the recv thread (checkFailsafeConfig/checkFailsafeParamReply), so it
+     * needs no locking — same pattern as goto_altitude_m above. */
+    terminate_action term_action;
     ILogger &logger;
     auto sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool;
     auto sendMavLinkMsg (mavlink_message_t *msg) -> bool;
@@ -243,6 +264,16 @@ class mav_connection
      * anomalous, so a rejection is logged at debug rather than warn/error. */
     auto isFromAutopilot (const mavlink_message_t *msg) -> bool;
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
+    /* Issue a PARAM_REQUEST_READ for each param expected_failsafe_params()
+     * returns for `autopilot_type`/this->term_action (todo/91). Called once,
+     * on the first heartbeat that resolves the autopilot type (see
+     * mav_sys::checkedFailsafe()/markFailsafeChecked()). Read-only: never
+     * writes an autopilot param, only requests and later compares. */
+    void checkFailsafeConfig (uint8_t autopilot_type);
+    /* Match a PARAM_VALUE reply's param_id against the current
+     * expected_failsafe_params() list; log a loud warning if it is one of
+     * them and reads 0 (todo/91). Silent on no match or a nonzero value. */
+    void checkFailsafeParamReply (const std::string &param_id, float value);
     /* Attempt a bounded TCP connect: puts `sock` in non-blocking mode, calls
      * connect(), and if it does not complete immediately, poll()s for
      * POLLOUT up to connect_timeout_ms before giving up. Returns true once
@@ -266,7 +297,8 @@ class mav_connection
     void heartbeat_loop ();
 
   public:
-    mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger);
+    mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger,
+                    terminate_action t_term_action = terminate_action::none);
     ~mav_connection ();
     mav_connection (mav_connection &) = delete;
     mav_connection (mav_connection &&) = delete;

@@ -146,6 +146,19 @@ The MAVLink endpoint is taken from the `mav_address` / `mav_port` keys in the
 | `disarm` | Sends `MAV_CMD_COMPONENT_ARM_DISARM` with force-disarm | Only safe on the ground; suitable for ground vehicles or bench testing |
 | `none` | Logs a loud warning and falls through to RTL — the safest non-destructive action | No special airframe configuration; use when AFS is not available |
 
+On the first heartbeat, the FMU does a **read-only, advisory** sanity check of
+the autopilot config the above depends on: `AFS_ENABLE`/`AFS_TERM_ACTION` when
+`terminate` is selected, and the autopilot's own GCS/telemetry-failsafe enable
+param in all cases (the backstop the comms-loss/low-battery RTL latches rely
+on while the MAV link is down). A mismatch logs a loud warning naming the
+missing config; it never blocks flight — the FMU only requests params, it
+never writes them. The GCS-failsafe param name is vehicle-firmware dependent
+(`FS_GCS_ENABL` for Plane, `FS_GCS_ENABLE` for Copter/Rover per current
+best-available knowledge) and has not been independently verified against
+real firmware for every airframe family — confirm it against your fleet's
+actual params if the check doesn't behave as expected; a wrong name simply
+means that one check silently doesn't fire, same as not checking at all.
+
 This requires [MAVProxy](https://ardupilot.org/mavproxy/) on the local device with `--tcpin:127.0.0.1:5760` you can adjust parameters as required to access a remote device.
 
 ## License

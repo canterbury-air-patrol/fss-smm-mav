@@ -90,7 +90,7 @@ MAV::sendADSB (PositionData pd)
 }
 
 MAV::MAV (std::string t_addr, uint16_t t_port, terminate_action ta, const MavParams &t_params, ILogger &t_logger)
-    : connection (std::make_shared<mav_connection> (std::move (t_addr), t_port, t_params, t_logger)), action (ta),
+    : connection (std::make_shared<mav_connection> (std::move (t_addr), t_port, t_params, t_logger, ta)), action (ta),
       logger (t_logger)
 {
 }
