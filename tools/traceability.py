@@ -10,8 +10,8 @@ Tier-3 pytest collector (CAP/tools/test/helpers/traceability.py), so the
 master-plan audit can merge evidence from both without a translation step.
 
 Usage: tools/traceability.py [--out PATH] [BINARY ...]
-Defaults to tests/fmu_test and tests/mav_io_test relative to the repo root
-if no binaries are given. Exits non-zero if a binary fails to run at all,
+Defaults to tests/fmu_test, tests/mav_io_test and tests/fss_test relative to
+the repo root if no binaries are given. Exits non-zero if a binary fails to run at all,
 exits with a failure its report does not explain, or if any test case
 tagged with a TC ID did not pass (failed or skipped: a skipped tagged
 test is missing evidence, not passing evidence).
@@ -101,7 +101,11 @@ def main():
     args = parser.parse_args()
 
     repo_root = pathlib.Path(__file__).resolve().parent.parent
-    binaries = args.binaries or [repo_root / "tests" / "fmu_test", repo_root / "tests" / "mav_io_test"]
+    binaries = args.binaries or [
+        repo_root / "tests" / "fmu_test",
+        repo_root / "tests" / "mav_io_test",
+        repo_root / "tests" / "fss_test",
+    ]
 
     test_ids = {}
     any_not_passed = False
