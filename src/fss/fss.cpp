@@ -121,6 +121,44 @@ FSS::enqueue (FssTask task)
 }
 
 void
+FSS::sendPosition (const FssPositionTask &t)
+{
+    if (this->ssl_client != nullptr)
+    {
+        this->ssl_client->sendPosition (t.lat, t.lng, t.alt, t.heading, t.hor_vel, t.ver_vel, t.fix_valid);
+    }
+}
+
+void
+FSS::sendReached (const FssReachedTask &t)
+{
+    if (this->ssl_client != nullptr)
+    {
+        this->ssl_client->reachedPoint (t.point, t.total_points);
+    }
+}
+
+void
+FSS::sendBattery (const FssBatteryTask &t)
+{
+    if (this->ssl_client != nullptr)
+    {
+        this->ssl_client->sendBatteryStatus (t.remaining, t.consumed, t.voltage);
+    }
+}
+
+void
+FSS::sendAck (const FssAckTask &t)
+{
+    /* No ssl_client guard: the responder closes over the originating connection
+     * itself, so it is neither reached through nor dependent on our client. */
+    if (t.ack)
+    {
+        t.ack (t.res);
+    }
+}
+
+void
 FSS::workerLoop ()
 {
     while (true)
@@ -136,24 +174,12 @@ FSS::workerLoop ()
             task = std::move (this->task_queue.front ());
             this->task_queue.pop_front ();
         }
-        if (this->ssl_client == nullptr)
-        {
-            continue;
-        }
         std::visit (
             overloaded{
-                [this] (const FssPositionTask &t)
-                { this->ssl_client->sendPosition (t.lat, t.lng, t.alt, t.heading, t.hor_vel, t.ver_vel, t.fix_valid); },
-                [this] (const FssReachedTask &t) { this->ssl_client->reachedPoint (t.point, t.total_points); },
-                [this] (const FssBatteryTask &t)
-                { this->ssl_client->sendBatteryStatus (t.remaining, t.consumed, t.voltage); },
-                [] (const FssAckTask &t)
-                {
-                    if (t.ack)
-                    {
-                        t.ack (t.res);
-                    }
-                },
+                [this] (const FssPositionTask &t) { this->sendPosition (t); },
+                [this] (const FssReachedTask &t) { this->sendReached (t); },
+                [this] (const FssBatteryTask &t) { this->sendBattery (t); },
+                [this] (const FssAckTask &t) { this->sendAck (t); },
             },
             task);
     }
@@ -177,11 +203,14 @@ FSS::FSS (const std::string &config_file)
     this->worker_thread = std::thread (&FSS::workerLoop, this);
 }
 
-FSS::~FSS ()
+void
+FSS::stopWorker ()
 {
     /* Stop and join the worker before the members it touches (ssl_client) are
-     * destroyed. A wedged peer can only delay shutdown by the time of one
-     * in-flight blocking send; the upstream send timeout bounds even that. */
+     * destroyed. workerLoop only returns once the queue is *also* empty, so
+     * everything already queued is still sent. A wedged peer can only delay
+     * shutdown by the time of one in-flight blocking send; the upstream send
+     * timeout bounds even that. */
     {
         std::lock_guard<std::mutex> lk (this->queue_lock);
         this->worker_running = false;
@@ -191,4 +220,11 @@ FSS::~FSS ()
     {
         this->worker_thread.join ();
     }
+}
+
+FSS::~FSS ()
+{
+    /* A no-op if a subclass already stopped the worker, as one overriding the
+     * send seams is required to. */
+    this->stopWorker ();
 }

@@ -15,20 +15,34 @@
 
 class FSS : public IFSSReporter
 {
+    /* Test-only accessor: lets the send-worker tests peek task_queue under
+     * queue_lock, since the only production path to it is enqueue(). */
+    friend struct FSSTestAccess;
+
   private:
     std::shared_ptr<fss_client_ssl> ssl_client{ nullptr };
 
-    /* Every outbound FSS send the event loop makes (position/reached/battery
-     * reports and the second-phase command ack) bottoms out in a blocking send()
-     * on a blocking socket (flight-safety-system transport.cpp / transport-ssl.cpp).
-     * A half-dead FSS peer fills the kernel send buffer and send() blocks until it
-     * drains or the connection's TCP_USER_TIMEOUT (30s, set in the transport)
-     * errors it out. Doing these on the event-loop thread would therefore stall
-     * queued rtl/terminate commands behind a hung peer for up to ~30s. The worker
-     * below takes the same treatment SMM got (todo/33): the public report/postAck
+  protected:
+    /* Outbound FSS sends bottom out in a blocking send() on a blocking socket
+     * (flight-safety-system transport.cpp / transport-ssl.cpp). A half-dead FSS
+     * peer fills the kernel send buffer and send() blocks until it drains or the
+     * connection's TCP_USER_TIMEOUT (30s, set in the transport) errors it out.
+     * Doing these on the event-loop thread would therefore stall queued
+     * rtl/terminate commands behind a hung peer for up to ~30s. The worker below
+     * takes the same treatment SMM got (todo/33): the public report/postAck
      * methods only enqueue a task and return, and this thread does the blocking
-     * send. A tighter, configurable send timeout (so even the worker can't wedge
-     * for the full 30s) is tracked upstream in flight-safety-system. */
+     * send.
+     *
+     * The four paths are no longer alike upstream. position/reached/battery fan
+     * out through fss_client::sendMsgAll(), which as of the client library's
+     * todo/66 (docs/decisions/66-67-client-outbound-fanout.md) packs once and
+     * hands the frame to each server's own outbound worker — non-blocking, with
+     * a bounded drop-oldest queue per server. The second-phase command ack is a
+     * *per-connection* sendMsg() on the originating connection, which that
+     * decision deliberately keeps inline, so it stays blocking. Against the
+     * currently pinned fss-client-ssl 1.2.1 all four still block; after that
+     * bump the ack is the one that still needs this worker — and it is the path
+     * that closes the loop on an operator's rtl/terminate. */
     struct FssPositionTask
     {
         double lat{ 0.0 };
@@ -61,6 +75,8 @@ class FSS : public IFSSReporter
         fss_command_ack_responder ack{};
         FSSCommandResolution res{};
     };
+
+  private:
     using FssTask = std::variant<FssPositionTask, FssReachedTask, FssBatteryTask, FssAckTask>;
 
     std::thread worker_thread{};
@@ -71,6 +87,27 @@ class FSS : public IFSSReporter
 
     void enqueue (FssTask task);
     void workerLoop ();
+
+  protected:
+    /* Seams over the blocking sends the worker makes, so a test can make one
+     * slow and observable without a live peer (the same shape as SMM's
+     * fetchSearch/reportPositionToSmm seams, todo/33). Defaults call straight
+     * through. Each guards ssl_client itself rather than the dispatch guarding
+     * it once: sendAck runs a plain closure and has nothing to do with the
+     * client, so it must still fire when there is no client at all. */
+    virtual void sendPosition (const FssPositionTask &t);
+    virtual void sendReached (const FssReachedTask &t);
+    virtual void sendBattery (const FssBatteryTask &t);
+    virtual void sendAck (const FssAckTask &t);
+
+    /* Drain the queue, then stop and join the worker. Idempotent. ~FSS calls
+     * it, but a subclass that overrides the seams above MUST also call it from
+     * its own destructor: the worker calls the seams, and a derived object is
+     * destroyed derived-part-first, so a worker still running by the time ~FSS
+     * gets control would be calling into an already-destroyed subclass. The
+     * base class cannot join early enough on its own — it does not get control
+     * until the derived destructor has finished. */
+    void stopWorker ();
 
   public:
     explicit FSS (const std::string &config_file);
