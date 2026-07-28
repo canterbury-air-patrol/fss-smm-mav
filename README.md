@@ -161,7 +161,54 @@ real firmware for every airframe family — confirm it against your fleet's
 actual params if the check doesn't behave as expected; a wrong name simply
 means that one check silently doesn't fire, same as not checking at all.
 
+That check is a last-chance warning, not a gate. Verifying the configuration
+is a ground activity — see below.
+
 This requires [MAVProxy](https://ardupilot.org/mavproxy/) on the local device with `--tcpin:127.0.0.1:5760` you can adjust parameters as required to access a remote device.
+
+## Required autopilot configuration
+
+The FMU relies on the autopilot's own GCS/telemetry failsafe as the backstop
+for a companion-computer failure: if the FMU stops heartbeating, the aircraft
+must return to launch on its own, with no ground intervention. **That backstop
+is disabled on a stock airframe and must be configured deliberately.** On
+ArduPlane 4.6 defaults it fails three ways at once — the failsafe is off, it
+watches the ground station's heartbeat rather than the FMU's, and its action
+is to carry on flying the mission.
+
+| Parameter | Value | Applies to | Why |
+|---|---|---|---|
+| `SYSID_MYGCS` | `200` | all | The FMU's own MAVLink system id. The failsafe must watch *its* heartbeat: MAVProxy runs on the same companion computer and heartbeats as 255, so with the default an FMU process death is invisible to the autopilot. |
+| `SYSID_ENFORCE` | `0` | all | `1` would reject every packet not from system 200, including the pilot's own GCS. |
+| `FS_GCS_ENABL` | `1` | Plane | Enables the GCS failsafe. (`2` also acceptable; `3` only acts in AUTO, and the FMU also flies GUIDED and LOITER.) |
+| `FS_LONG_ACTN` | `1` | Plane | RTL. The default `0` means *continue the mission* in AUTO/GUIDED — the failsafe fires and the aircraft keeps flying. |
+| `FS_LONG_TIMEOUT` | `<= 5` | Plane | How long the FMU can be silent before the aircraft returns to launch. |
+| `FS_GCS_ENABLE` | `1` or `3` | Copter | RTL, or SmartRTL falling back to RTL. |
+| `FS_GCS_TIMEOUT` | `<= 5` | Copter | As `FS_LONG_TIMEOUT`. |
+| `FS_OPTIONS` | bit 1 clear | Copter | Bit 1 continues the mission in AUTO on a GCS failsafe — the same trap as `FS_LONG_ACTN=0`. |
+| `FS_GCS_ENABLE` | `1` | Rover | `2` continues the mission in Auto. |
+| `FS_ACTION` | `1` or `3` | Rover | The default is Hold. |
+| `FS_TIMEOUT` | `<= 5` | Rover | As `FS_LONG_TIMEOUT`. |
+
+`SYSID_MYGCS=200` means a restart of the FMU that lasts longer than the
+failsafe timeout will trigger an RTL. That is the intended, conservative
+direction: the aircraft returns rather than continuing without a control
+link.
+
+`tools/apconfig_check.py` verifies all of the above against a real aircraft:
+
+```
+tools/apconfig_check.py --device udp:127.0.0.1:14550
+tools/apconfig_check.py --device /dev/ttyUSB0 --baud 57600 \
+    --terminate-action terminate --json evidence.json
+```
+
+It reads parameters only, never writes them, reports pass/fail per parameter
+with the reason each one matters, and exits non-zero if anything is wrong (or
+if the aircraft never answers for a parameter — "not checked" is a failure,
+not a pass). `--json` writes a record for the aircraft's change log. It needs
+`pymavlink`; the expectations themselves are plain Python and are unit tested
+in CI without it.
 
 ## License
 This project is licensed under GNU GPLv2 see the [LICENSE](LICENSE.md) file for details.
