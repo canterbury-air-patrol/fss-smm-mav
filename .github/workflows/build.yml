@@ -58,6 +58,12 @@ jobs:
     - name: Test-plan traceability (todo/66)
       run: python3 tools/traceability.py --out traceability-report.json
 
+    # The config checker's expectations are deliberately free of pymavlink,
+    # so this needs nothing beyond the python3 installed above -- no
+    # aircraft, no simulator (todo/103).
+    - name: Autopilot config checker unit tests (todo/103)
+      run: python3 -m unittest discover -s tools -p 'test_*.py' --verbose
+
     - name: Upload traceability report
       uses: actions/upload-artifact@v4
       with:
