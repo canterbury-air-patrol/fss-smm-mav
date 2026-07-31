@@ -25,6 +25,7 @@ the same configuration on the first heartbeat but never blocks flight. This
 tool is where a misconfiguration is meant to be caught.
 """
 import argparse
+import datetime
 import json
 import sys
 import time
@@ -256,9 +257,17 @@ def connect(device, baud, source_system, timeout):
     """
     Open the MAVLink connection and wait for the autopilot's heartbeat.
 
-    Returns (connection, heartbeat). Raises RuntimeError if nothing answers.
+    Returns (connection, heartbeat). Raises RuntimeError if pymavlink is
+    missing or if nothing answers.
     """
-    from pymavlink import mavutil  # pylint: disable=import-outside-toplevel
+    try:
+        from pymavlink import mavutil  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        raise RuntimeError(
+            'pymavlink is not installed, so this tool cannot talk to an aircraft '
+            '(pip install pymavlink). Only the MAVLink I/O needs it; the expectation '
+            'logic does not, which is why tools/test_apconfig_check.py runs without '
+            'it.') from exc
 
     conn = mavutil.mavlink_connection(device, baud=baud, source_system=source_system)
     heartbeat = conn.wait_heartbeat(timeout=timeout)
@@ -313,7 +322,7 @@ def main(argv=None):
         with open(args.json, 'w', encoding='utf-8') as handle:
             json.dump({
                 'device': args.device,
-                'checked': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+                'checked': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'family': family,
                 'mav_type': heartbeat.type,
                 'system_id': conn.target_system,
