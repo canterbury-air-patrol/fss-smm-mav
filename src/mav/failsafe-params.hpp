@@ -28,9 +28,10 @@ struct FailsafeParamCheck
 
 /* The GCS/telemetry-failsafe enable param name is vehicle-firmware
  * dependent, unlike AFS_ENABLE/AFS_TERM_ACTION (uniform across Plane/Copter/
- * Rover, part of the shared AP_AdvancedFailsafe library). This mapping is
- * best-effort and has not been independently verified against real firmware
- * for every airframe family (see README) — an autopilot_type this doesn't
+ * Rover, part of the shared AP_AdvancedFailsafe library). The Plane and
+ * Copter names were read back by name from ArduPilot 4.6 (SITL); the Rover
+ * name is taken from Rover/Parameters.cpp and has never been requested from
+ * a running vehicle (see README) — an autopilot_type this doesn't
  * recognise, or a wrong name for one it does, simply means that check is
  * skipped/never answered, degrading to "not checked" rather than a false
  * "all clear". */

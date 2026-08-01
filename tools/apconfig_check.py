@@ -45,9 +45,9 @@ MAV_TYPE_TRICOPTER = 15
 
 # Vehicle families share a parameter set. The mapping mirrors
 # resolve_gcs_failsafe_param_name() in src/mav/failsafe-params.hpp; keep the
-# two in step, and see this repo's README for the caveat that the
-# family-to-param-name mapping is verified against real firmware for Plane
-# only.
+# two in step. The Plane and Copter names were read back by name from
+# ArduPilot 4.6 (SITL); the Rover names come from Rover/Parameters.cpp and
+# have never been requested from a running vehicle. See this repo's README.
 FAMILY_BY_MAV_TYPE = {
     MAV_TYPE_FIXED_WING: 'plane',
     MAV_TYPE_QUADROTOR: 'copter',
