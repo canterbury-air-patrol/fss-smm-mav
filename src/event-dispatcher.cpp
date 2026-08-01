@@ -66,7 +66,7 @@ EventDispatcher::dispatch (const event &e)
                  * ordinary re-entry into the commanded state. Re-apply it
                  * (todo/108) -- this is the case the FSS server's 10s command
                  * redelivery used to paper over, and no longer does. */
-                logger.log (LogLevel::error, "COMMS mav autopilot restart — re-applying commanded state");
+                logger.log (LogLevel::warning, "COMMS mav autopilot restart — re-applying commanded state");
                 state_machine.reassertState ();
             },
             [&] (SMMSettings settings)

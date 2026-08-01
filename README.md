@@ -129,7 +129,7 @@ absent entirely):
 | `smm_position_report_interval_ms` | `1000` | Minimum interval (milliseconds) between position reports to the SMM server, throttling them independently of the (faster) MAVLink position stream. Range 100–60000. |
 | `smm_connect_timeout_s` | `5` | Connect timeout (seconds) for SMM HTTP requests. SMM I/O runs on a dedicated worker thread (public SMM methods enqueue work and return, so queued FSS commands are never blocked on SMM HTTP); this timeout bounds how long a slow or hung SMM endpoint can pin that worker, delaying shutdown, search-acquire retries, and other queued SMM work. Range 1–30 (the smm-asset library default of 30s is the cap, since a larger value only loosens the bound). |
 | `smm_transfer_timeout_s` | `10` | Total transfer timeout (seconds) for SMM HTTP requests; see `smm_connect_timeout_s`. Range 1–60 (capped at the smm-asset library default of 60s). |
-| `log_level` | `info` | Logging verbosity: `error`, `info`, or `debug`. |
+| `log_level` | `info` | Logging verbosity: `error`, `warning`, `info`, or `debug`. Each level adds to the one before it, so `error` shows only failures and `warning` adds degraded-but-handled conditions (a link drop, an ignored mission ack, a misconfigured autopilot param). Every log line names its own level between the timestamp and the message. |
 | `log_dir` | `/var/log/cap-fmu` | Directory the rotating `fmu.log` is written to. The FMU normally runs as a non-root user, so set this to a path that user can write; the directory is created if missing, and logging is skipped with a warning if it cannot be. |
 
 Then start this client with:

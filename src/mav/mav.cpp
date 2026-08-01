@@ -47,7 +47,7 @@ MAV::terminate () -> bool
         case terminate_action::disarm:
             return this->connection->commandForceDisARM ();
         case terminate_action::none:
-            this->logger.log (LogLevel::error, "WARN: terminate-action is none, falling through to RTL");
+            this->logger.log (LogLevel::warning, "terminate-action is none, falling through to RTL");
             return this->connection->commandRTL ();
     }
     return false;

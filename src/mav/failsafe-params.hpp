@@ -19,10 +19,10 @@ struct FailsafeParamCheck
     /* MAVLink param_id to request (PARAM_REQUEST_READ) and match a
      * PARAM_VALUE reply against. <=16 chars per the MAVLink field width. */
     const char *name = nullptr;
-    /* Full log text (including the "WARN: " prefix, matching every other
-     * LogLevel::error call site in this file) if the param reads 0. A
-     * std::string (not const char *) since the GCS-failsafe entry below
-     * builds its text from the resolved param name. */
+    /* Log text if the param reads 0, carrying no severity prefix of its own —
+     * the caller logs it at LogLevel::warning and the line names the level
+     * (todo/109). A std::string (not const char *) since the GCS-failsafe
+     * entry below builds its text from the resolved param name. */
     std::string warning;
 };
 
@@ -67,16 +67,15 @@ expected_failsafe_params (uint8_t autopilot_type, terminate_action action) -> st
     std::vector<FailsafeParamCheck> params;
     if (action == terminate_action::terminate)
     {
-        params.push_back ({ "AFS_ENABLE",
-                            "WARN: AFS_ENABLE=0 on the autopilot but --terminate-action=terminate requires "
-                            "AFS enabled for MAV_CMD_DO_FLIGHTTERMINATION to have any effect" });
-        params.push_back ({ "AFS_TERM_ACTION", "WARN: AFS_TERM_ACTION is not configured (0) on the autopilot but "
+        params.push_back ({ "AFS_ENABLE", "AFS_ENABLE=0 on the autopilot but --terminate-action=terminate requires "
+                                          "AFS enabled for MAV_CMD_DO_FLIGHTTERMINATION to have any effect" });
+        params.push_back ({ "AFS_TERM_ACTION", "AFS_TERM_ACTION is not configured (0) on the autopilot but "
                                                "--terminate-action=terminate requires it to be set" });
     }
     if (auto gcs_param = resolve_gcs_failsafe_param_name (autopilot_type))
     {
         params.push_back (
-            { *gcs_param, std::string ("WARN: ") + *gcs_param
+            { *gcs_param, std::string (*gcs_param)
                               + "=0 on the autopilot: its own GCS/telemetry failsafe is disabled, removing the "
                                 "backstop the FMU relies on while the MAV link is down" });
     }

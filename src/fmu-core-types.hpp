@@ -202,10 +202,21 @@ enum class MavCommsStatus
 
 /* Logging verbosity, ordered least- to most-verbose. A message logged at
  * level L is emitted only when L <= the configured level, so `error` shows
- * only errors, `info` adds normal operation, and `debug` shows everything. */
+ * only errors, `warning` adds degraded-but-handled conditions, `info` adds
+ * normal operation, and `debug` shows everything.
+ *
+ * The level is the *only* place a line's severity is stated (todo/109): a
+ * message must not carry its own "WARN:"/"ERROR:" prefix, because the two
+ * then drift and the prefix wins the reader's eye while the enum is what
+ * actually decides whether the line is emitted at all. Logger::log() renders
+ * the level into the line, so nothing is lost by leaving it out of the text.
+ * `warning` exists so that rule can be followed: before it, every
+ * degraded-but-handled condition had to be logged at `error` and say "WARN:"
+ * to be honest about what it was. */
 enum class LogLevel
 {
     error,
+    warning,
     info,
     debug,
 };

@@ -621,8 +621,8 @@ SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altit
         this->valid = parsed.all_valid;
         if (!parsed.all_valid)
         {
-            logger.log (LogLevel::error, "WARN: SMM search has an invalid waypoint (non-finite or out-of-range "
-                                         "coordinate); discarding the candidate rather than loading it");
+            logger.log (LogLevel::warning, "SMM search has an invalid waypoint (non-finite or out-of-range "
+                                           "coordinate); discarding the candidate rather than loading it");
         }
     }
     smm_waypoints_free (wps, wps_count);
@@ -635,15 +635,15 @@ SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altit
     this->altitude = clamp_search_altitude (raw_altitude, altitude_floor, altitude_cap);
     if (raw_altitude > altitude_cap)
     {
-        logger.log (LogLevel::error, "SMM: Derived altitude (" + std::to_string (raw_altitude) + "m) for sweep width "
-                                         + std::to_string (sweep_width) + "m exceeds altitude cap ("
-                                         + std::to_string (altitude_cap) + "m), clamping altitude");
+        logger.log (LogLevel::warning, "SMM: Derived altitude (" + std::to_string (raw_altitude) + "m) for sweep width "
+                                           + std::to_string (sweep_width) + "m exceeds altitude cap ("
+                                           + std::to_string (altitude_cap) + "m), clamping altitude");
     }
     else if (raw_altitude < altitude_floor)
     {
-        logger.log (LogLevel::error, "SMM: Derived altitude (" + std::to_string (raw_altitude) + "m) for sweep width "
-                                         + std::to_string (sweep_width) + "m below altitude floor ("
-                                         + std::to_string (altitude_floor) + "m), clamping altitude");
+        logger.log (LogLevel::warning, "SMM: Derived altitude (" + std::to_string (raw_altitude) + "m) for sweep width "
+                                           + std::to_string (sweep_width) + "m below altitude floor ("
+                                           + std::to_string (altitude_floor) + "m), clamping altitude");
     }
 }
 
