@@ -59,6 +59,16 @@ EventDispatcher::dispatch (const event &e)
                  * handling is needed in this handler. */
                 state_machine.setMavCommsFailure (status == MavCommsStatus::failure);
             },
+            [&] (const MavAutopilotRestart &)
+            {
+                /* The autopilot came back with no memory of what it was doing,
+                 * and (unlike a link drop) with no comms edge to drive the
+                 * ordinary re-entry into the commanded state. Re-apply it
+                 * (todo/108) -- this is the case the FSS server's 10s command
+                 * redelivery used to paper over, and no longer does. */
+                logger.log (LogLevel::error, "COMMS mav autopilot restart — re-applying commanded state");
+                state_machine.reassertState ();
+            },
             [&] (SMMSettings settings)
             {
                 logger.log ("SMM connect " + settings.getURL ());

@@ -156,28 +156,6 @@ FMUStateMachine::resolveFSSCommand (FMUState desired, const std::optional<FMUSta
     return res;
 }
 
-namespace
-{
-/* States whose MAV command must reach the autopilot for flight safety. If the
- * send fails (link down) these are recorded for replay once the link recovers;
- * a failed manual/hold/goto/altitude is left to the operator to re-issue. */
-auto
-requires_replay_on_failure (FMUState state) -> bool
-{
-    switch (state)
-    {
-        case fmu_state_rtl:
-        case fmu_state_failsafe:
-        case fmu_state_low_battery:
-        case fmu_state_terminate:
-        case fmu_state_waiting_for_tasking:
-            return true;
-        default:
-            return false;
-    }
-}
-} // namespace
-
 auto
 FMUStateMachine::actionState (FMUState state) -> bool
 {
@@ -253,22 +231,6 @@ FMUStateMachine::actionState (FMUState state) -> bool
             /* Tell MAV to terminate the flight */
             sent = this->mav.terminate ();
             break;
-    }
-
-    {
-        /* Remember a safety-critical action that did not make it onto the wire so
-         * it can be replayed on MAV recovery; clear the record on any action that
-         * did transmit (or any non-safety transition), since the autopilot now has
-         * the latest command and there is nothing stale to re-send. */
-        std::lock_guard<std::mutex> lk (this->lock);
-        if (requires_replay_on_failure (state) && !sent)
-        {
-            this->pending_replay_state = state;
-        }
-        else
-        {
-            this->pending_replay_state.reset ();
-        }
     }
 
     if (this->state_change_cb)
@@ -439,31 +401,48 @@ FMUStateMachine::setMavCommsFailure (bool failed)
 {
     this->assert_event_loop_thread ();
     std::optional<FMUState> changed_to;
-    std::optional<FMUState> replay;
+    bool recovered = false;
+    FMUState reassert = fmu_state_manual;
     {
         std::lock_guard<std::mutex> lk (this->lock);
+        /* A genuine down->up edge, not a redundant "still okay" report. The
+         * heartbeat loop only ever reports edges, so in production this is
+         * simply "the link came back". */
+        recovered = this->mav_comms_lost && !failed;
         this->mav_comms_lost = failed;
         changed_to = this->updateState ();
-        /* The MAV link just recovered. If a safety-critical action could not be
-         * transmitted while it was down, re-send it now. A non-clearing latch
-         * (low-battery, or a still-current terminate) keeps current_state the
-         * same, so updateState() reports no transition and the action would
-         * otherwise never be retried. A clearing latch (comms failsafe) instead
-         * transitions to the commanded state, handled by the changed_to branch
-         * below — which also clears any pending replay. */
-        if (!failed && !changed_to && this->pending_replay_state.has_value ())
-        {
-            replay = this->pending_replay_state;
-        }
+        reassert = this->current_state;
     }
     if (changed_to)
     {
+        /* A clearing latch (the comms failsafe itself) transitions back to the
+         * commanded state, which re-commands the autopilot on the way in. */
         this->actionState (*changed_to);
     }
-    else if (replay)
+    else if (recovered)
     {
-        this->actionState (*replay);
+        /* The link came back with no transition to re-drive: a non-clearing
+         * latch (low-battery, a still-current terminate) held current_state the
+         * whole time. Re-command it regardless of whether the original send
+         * succeeded (todo/108) — the gap may have been an autopilot reboot,
+         * which this end cannot distinguish from a link drop and which leaves
+         * the autopilot with no memory of the command. This supersedes todo/46's
+         * narrower replay-only-if-the-send-failed rule, which silently lost a
+         * successfully-transmitted RTL to a reboot. */
+        this->actionState (reassert);
     }
+}
+
+void
+FMUStateMachine::reassertState ()
+{
+    this->assert_event_loop_thread ();
+    FMUState state = fmu_state_manual;
+    {
+        std::lock_guard<std::mutex> lk (this->lock);
+        state = this->current_state;
+    }
+    this->actionState (state);
 }
 
 auto

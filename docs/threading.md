@@ -11,7 +11,7 @@ comments point back to instead of restating (todo/62).
 | Thread | Started in | Role |
 |---|---|---|
 | Event loop | `App::run()` (the process's main thread) | Dequeues `event`s and calls `EventDispatcher::dispatch()`, which drives `FMUStateMachine`. The sole arbiter of FMU state and priority (todo/33). |
-| MAV recv | `mav_connection::connect_to_mav()` | Performs blocking reads and parses inbound MAVLink; invokes the position/battery/reached/comms callbacks that enqueue events for the event loop. |
+| MAV recv | `mav_connection::connect_to_mav()` | Performs blocking reads and parses inbound MAVLink; invokes the position/battery/reached/autopilot-restart callbacks that enqueue events for the event loop. |
 | MAV heartbeat | `mav_connection` constructor path / `start()` | Sends periodic `HEARTBEAT`s and is the single authority for edge-triggering the MAV comms-up/down callback (`heartbeat_loop()`). |
 | Signal waiter | `App::signal_waiter()` | Blocks in `sigwait()` for SIGINT/SIGTERM, then flips `App::running` and wakes the event loop and reconnector. |
 | FSS reconnector | `App::fss_reconnector()` | Periodically calls `fss->reconnectAll()`, `mav->attemptReconnect()`, and `smm->retryPendingSearch()`. |
@@ -32,11 +32,11 @@ events, even though their lifetime is the library's concern, not ours.
 |---|---|---|
 | `App::main_lock` + `main_cv` | `App::event_queue` | Event loop (consumer), every callback that calls `enqueue_event` (producers: MAV recv/heartbeat threads, FSS recv threads, SMM worker via its callbacks, FSS send worker, signal waiter, FSS reconnector). |
 | `App::reconnect_lock` + `reconnect_cv` | Only the reconnector's own wait timer | FSS reconnector thread, woken early by the signal waiter. |
-| `FMUStateMachine::lock` | `fss_command`, `smm_command`, `fss_command_target`, `low_battery`, `low_battery_count`, `terminated`, `altitude_breach`, `altitude_breach_count`, `altitude_clear_count`, `current_state`, `fss_comms_lost`, `mav_comms_lost`, `pending_replay_state` | Event loop only (todo/52's `assert_event_loop_thread()` enforces this in debug builds) — see "Single-event-loop-thread invariant" below. |
+| `FMUStateMachine::lock` | `fss_command`, `smm_command`, `fss_command_target`, `low_battery`, `low_battery_count`, `terminated`, `altitude_breach`, `altitude_breach_count`, `altitude_clear_count`, `current_state`, `fss_comms_lost`, `mav_comms_lost` | Event loop only (todo/52's `assert_event_loop_thread()` enforces this in debug builds) — see "Single-event-loop-thread invariant" below. |
 | `mav_connection::send_lock` | The socket fd's lifetime (open/close) and the per-channel MAVLink pack/transmit state (the generated `*_pack_chan()` calls mutate global per-channel sequence/status, so packing and sending must be serialised) | Any thread that sends: event loop (via `MAV`/`IMAV` action methods), MAV heartbeat thread, MAV recv thread (mission handshake replies, ADS-B rebroadcast). |
 | `mav_connection::state_lock` | `last_position`, `search`, `search_loaded`, `search_loading`, `goto_active`, `goto_position`, `goto_ack_pending`, `pending_mode_command`, `retry_count`, `last_tried` | MAV recv thread (parses inbound MAVLink and updates upload/search state), event loop (issues commands), FSS reconnector (`attemptReconnect`). |
 | `mav_connection::heartbeat_mutex` + `heartbeat_cv` | Only the heartbeat loop's own 1-second wait timer | MAV heartbeat thread, woken early by `stopping`. |
-| `mav_systems::lock` | `mav_systems::systems` (the per-sysid `mav_sys` list, and through it each system's component list) | MAV recv thread, which is the only one that grows the list (`findSystem`'s find-or-create, from `processMavLinkMsg`); the event-loop command paths read it via `findExistingSystem()`, which never mutates, so dispatching a command cannot race a concurrent recv-thread insertion. Each `mav_sys`'s own published state (`autopilot_type`, `flight_mode`, `setup`, `failsafe_checked`, `failsafe_checked_type`) is atomic and read without this lock once the `shared_ptr` is in hand. |
+| `mav_systems::lock` | `mav_systems::systems` (the per-sysid `mav_sys` list, and through it each system's component list) | MAV recv thread, which is the only one that grows the list (`findSystem`'s find-or-create, from `processMavLinkMsg`) and which also walks it to re-arm the setup latches on a detected autopilot restart (`resetAllSetup()`, todo/108); FSS reconnector thread, which walks it the same way from `disconnect_from_mav()`; the event-loop command paths read it via `findExistingSystem()`, which never mutates, so dispatching a command cannot race a concurrent recv-thread insertion. Each `mav_sys`'s own published state (`autopilot_type`, `flight_mode`, `setup`, `failsafe_checked`, `failsafe_checked_type`) is atomic and read without this lock once the `shared_ptr` is in hand. |
 | `SMM::queue_lock` + `queue_cv` | `SMM::task_queue`, `SMM::worker_running` (the shutdown flag the `queue_cv` predicate reads) | SMM worker (consumer); event loop and FSS reconnector (producers, via the public methods that call `enqueue`); the destructor clears `worker_running`. |
 | `SMM::state_lock` | `current_search`, `asset` | SMM worker (publishes), event loop (`currentSearchPoints()` reads the atomic mirror instead, see below), test-only injection (`SMMTestAccess`). |
 | `FSS::queue_lock` + `queue_cv` | `FSS::task_queue`, `FSS::worker_running` (the shutdown flag the `queue_cv` predicate reads) | FSS send worker (consumer); event loop (producer, via `reportPosition`/`reachedPoint`/`reportBatteryStatus`/`postAck`); the destructor clears `worker_running`. |
@@ -55,7 +55,8 @@ deliberately *not* listed, so their absence is not read as drift:
   are read inside critical sections, but they are written once by the
   constructor and never again, so no lock is what makes them safe.
 - **Thread-owned.** Fields written and read on exactly one thread, e.g.
-  `mav_connection::gps_fix_type` (recv thread only, see todo/79).
+  `mav_connection::gps_fix_type` (recv thread only, see todo/79) and
+  `mav_connection::last_time_boot_ms` (recv thread only, see todo/108).
 
 One genuine asymmetry is worth naming rather than hiding:
 `FMUStateMachine::state_change_cb` is *written* under `FMUStateMachine::lock`
@@ -90,11 +91,16 @@ The same holds for the two locks a command path can meet in sequence:
 `mav_systems::findExistingSystem()` (which takes and releases
 `mav_systems::lock`) *before* it touches `state_lock` or `send_lock`, and
 `processMavLinkMsg()` likewise finishes its `findSystem()` lookup before any
-per-message handler takes a lock.
+per-message handler takes a lock. `handleAutopilotRestart()` (todo/108) keeps
+that shape: `resetAllSetup()` takes and releases `mav_systems::lock`, and only
+then does it take `state_lock` to drop the loaded-mission belief.
+`disconnect_from_mav()` calls `resetAllSetup()` after its `send_lock` region has
+closed, for the same reason — `mav_systems::lock` never nests with either.
 
 Cross-object calls follow the same rule at a coarser grain: `FMUStateMachine`
-calls into `IMAV`/`ISMM` (`actionState()`) *before* taking `this->lock` to
-record `pending_replay_state`, never while holding it; `SMM::retryPendingSearch()`
+calls into `IMAV`/`ISMM` (`actionState()`) *before* taking `this->lock`, never
+while holding it (`setMavCommsFailure()` and `reassertState()` both read
+`current_state` under the lock, release it, and only then action); `SMM::retryPendingSearch()`
 reads `MAV::getCurrentPosition()` (which takes `mav_connection::state_lock`
 internally) before calling `SMM::enqueue()` (which takes `SMM::queue_lock`),
 never both at once.
@@ -103,15 +109,14 @@ never both at once.
 
 Every state-mutating `FMUStateMachine` method (`FSSNewCommand`,
 `SMMNewCommand`, `setLowBattery`, `setCommsFailure`, `setMavCommsFailure`,
-`setCurrentAltitude`) and the work they drive (`updateState`/`actionState`, which touch `mav`,
+`setCurrentAltitude`, `reassertState`) and the work they drive (`updateState`/`actionState`, which touch `mav`,
 `smm`, and `state_change_cb`) must run on the event-loop thread. All
 external inputs — FSS/SMM/MAV callbacks, which fire on their own threads —
 are funnelled through `App`'s event queue and applied on the event-loop
 thread instead of being actioned directly from the callback. This is what
 lets the priority arbitration and `FMUStateMachine`'s state fields be
-reasoned about with only `FMUStateMachine::lock` (guarding the small
-publish-to-worker-threads surface, `pending_replay_state`) rather than a
-lock around every access. `FMUStateMachine::assert_event_loop_thread()`
+reasoned about with only `FMUStateMachine::lock` rather than a lock around
+every access. `FMUStateMachine::assert_event_loop_thread()`
 defends this in debug builds (todo/52); calling a state-mutating method from
 another thread would otherwise be a silent data race.
 

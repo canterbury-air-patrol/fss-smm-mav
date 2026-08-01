@@ -45,8 +45,10 @@ class FMUStateMachine
     auto resolveFSSCommand (FMUState desired, const std::optional<FMUState> &changed) -> FSSCommandResolution;
     /* Carry out the side effects of entering `state` (command the MAV, cancel the
      * search, fire the state-change callback). Returns whether the MAV command was
-     * transmitted; for a safety-critical state a false result is recorded in
-     * pending_replay_state so it is re-sent once the MAV link recovers (todo/46).
+     * transmitted; a false result is not recorded anywhere, because the recovery
+     * rule no longer depends on it — every MAV-link recovery re-applies the
+     * current state whether or not the earlier send got through (todo/108,
+     * generalising todo/46's narrower replay-on-failure).
      * Must be called WITHOUT this->lock held (it locks internally). */
     auto actionState (FMUState state) -> bool;
     /* Debug-only guard for the single-event-loop-thread invariant documented
@@ -71,11 +73,6 @@ class FMUStateMachine
      * stops being the complete map it claims to be (todo/95, which is exactly
      * how `terminated` came to be missing from it). */
     FMUState current_state{ fmu_state_manual };
-    /* A safety-critical state (RTL / failsafe / low-battery / terminate /
-     * waiting-for-tasking) whose MAV command could not be transmitted (link
-     * down). Replayed when MAV comms recover; empty once delivered or
-     * superseded. Guarded by this->lock. */
-    std::optional<FMUState> pending_replay_state{};
     FSSCommand fss_command{ fss_cmd_unknown };
     /* Target of the most recent goto/altitude FSS command, retained so
      * actionState can command the MAV whenever the goto/altitude state is
@@ -152,7 +149,22 @@ class FMUStateMachine
      * not-low reading resets the run. The latch, once engaged, is not cleared. */
     void setLowBattery (bool low);
     void setCommsFailure (bool failed);
+    /* Report the MAV link's health. On a genuine down->up edge the current state
+     * is re-commanded to the autopilot unconditionally -- whether or not the
+     * earlier send succeeded, and whether or not the recovery produced a state
+     * transition (todo/108). A link gap is not distinguishable from an autopilot
+     * reboot from here, so the safe reading is that the autopilot came back with
+     * no memory: a redundant SET_MODE costs nothing, a low-battery RTL that is
+     * never re-sent costs the aircraft. */
     void setMavCommsFailure (bool failed);
+    /* Re-apply the current state to the autopilot with no state change: the
+     * autopilot restarted underneath us (todo/108) and has forgotten its mode
+     * and its mission, but nothing about the FMU's own state is stale. Runs the
+     * full side effects of entering that state -- including the SMM
+     * search/cancel calls and the state-change log -- because the restart
+     * invalidated all of them; SMM::doSearch()'s held-search resume path makes
+     * the searching case idempotent. */
+    void reassertState ();
     /* Report the latest own-aircraft AGL altitude reading and whether it is
      * backed by a valid fix. Called for *every* own-ship position report
      * (not just over-cap ones), mirroring setLowBattery, so the consecutive

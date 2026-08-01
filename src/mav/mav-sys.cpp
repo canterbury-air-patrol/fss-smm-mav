@@ -44,3 +44,13 @@ mav_systems::findExistingSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>
     }
     return nullptr;
 }
+
+void
+mav_systems::resetAllSetup ()
+{
+    std::lock_guard<std::mutex> lk (this->lock);
+    for (const auto &iter : this->systems)
+    {
+        iter->resetSetup ();
+    }
+}

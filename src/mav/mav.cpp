@@ -130,3 +130,9 @@ MAV::registerMavCommsStatusCB (notify_mav_comms_cb cb)
 {
     this->connection->registerMavCommsStatusCB (std::move (cb));
 }
+
+void
+MAV::registerAutopilotRestartCB (notify_autopilot_restart_cb cb)
+{
+    this->connection->registerAutopilotRestartCB (std::move (cb));
+}

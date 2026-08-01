@@ -87,6 +87,20 @@ class mav_sys
     {
         this->setup.store (true);
     };
+    /* Re-arm both one-shot latches so the next message from this system
+     * re-issues the stream requests and re-runs the failsafe-config check
+     * (todo/108). Needed because an autopilot restart discards the runtime
+     * SET_MESSAGE_INTERVAL overrides this end asked for: without this the
+     * streams are requested exactly once per FMU process and a rebooted
+     * autopilot silently falls back to whatever its SRx_* params give. Also
+     * called when the link is torn down, since a reconnect may be to a
+     * different autopilot instance entirely. */
+    void
+    resetSetup ()
+    {
+        this->setup.store (false);
+        this->failsafe_checked.store (false);
+    };
     /* Whether the todo/91 failsafe-config sanity check has already been
      * issued for this system for the given (heartbeat-reported) `type`.
      * MAV_TYPE is fixed by firmware and does not change at runtime for a
@@ -128,6 +142,12 @@ class mav_systems
     /* Return the system for t_sysid if it already exists, else nullptr. Never
      * mutates the list, so it is safe to call from the command paths. */
     auto findExistingSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>;
+    /* Re-arm every known system's setup/failsafe-check latches (todo/108).
+     * Called from the recv thread on a detected autopilot restart and from the
+     * reconnector thread when the link is torn down, so it takes `lock` like
+     * every other list access. Must not be called with mav_connection's
+     * send_lock held — this lock never nests with it (see docs/threading.md). */
+    void resetAllSetup ();
 };
 
 class mav_connection
@@ -160,6 +180,7 @@ class mav_connection
      * that corrects it, rather than the link being silently assumed healthy. */
     std::atomic<bool> mav_comms_ok{ true };
     notify_mav_comms_cb mav_comms_cb{};
+    notify_autopilot_restart_cb autopilot_restart_cb{};
     mav_systems systems{};
     /* state_lock guards: last_position, search, search_loaded,
      * search_loading, goto_active, goto_position, goto_ack_pending,
@@ -198,6 +219,13 @@ class mav_connection
      * Written and read only on the recv thread (processMavLinkMsg), so it
      * needs no lock, same as goto_altitude_m above. */
     uint8_t gps_fix_type{ GPS_FIX_TYPE_NO_GPS };
+    /* Highest autopilot uptime (time_boot_ms) seen so far, from whichever of
+     * GLOBAL_POSITION_INT / SYSTEM_TIME reported it. A backwards jump is the
+     * only evidence this end gets of an autopilot restart that was too short to
+     * break the link (todo/108). 0 means nothing has been observed yet. Written
+     * and read only on the recv thread (processMavLinkMsg), so it needs no lock,
+     * same as gps_fix_type above. */
+    uint32_t last_time_boot_ms{ 0 };
     std::optional<MavModeCommand> pending_mode_command{};
     /* Altitude (metres AGL, relative to home) a goto waypoint is flown at;
      * supplied from config, already clamped to [floor, cap]. Set once at
@@ -278,6 +306,17 @@ class mav_connection
      * (todo/83). Non-matching traffic is expected on a shared link, not
      * anomalous, so a rejection is logged at debug rather than warn/error. */
     auto isFromAutopilot (const mavlink_message_t *msg) -> bool;
+    /* Feed an autopilot-reported uptime (GLOBAL_POSITION_INT.time_boot_ms or
+     * SYSTEM_TIME.time_boot_ms) to the restart detector, then record it. A
+     * backwards jump past autopilot_restart_margin_ms runs
+     * handleAutopilotRestart(). Recv thread only. */
+    void noteTimeBootMs (uint32_t time_boot_ms);
+    /* React to a detected autopilot restart (todo/108): warn, re-arm the
+     * per-system setup latches so the streams and the failsafe-config check are
+     * re-issued, drop this end's belief about what mission is loaded (the reboot
+     * wiped it), and tell the event loop to re-apply the commanded state. Recv
+     * thread only. */
+    void handleAutopilotRestart ();
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     /* Issue a PARAM_REQUEST_READ for each param expected_failsafe_params()
      * returns for `autopilot_type`/this->term_action (todo/91). Called once,
@@ -355,4 +394,5 @@ class mav_connection
     void registerReachedCB (notify_reached_cb cb);
     void registerBatteryCB (notify_battery_status_cb cb);
     void registerMavCommsStatusCB (notify_mav_comms_cb cb);
+    void registerAutopilotRestartCB (notify_autopilot_restart_cb cb);
 };

@@ -65,7 +65,7 @@ class MockMAV : public IMAV
     int goto_calls{ 0 };
     /* Controls the transmission result the action methods report. Set false to
      * simulate a send that did not reach the autopilot (MAV link down) so the
-     * replay-on-recovery path (todo/46) can be exercised. */
+     * re-apply-on-recovery path (todo/46, todo/108) can be exercised. */
     bool send_succeeds{ true };
     std::shared_ptr<SMMSearch> last_loaded_search{ nullptr };
     int load_search_calls{ 0 };
@@ -120,6 +120,10 @@ class MockMAV : public IMAV
     }
     void
     registerMavCommsStatusCB (notify_mav_comms_cb) override
+    {
+    }
+    void
+    registerAutopilotRestartCB (notify_autopilot_restart_cb) override
     {
     }
     void
@@ -345,15 +349,15 @@ TEST_CASE ("a waiting_for_tasking RTL that failed to send is replayed once MAV c
     REQUIRE (mav->last_mode == flight_mode_rtl);
     const int calls_before = mav->set_mode_calls;
 
-    /* Unlike low_battery/terminate, waiting_for_tasking is not a latch: a
-     * genuine comms down->up cycle would itself re-drive the send via the
-     * ordinary transition path (out to failsafe and back), not the replay
-     * mechanism. So exercise the mechanism directly with a redundant "comms
-     * still okay" edge, which reports no transition and must fall back to
-     * replaying the still-pending send. */
+    /* Unlike low_battery/terminate, waiting_for_tasking is not a latch, so a
+     * genuine comms down->up cycle re-drives the send via the ordinary
+     * transition path (out to failsafe and back) rather than the no-transition
+     * re-apply. Either way the RTL that never reached the autopilot must be on
+     * the wire once the link is back. */
     mav->send_succeeds = true;
+    sm->setMavCommsFailure (true);
     sm->setMavCommsFailure (false);
-    REQUIRE (mav->set_mode_calls == calls_before + 1);
+    REQUIRE (mav->set_mode_calls > calls_before);
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
@@ -376,8 +380,8 @@ TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (
     REQUIRE (mav->terminate_calls == terminate_before + 1);
 }
 
-TEST_CASE ("a safety action that was transmitted is not replayed on a later MAV recovery (todo/46)",
-           "[state_machine][replay]")
+TEST_CASE ("a safety action that was transmitted is re-applied on a genuine MAV recovery (todo/108)",
+           "[state_machine][replay][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -386,7 +390,31 @@ TEST_CASE ("a safety action that was transmitted is not replayed on a later MAV 
     REQUIRE (mav->last_mode == flight_mode_rtl);
     const int calls_before = mav->set_mode_calls;
 
-    /* A subsequent MAV recovery edge with nothing outstanding must not re-send. */
+    /* The link goes away and comes back. The low-battery latch outranks the
+     * comms failsafe, so current_state never moves and there is no transition to
+     * re-drive -- and under todo/46's old rule nothing was re-sent, because the
+     * original send had succeeded. But this end cannot tell a link drop from an
+     * autopilot reboot, and a rebooted autopilot has forgotten the RTL entirely.
+     * So the current state is re-commanded regardless (todo/108). */
+    sm->setMavCommsFailure (true);
+    sm->setMavCommsFailure (false);
+    REQUIRE (mav->set_mode_calls == calls_before + 1);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+TEST_CASE ("a redundant comms-okay report with no preceding loss re-sends nothing (todo/108)",
+           "[state_machine][replay]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    latch_low_battery (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    const int calls_before = mav->set_mode_calls;
+
+    /* Only a genuine down->up edge means the autopilot may have restarted. The
+     * heartbeat loop only ever reports edges, so this cannot happen in
+     * production -- but the re-apply must be gated on the edge, not on
+     * !failed, or any repeated health report would re-command the autopilot. */
     sm->setMavCommsFailure (false);
     REQUIRE (mav->set_mode_calls == calls_before);
 }
@@ -2341,6 +2369,106 @@ TEST_CASE ("mav_comms_is_up requires an open socket and a recent heartbeat", "[m
     /* A clock anomaly (last heartbeat timestamped after now) must not wrap the
      * unsigned subtraction into a huge age and spuriously fail; treat it as up. */
     REQUIRE (mav_comms_is_up (true, now, now + 1000, timeout));
+}
+
+TEST_CASE ("autopilot_restarted trips only on a real backwards jump in autopilot uptime (todo/108)", "[mav][comms]")
+{
+    constexpr uint32_t margin = autopilot_restart_margin_ms;
+
+    /* Nothing observed yet: the first sample can never look like a restart, at
+     * any value. */
+    REQUIRE_FALSE (autopilot_restarted (0, 0, margin));
+    REQUIRE_FALSE (autopilot_restarted (0, 900000, margin));
+
+    /* A zero *reading* is MAVLink's "field not populated", not a jump back to
+     * the epoch -- otherwise every such message would report a restart. */
+    REQUIRE_FALSE (autopilot_restarted (900000, 0, margin));
+
+    /* Uptime moving forward, or standing still, is the healthy case. */
+    REQUIRE_FALSE (autopilot_restarted (900000, 900200, margin));
+    REQUIRE_FALSE (autopilot_restarted (900000, 900000, margin));
+
+    /* A small backwards step is ordinary skew between the two sources feeding
+     * this (GLOBAL_POSITION_INT at 5Hz, SYSTEM_TIME at 1Hz), not a restart --
+     * including at the exact margin. */
+    REQUIRE_FALSE (autopilot_restarted (900000, 899800, margin));
+    REQUIRE_FALSE (autopilot_restarted (900000, 900000 - margin, margin));
+
+    /* Past the margin: a genuine reboot, whose first reported uptime is the few
+     * milliseconds between boot and the stream's first message. */
+    REQUIRE (autopilot_restarted (900000, 900000 - (margin + 1), margin));
+    REQUIRE (autopilot_restarted (900000, 1200, margin));
+    REQUIRE (autopilot_restarted (900000, 1, margin));
+}
+
+TEST_CASE ("reassertState re-commands the current state without a transition (todo/108)", "[state_machine][replay]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+    const int calls_before = mav->set_mode_calls;
+
+    /* The autopilot rebooted: no FMU state changed, but the autopilot has
+     * forgotten the mode, so it must be commanded again. */
+    sm->reassertState ();
+    REQUIRE (mav->set_mode_calls == calls_before + 1);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+}
+
+TEST_CASE ("reassertState re-issues a goto with its stored target (todo/108)", "[state_machine][replay]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    FSSCommandTarget target{};
+    target.position = Point (-43.5, 172.6);
+    sm->FSSNewCommand (fss_cmd_goto, target);
+    REQUIRE (mav->goto_calls == 1);
+    REQUIRE (mav->last_mode == flight_mode_goto);
+
+    /* The reboot wiped the uploaded mission too, so the re-apply must re-drive
+     * the goto from the retained target, not just re-set the mode. */
+    mav->last_goto = Point{};
+    sm->reassertState ();
+    REQUIRE (mav->goto_calls == 2);
+    REQUIRE (mav->last_goto.getLatitude () == Catch::Approx (-43.5));
+    REQUIRE (mav->last_goto.getLongitude () == Catch::Approx (172.6));
+    REQUIRE (mav->last_mode == flight_mode_goto);
+}
+
+TEST_CASE ("reassertState re-drives the search while searching (todo/108)", "[state_machine][replay]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    sm->FSSNewCommand (fss_cmd_continue);
+    REQUIRE (smm->search_calls == 1);
+
+    /* SMM's resume path re-uploads the held search when the mission is no longer
+     * loaded on the autopilot -- which is exactly what a restart makes true (the
+     * MAV layer drops search_loaded on detecting one). */
+    sm->reassertState ();
+    REQUIRE (smm->search_calls == 2);
+}
+
+TEST_CASE ("reassertState re-commands a latched state that no transition would re-drive (todo/108)",
+           "[state_machine][replay][TC-FS-005]")
+{
+    auto [mav, smm, sm] = make_sm ();
+
+    latch_low_battery (sm);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    const int calls_before = mav->set_mode_calls;
+
+    sm->reassertState ();
+    REQUIRE (mav->set_mode_calls == calls_before + 1);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    /* Same for terminate, whose latch equally produces no transition to ride. */
+    const int terminate_before = mav->terminate_calls;
+    sm->FSSNewCommand (fss_cmd_terminate);
+    REQUIRE (mav->terminate_calls == terminate_before + 1);
+    sm->reassertState ();
+    REQUIRE (mav->terminate_calls == terminate_before + 2);
 }
 
 TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[aircraft]")

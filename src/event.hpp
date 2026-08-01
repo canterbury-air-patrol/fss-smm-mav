@@ -18,6 +18,16 @@ struct Nudge
 {
 };
 
+/* The autopilot restarted underneath the FMU while both links stayed up
+ * (todo/108). Distinct from MavCommsStatus: a typical ArduPilot reboot is a ~3s
+ * heartbeat gap, well under the 5s link-down timeout, so neither the MAV comms
+ * status nor the FSS connection changes — but the autopilot has lost its
+ * commanded mode and its uploaded mission all the same. Carries nothing; the
+ * state machine re-applies the state it already holds. */
+struct MavAutopilotRestart
+{
+};
+
 /* An action produced by the SMM worker thread, fed back through the event queue
  * so it is applied on the event-loop thread. SmmLoadSearch is only applied while
  * the FMU is still searching or waiting for tasking, so a stale action that
@@ -58,5 +68,6 @@ struct FSSCommandEvent
     fss_command_ack_responder ack;
 };
 
-using event = std::variant<FSSCommandEvent, FSSCommsStatus, MavCommsStatus, SMMSettings, PositionData, BatteryData,
-                           ReachedPoint, OtherAircraftReport, SmmLoadSearch, SmmRtl, SmmOperatorCommand, Nudge>;
+using event
+    = std::variant<FSSCommandEvent, FSSCommsStatus, MavCommsStatus, MavAutopilotRestart, SMMSettings, PositionData,
+                   BatteryData, ReachedPoint, OtherAircraftReport, SmmLoadSearch, SmmRtl, SmmOperatorCommand, Nudge>;
