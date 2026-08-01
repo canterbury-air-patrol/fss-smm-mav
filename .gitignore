@@ -35,3 +35,9 @@ clang-tidy.log
 
 # Distribution tarball (make dist / make distcheck)
 /cap-fmu-*.tar.gz
+
+# Python bytecode from the tools/ scripts and their unit tests
+__pycache__/
+
+# tools/traceability.py output
+/traceability-report.json
