@@ -150,11 +150,17 @@ The MAVLink endpoint is taken from the `mav_address` / `mav_port` keys in the
 
 On the first heartbeat, the FMU does a **read-only, advisory** sanity check of
 the autopilot config the above depends on: `AFS_ENABLE`/`AFS_TERM_ACTION` when
-`terminate` is selected, and the autopilot's own GCS/telemetry-failsafe enable
-param in all cases (the backstop the comms-loss/low-battery RTL latches rely
-on while the MAV link is down). A mismatch logs a loud warning naming the
-missing config; it never blocks flight — the FMU only requests params, it
-never writes them. The GCS-failsafe param name is vehicle-firmware dependent:
+`terminate` is selected, and in all cases the autopilot's own GCS/telemetry
+failsafe — the backstop the comms-loss/low-battery RTL latches rely on while
+the MAV link is down. That means more than the enable flag, because an enabled
+failsafe can still be configured to carry on flying the mission: the check
+covers the failsafe's *action* and `SYSID_MYGCS` too, per family, matching the
+table under [Required autopilot configuration](#required-autopilot-configuration)
+below. (The timeouts and `SYSID_ENFORCE` are checked only by the ground tool: a
+slow backstop is still a backstop.) A mismatch logs a loud warning naming the
+parameter, the value read back, and what is wrong with it; it never blocks
+flight — the FMU only requests params, it never writes them. The GCS-failsafe
+param name is vehicle-firmware dependent:
 `FS_GCS_ENABL` for Plane and `FS_GCS_ENABLE` for Copter are confirmed to
 exist and answer on ArduPilot 4.6 (read back by name with
 `tools/apconfig_check.py` against SITL — the same firmware source and
@@ -199,6 +205,11 @@ is to carry on flying the mission.
 failsafe timeout will trigger an RTL. That is the intended, conservative
 direction: the aircraft returns rather than continuing without a control
 link.
+
+Every row above except the timeouts and `SYSID_ENFORCE` is also checked in
+flight, on the first heartbeat, as an advisory warning (see above). Verify on
+the ground regardless — the in-flight check is the last-chance warning for a
+configuration error that should already have been caught.
 
 `tools/apconfig_check.py` verifies all of the above against a real aircraft:
 

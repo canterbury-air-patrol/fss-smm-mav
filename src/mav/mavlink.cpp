@@ -12,10 +12,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 
 #include <cerrno>
@@ -33,6 +35,10 @@ constexpr int BUFFER_LEN = 2048;
 
 constexpr uint8_t SYS_ID = 200;
 constexpr uint8_t COMP_ID = 1;
+/* The SYSID_MYGCS check (failsafe-params.hpp, todo/104) warns when the
+ * autopilot's GCS failsafe is watching a system id other than the one we
+ * heartbeat as. It needs the value in a header; this keeps the copy honest. */
+static_assert (SYS_ID == fmu_gcs_sys_id, "the SYSID_MYGCS check must expect the system id we actually heartbeat as");
 
 /* The autopilot this FMU talks to. Every direct command (mode, arm/disarm,
  * terminate, altitude, stream requests) targets this system/component pair;
@@ -729,16 +735,21 @@ mav_connection::checkFailsafeParamReply (const std::string &param_id, float valu
     auto params = expected_failsafe_params (sys->getAutoPilotType (), this->term_action);
     auto match = std::find_if (params.begin (), params.end (),
                                [&] (const FailsafeParamCheck &check) { return param_id == check.name; });
-    /* Exact-zero comparison is deliberate, not a float-equality footgun: every
-     * param checked here (AFS_ENABLE, AFS_TERM_ACTION, the GCS-failsafe
-     * enable) is an ArduPilot integer/enum/boolean param, and small integers
-     * are exactly representable in IEEE-754 float — there is no rounding or
-     * scaling in play, so a genuinely-disabled param always arrives as
-     * precisely 0.0F, never a near-zero value a tolerance would be needed
-     * for. */
-    if (match != params.end () && value == 0.0F)
+    /* Each check judges its own value (todo/104): an enable flag says the
+     * failsafe fires, not what it does when it does, so "nonzero" is not a
+     * sufficient test for every param here. See FailsafeParamCheck on why the
+     * predicates compare floats exactly. */
+    if (match != params.end () && !match->accept (value))
     {
-        this->logger.log (LogLevel::warning, match->warning);
+        /* Name the value that was actually read: the warnings say what is wrong
+         * with the configuration, and an operator fixing it needs to see what
+         * the autopilot is currently holding. Params here are integers/enums/
+         * bitmasks carried as float, so render them as integers when they are
+         * whole and fall back to the raw value if one ever is not. */
+        std::string value_text = std::isfinite (value) && value == std::trunc (value)
+                                     ? std::to_string (static_cast<long> (value))
+                                     : std::to_string (value);
+        this->logger.log (LogLevel::warning, param_id + "=" + value_text + " on the autopilot: " + match->warning);
     }
 }
 
