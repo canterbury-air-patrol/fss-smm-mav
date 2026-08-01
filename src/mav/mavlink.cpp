@@ -760,6 +760,56 @@ mav_connection::isFromAutopilot (const mavlink_message_t *msg) -> bool
 }
 
 void
+mav_connection::noteTimeBootMs (uint32_t time_boot_ms)
+{
+    if (time_boot_ms == 0)
+    {
+        /* MAVLink's "field not populated" value, not an uptime. Discard it
+         * outright rather than let it overwrite a good baseline below — a sender
+         * that never fills the field would otherwise erase the only evidence a
+         * later restart is detected against. */
+        return;
+    }
+    if (autopilot_restarted (this->last_time_boot_ms, time_boot_ms, autopilot_restart_margin_ms))
+    {
+        this->handleAutopilotRestart ();
+    }
+    /* Record unconditionally, including the post-restart value: the counter
+     * starts again from the reboot, so the new (lower) reading is the one later
+     * samples must be compared against. */
+    this->last_time_boot_ms = time_boot_ms;
+}
+
+void
+mav_connection::handleAutopilotRestart ()
+{
+    this->logger.log (LogLevel::error,
+                      "WARN: Autopilot restart detected (time_boot_ms went backwards) — re-requesting streams and "
+                      "re-applying commanded state");
+    /* The reboot discarded the SET_MESSAGE_INTERVAL overrides and the
+     * failsafe-config answers; re-arm both latches so the next message from the
+     * autopilot re-issues them. */
+    this->systems.resetAllSetup ();
+    /* It also discarded the uploaded mission, so this end's belief about what is
+     * loaded is now wrong. Clearing it is what lets the re-applied state
+     * genuinely re-upload: SMM's resume path treats loadSearch as a no-op while
+     * search_loaded still claims the mission is on the autopilot. */
+    bool upload_lost = false;
+    {
+        std::lock_guard<std::mutex> lk (this->state_lock);
+        upload_lost = this->invalidateInFlightUploadLocked ();
+    }
+    if (upload_lost)
+    {
+        this->logUploadInvalidated ("an autopilot restart");
+    }
+    if (this->autopilot_restart_cb)
+    {
+        this->autopilot_restart_cb ();
+    }
+}
+
+void
 mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status __attribute__ ((unused)))
 {
     auto sys = this->systems.findSystem (msg->sysid);
@@ -819,6 +869,9 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             {
                 break;
             }
+            /* GLOBAL_POSITION_INT is the fastest stream carrying the autopilot's
+             * uptime, so it is the primary restart detector (todo/108). */
+            this->noteTimeBootMs (mavlink_msg_global_position_int_get_time_boot_ms (msg));
             /* New position data */
             int32_t lat = mavlink_msg_global_position_int_get_lat (msg);
             int32_t lng = mavlink_msg_global_position_int_get_lon (msg);
@@ -917,6 +970,19 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             this->gps_fix_type = mavlink_msg_gps_raw_int_get_fix_type (msg);
         }
         break;
+        case MAVLINK_MSG_ID_SYSTEM_TIME:
+        {
+            if (!this->isFromAutopilot (msg))
+            {
+                break;
+            }
+            /* Nothing here consumes the autopilot's clock; SYSTEM_TIME is
+             * handled purely as a second source of time_boot_ms, so a restart is
+             * still detected when the position stream is not flowing (no fix, or
+             * the stream request lost to an earlier reboot) — todo/108. */
+            this->noteTimeBootMs (mavlink_msg_system_time_get_time_boot_ms (msg));
+        }
+        break;
         case MAVLINK_MSG_ID_PARAM_VALUE:
         {
             if (!this->isFromAutopilot (msg))
@@ -955,7 +1021,6 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
         case MAVLINK_MSG_ID_TERRAIN_REPORT:
         case MAVLINK_MSG_ID_LOCAL_POSITION_NED:
         case MAVLINK_MSG_ID_VIBRATION:
-        case MAVLINK_MSG_ID_SYSTEM_TIME:
         case MAVLINK_MSG_ID_EKF_STATUS_REPORT:
         case MAVLINK_MSG_ID_ATTITUDE:
         case MAVLINK_MSG_ID_AHRS:
@@ -1249,6 +1314,14 @@ mav_connection::disconnect_from_mav ()
     {
         close (orig_fd);
     }
+    /* Re-arm the per-system setup latches so a reconnect re-requests the streams
+     * and re-runs the failsafe-config check (todo/108). The old link's runtime
+     * SET_MESSAGE_INTERVAL overrides cannot be assumed to have survived — the
+     * autopilot may have rebooted, or the reconnect may reach a different
+     * instance entirely — and without this they were issued exactly once per FMU
+     * process. Deliberately outside the send_lock region above: mav_systems::lock
+     * never nests with send_lock (see docs/threading.md). */
+    this->systems.resetAllSetup ();
 }
 
 mav_connection::mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger,
@@ -1446,4 +1519,10 @@ void
 mav_connection::registerMavCommsStatusCB (notify_mav_comms_cb cb)
 {
     this->mav_comms_cb = std::move (cb);
+}
+
+void
+mav_connection::registerAutopilotRestartCB (notify_autopilot_restart_cb cb)
+{
+    this->autopilot_restart_cb = std::move (cb);
 }

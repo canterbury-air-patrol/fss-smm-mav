@@ -18,6 +18,10 @@ using notify_fss_command_cb
     = std::function<void (FSSCommand, const FSSCommandTarget &, const fss_command_ack_responder &)>;
 using notify_fss_comms_cb = std::function<void (FSSCommsStatus)>;
 using notify_mav_comms_cb = std::function<void (MavCommsStatus)>;
+/* The autopilot restarted underneath us while the link stayed up (todo/108).
+ * Carries nothing: the only thing the event loop does with it is re-apply the
+ * state machine's current state, which it already holds. */
+using notify_autopilot_restart_cb = std::function<void ()>;
 
 using notify_position_cb = std::function<void (const PositionData &)>;
 using notify_battery_status_cb = std::function<void (const BatteryData &)>;

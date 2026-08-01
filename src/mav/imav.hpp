@@ -39,6 +39,12 @@ class IMAV
     virtual auto setAltitude (uint32_t alt) -> bool = 0;
     virtual auto getCurrentPosition () -> Point = 0;
     virtual void registerMavCommsStatusCB (notify_mav_comms_cb cb) = 0;
+    /* Report that the autopilot restarted while the link stayed up (todo/108),
+     * so the event loop can re-apply the commanded state to an autopilot that
+     * has forgotten it. Distinct from the comms-status callback above: a
+     * typical ArduPilot reboot is a ~3s heartbeat gap, which never trips the
+     * 5s link-down timeout, so this fires with no comms edge either side. */
+    virtual void registerAutopilotRestartCB (notify_autopilot_restart_cb cb) = 0;
     /* Load an SMM-acquired search mission onto the autopilot, and forward
      * another aircraft's position report for ADS-B rebroadcast. Not used by
      * FMUStateMachine (which only needs the action methods above); part of

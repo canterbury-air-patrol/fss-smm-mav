@@ -228,6 +228,30 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
+    /* Same, with the autopilot's uptime (time_boot_ms) set explicitly
+     * (todo/108): every overload above packs 0, which the restart detector
+     * treats as "nothing observed yet", so no test using them can drive it. */
+    void
+    sendPositionAt (uint32_t time_boot_ms, int32_t lat = -435000000, int32_t lon = 1726000000, uint8_t sysid = 1)
+    {
+        mavlink_message_t msg;
+        mavlink_msg_global_position_int_pack_chan (sysid, 1, autopilot_tx_channel, &msg, time_boot_ms, lat, lon,
+                                                   /*alt mm*/ 100000, /*rel alt mm*/ 100000, 0, 0, 0, /*hdg*/ 0);
+        sendMsg (msg);
+    }
+
+    /* Send a SYSTEM_TIME carrying the autopilot's uptime (todo/108) — the second
+     * source the restart detector reads, so a reboot is still caught when the
+     * position stream is not flowing. A non-default sysid (todo/83) stands in
+     * for another vehicle or GCS sharing the link. */
+    void
+    sendSystemTime (uint32_t time_boot_ms, uint8_t sysid = 1)
+    {
+        mavlink_message_t msg;
+        mavlink_msg_system_time_pack_chan (sysid, 1, autopilot_tx_channel, &msg, /*time_unix_usec*/ 0, time_boot_ms);
+        sendMsg (msg);
+    }
+
     /* Send a GPS_RAW_INT with the given fix_type (todo/68) — e.g.
      * GPS_FIX_TYPE_NO_FIX — as ArduPilot would report GPS health directly
      * (distinct from GLOBAL_POSITION_INT, which carries the EKF's position
@@ -2056,6 +2080,230 @@ TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged ea
         REQUIRE (pd.getP ().getLongitude () == Catch::Approx (172.6));
     }
     REQUIRE (positions.count_now () >= 5);
+}
+
+/* todo/108: an ArduPilot reboot is typically a ~3s heartbeat gap, well under
+ * heartbeat_loop()'s 5s link-down timeout, so it produces no comms edge and the
+ * FSS connection never notices either. A backwards jump in the autopilot's own
+ * uptime counter is the only evidence this end gets. These cases pin the
+ * detector and the resync it drives: re-requested streams (the reboot discarded
+ * the SET_MESSAGE_INTERVAL overrides) and a dropped belief about what mission is
+ * loaded. */
+namespace
+{
+/* Collect the three SET_MESSAGE_INTERVAL requests the FMU issues on completing
+ * setup for the autopilot, returning the message ids it asked for (sorted, since
+ * only the set matters here). */
+auto
+recv_stream_requests (MavLoopbackServer &server) -> std::vector<uint32_t>
+{
+    std::vector<uint32_t> ids;
+    for (int i = 0; i < 3; i++)
+    {
+        mavlink_message_t msg;
+        REQUIRE (server.recvMessage (MAVLINK_MSG_ID_COMMAND_LONG, msg, io_timeout));
+        REQUIRE (mavlink_msg_command_long_get_command (&msg) == MAV_CMD_SET_MESSAGE_INTERVAL);
+        ids.push_back (static_cast<uint32_t> (mavlink_msg_command_long_get_param1 (&msg)));
+    }
+    std::sort (ids.begin (), ids.end ());
+    return ids;
+}
+
+const std::vector<uint32_t> expected_stream_ids{ MAVLINK_MSG_ID_GPS_RAW_INT, MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
+                                                 MAVLINK_MSG_ID_BATTERY_STATUS };
+} // namespace
+
+TEST_CASE ("a backwards jump in the autopilot's uptime is reported as a restart and re-requests the streams (todo/108)",
+           "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+    CapturingLogger capture;
+    std::atomic<int> restarts{ 0 };
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.registerAutopilotRestartCB ([&restarts] () { restarts.fetch_add (1); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* Drain the streams requested on first setup, so the ones asserted after the
+     * restart can only be the re-issued set. */
+    std::vector<uint32_t> ids = recv_stream_requests (server);
+    std::sort (ids.begin (), ids.end ());
+    std::vector<uint32_t> expected = expected_stream_ids;
+    std::sort (expected.begin (), expected.end ());
+    REQUIRE (ids == expected);
+
+    /* Re-sending the same uptime is safe: equal values are not a regression, so
+     * the wait loop cannot itself trip the detector. */
+    auto sendUptimeAndWait = [&] (uint32_t time_boot_ms)
+    {
+        const int before = positions.count_now ();
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPositionAt (time_boot_ms);
+                return positions.count_now () > before;
+            },
+            io_timeout));
+    };
+
+    /* An autopilot that has been up for 15 minutes. */
+    sendUptimeAndWait (900000);
+    REQUIRE (restarts.load () == 0);
+
+    /* It reboots: uptime restarts from near zero, with the link never dropping. */
+    sendUptimeAndWait (1200);
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return restarts.load () >= 1; }, io_timeout));
+    REQUIRE (capture.containsSubstring ("Autopilot restart detected"));
+
+    /* The reboot discarded the runtime stream requests, so they are issued again
+     * on the next message from the autopilot. */
+    REQUIRE (recv_stream_requests (server) == expected);
+
+    /* Exactly one restart: the post-reboot uptime becomes the new baseline, so
+     * the wait loop's repeats of it do not each look like another restart. */
+    sendUptimeAndWait (1400);
+    REQUIRE (restarts.load () == 1);
+}
+
+TEST_CASE ("SYSTEM_TIME feeds the restart detector, and only from the configured autopilot (todo/108)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+    CapturingLogger capture;
+    std::atomic<int> restarts{ 0 };
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.registerAutopilotRestartCB ([&restarts] () { restarts.fetch_add (1); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* TCP delivery is ordered and mav_connection processes on a single recv
+     * thread, so once a position sent afterwards is echoed back, everything
+     * before it has been processed — the barrier every "and then nothing
+     * happened" assertion below relies on. */
+    auto barrier = [&] ()
+    {
+        const int before = positions.count_now ();
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPosition ();
+                return positions.count_now () > before;
+            },
+            io_timeout));
+    };
+
+    server.sendSystemTime (900000);
+    barrier ();
+    REQUIRE (restarts.load () == 0);
+
+    /* A backwards jump attributed to some other system on the link (a second
+     * vehicle, a GCS) must not be read as this autopilot restarting (todo/83). */
+    server.sendSystemTime (1200, /*sysid*/ 2);
+    barrier ();
+    REQUIRE (restarts.load () == 0);
+
+    /* The same jump from the autopilot itself is the restart. */
+    server.sendSystemTime (1200);
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return restarts.load () >= 1; }, io_timeout));
+    REQUIRE (restarts.load () == 1);
+}
+
+TEST_CASE ("an autopilot uptime that only advances is never read as a restart (todo/108)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+    std::atomic<int> restarts{ 0 };
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.registerAutopilotRestartCB ([&restarts] () { restarts.fetch_add (1); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* Interleave the two sources at their real relative rates (position 5Hz,
+     * SYSTEM_TIME 1Hz): they are stamped at slightly different instants, and a
+     * detector keyed on a bare "lower than last seen" would false-trip on the
+     * skew between them. */
+    for (uint32_t t = 900000; t < 901000; t += 200)
+    {
+        const int before = positions.count_now ();
+        server.sendSystemTime (t - 150);
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPositionAt (t);
+                return positions.count_now () > before;
+            },
+            io_timeout));
+    }
+    REQUIRE (restarts.load () == 0);
+}
+
+TEST_CASE ("a restart drops the loaded-search belief so the next load re-uploads (todo/108)", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    PositionRecorder positions;
+    std::atomic<int> restarts{ 0 };
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.registerAutopilotRestartCB ([&restarts] () { restarts.fetch_add (1); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    auto search = std::make_shared<SMMSearch> ();
+    conn.loadSearch (search);
+    REQUIRE (run_mission_upload (server, 3).set_current == search_point_mission_seq (0));
+    expect_auto_mode (server);
+
+    /* Re-loading the same search while it is still believed loaded is a no-op —
+     * this is the behaviour that would silently swallow the re-apply after a
+     * reboot if the belief were not cleared. */
+    conn.loadSearch (search);
+    mavlink_message_t msg;
+    REQUIRE_FALSE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, no_message_timeout));
+
+    /* The autopilot reboots, wiping the uploaded mission. */
+    auto sendUptimeAndWait = [&] (uint32_t time_boot_ms)
+    {
+        const int before = positions.count_now ();
+        REQUIRE (MavLoopbackServer::waitFor (
+            [&] ()
+            {
+                server.sendPositionAt (time_boot_ms);
+                return positions.count_now () > before;
+            },
+            io_timeout));
+    };
+    sendUptimeAndWait (900000);
+    sendUptimeAndWait (1200);
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return restarts.load () >= 1; }, io_timeout));
+
+    /* Now the identical re-load genuinely re-uploads, which is what makes the
+     * state machine's re-apply of fmu_state_searching mean anything. */
+    conn.loadSearch (search);
+    REQUIRE (run_mission_upload (server, 3).set_current == search_point_mission_seq (0));
 }
 
 TEST_CASE ("A heartbeat from a system other than the configured autopilot does not affect comms health or a "

@@ -104,6 +104,7 @@ class App
         mav->registerBatteryCB ([this] (const BatteryData &bd) { enqueue_event (std::make_shared<event> (bd)); });
         mav->registerMavCommsStatusCB ([this] (MavCommsStatus status)
                                        { enqueue_event (std::make_shared<event> (status)); });
+        mav->registerAutopilotRestartCB ([this] { enqueue_event (std::make_shared<event> (MavAutopilotRestart{})); });
 
         /* SMM I/O runs on its own worker thread; its flight outcomes come back
          * through the event queue so they are applied on the event-loop thread,
