@@ -21,8 +21,10 @@ Exit status: 0 all checks passed, 1 one or more failed, 2 could not talk to
 the aircraft.
 
 The in-flight counterpart is src/mav/failsafe-params.hpp, which warns about
-the same configuration on the first heartbeat but never blocks flight. This
-tool is where a misconfiguration is meant to be caught.
+the same configuration on the first heartbeat but never blocks flight. It
+checks every expectation below except the failsafe timeouts and SYSID_ENFORCE;
+keep the two tables in step. This tool is where a misconfiguration is meant to
+be caught.
 """
 import argparse
 import datetime
@@ -44,8 +46,8 @@ MAV_TYPE_OCTOROTOR = 14
 MAV_TYPE_TRICOPTER = 15
 
 # Vehicle families share a parameter set. The mapping mirrors
-# resolve_gcs_failsafe_param_name() in src/mav/failsafe-params.hpp; keep the
-# two in step. The Plane and Copter names were read back by name from
+# resolve_vehicle_family() in src/mav/failsafe-params.hpp, and the checks
+# below mirror expected_failsafe_params(); keep the two in step. The Plane and Copter names were read back by name from
 # ArduPilot 4.6 (SITL); the Rover names come from Rover/Parameters.cpp and
 # have never been requested from a running vehicle. See this repo's README.
 FAMILY_BY_MAV_TYPE = {

@@ -2091,6 +2091,141 @@ TEST_CASE ("expected_failsafe_params omits the GCS-failsafe entry for an unrecog
                           [] (const auto &p) { return std::string (p.name) == "AFS_TERM_ACTION"; }));
     REQUIRE (std::none_of (params.begin (), params.end (),
                            [] (const auto &p) { return std::string (p.name) == "FS_GCS_ENABLE"; }));
+    /* SYSID_MYGCS goes with the GCS-failsafe entry: it selects whose heartbeat
+     * that failsafe watches, so it means nothing when the failsafe itself is
+     * not being checked. */
+    REQUIRE (std::none_of (params.begin (), params.end (),
+                           [] (const auto &p) { return std::string (p.name) == "SYSID_MYGCS"; }));
+}
+
+/* todo/104. Every todo/91 check reduced to "this param must read nonzero",
+ * which an enable flag satisfies while the failsafe it enables goes on to
+ * continue the mission -- so the check passed on an airframe with no backstop.
+ * Each entry now judges its own value. */
+namespace
+{
+auto
+find_check (const std::vector<FailsafeParamCheck> &params, const std::string &name) -> const FailsafeParamCheck *
+{
+    auto it = std::find_if (params.begin (), params.end (), [&] (const auto &p) { return name == p.name; });
+    return it == params.end () ? nullptr : &*it;
+}
+} // namespace
+
+TEST_CASE ("expected_failsafe_params rejects a failsafe that fires and then continues the mission (todo/104)", "[mav]")
+{
+    SECTION ("Plane: FS_LONG_ACTN must be RTL, not the default Continue")
+    {
+        auto params = expected_failsafe_params (MAV_TYPE_FIXED_WING, terminate_action::none);
+        const auto *check = find_check (params, "FS_LONG_ACTN");
+        REQUIRE (check != nullptr);
+        /* 0 = Continue, the firmware default and the whole point of this item:
+         * the failsafe triggers and the aircraft carries on flying. */
+        REQUIRE_FALSE (check->accept (0.0F));
+        REQUIRE (check->accept (1.0F));
+    }
+
+    SECTION ("Plane: FS_GCS_ENABL=3 only fails safe in AUTO, and the FMU also flies GUIDED")
+    {
+        auto params = expected_failsafe_params (MAV_TYPE_FIXED_WING, terminate_action::none);
+        const auto *check = find_check (params, "FS_GCS_ENABL");
+        REQUIRE (check != nullptr);
+        REQUIRE_FALSE (check->accept (0.0F));
+        REQUIRE (check->accept (1.0F));
+        REQUIRE (check->accept (2.0F));
+        REQUIRE_FALSE (check->accept (3.0F));
+    }
+
+    SECTION ("Copter: FS_GCS_ENABLE=2 continues the mission, so nonzero is not enough")
+    {
+        auto params = expected_failsafe_params (MAV_TYPE_QUADROTOR, terminate_action::none);
+        const auto *check = find_check (params, "FS_GCS_ENABLE");
+        REQUIRE (check != nullptr);
+        REQUIRE_FALSE (check->accept (0.0F));
+        REQUIRE (check->accept (1.0F));
+        REQUIRE_FALSE (check->accept (2.0F));
+        REQUIRE (check->accept (3.0F));
+    }
+
+    SECTION ("Copter: FS_OPTIONS bit 1 is the same trap as FS_LONG_ACTN=0")
+    {
+        auto params = expected_failsafe_params (MAV_TYPE_QUADROTOR, terminate_action::none);
+        const auto *check = find_check (params, "FS_OPTIONS");
+        REQUIRE (check != nullptr);
+        REQUIRE (check->accept (0.0F));
+        /* Bit 0 and bit 2 are unrelated options; only bit 1 is the trap. */
+        REQUIRE (check->accept (1.0F));
+        REQUIRE_FALSE (check->accept (2.0F));
+        REQUIRE_FALSE (check->accept (3.0F));
+        REQUIRE (check->accept (4.0F));
+    }
+
+    SECTION ("Rover: FS_GCS_ENABLE=2 continues in Auto, and FS_ACTION's default is Hold")
+    {
+        auto params = expected_failsafe_params (MAV_TYPE_GROUND_ROVER, terminate_action::none);
+        const auto *enable = find_check (params, "FS_GCS_ENABLE");
+        REQUIRE (enable != nullptr);
+        REQUIRE (enable->accept (1.0F));
+        REQUIRE_FALSE (enable->accept (2.0F));
+
+        const auto *action = find_check (params, "FS_ACTION");
+        REQUIRE (action != nullptr);
+        REQUIRE_FALSE (action->accept (0.0F));
+        REQUIRE (action->accept (1.0F));
+        REQUIRE_FALSE (action->accept (2.0F));
+        REQUIRE (action->accept (3.0F));
+    }
+}
+
+TEST_CASE ("expected_failsafe_params requires the GCS failsafe to watch the FMU's own system id (todo/104)", "[mav]")
+{
+    /* Uniform across the families: the default (255) is MAVProxy's, which runs
+     * on the same companion computer, so an FMU process death leaves the
+     * autopilot seeing a perfectly healthy GCS. */
+    for (uint8_t type : { MAV_TYPE_FIXED_WING, MAV_TYPE_QUADROTOR, MAV_TYPE_GROUND_ROVER })
+    {
+        auto params = expected_failsafe_params (type, terminate_action::none);
+        const auto *check = find_check (params, "SYSID_MYGCS");
+        REQUIRE (check != nullptr);
+        REQUIRE (check->accept (static_cast<float> (fmu_gcs_sys_id)));
+        REQUIRE_FALSE (check->accept (255.0F));
+        REQUIRE_FALSE (check->accept (1.0F));
+    }
+}
+
+TEST_CASE ("the AFS checks still accept any nonzero value (todo/104 did not narrow them)", "[mav]")
+{
+    auto params = expected_failsafe_params (MAV_TYPE_QUADROTOR, terminate_action::terminate);
+    for (const char *name : { "AFS_ENABLE", "AFS_TERM_ACTION" })
+    {
+        const auto *check = find_check (params, name);
+        REQUIRE (check != nullptr);
+        REQUIRE_FALSE (check->accept (0.0F));
+        REQUIRE (check->accept (1.0F));
+        REQUIRE (check->accept (2.0F));
+    }
+}
+
+TEST_CASE ("every failsafe check carries a predicate and a warning (todo/104)", "[mav]")
+{
+    /* A null predicate would be dereferenced by checkFailsafeParamReply, and an
+     * empty warning would log a bare param name and value with no explanation. */
+    for (uint8_t type :
+         { uint8_t (MAV_TYPE_FIXED_WING), uint8_t (MAV_TYPE_QUADROTOR), uint8_t (MAV_TYPE_GROUND_ROVER), uint8_t (0) })
+    {
+        for (auto action : { terminate_action::none, terminate_action::disarm, terminate_action::terminate })
+        {
+            for (const auto &check : expected_failsafe_params (type, action))
+            {
+                REQUIRE (check.name != nullptr);
+                REQUIRE (check.accept != nullptr);
+                REQUIRE_FALSE (check.warning.empty ());
+                /* MAVLink's param_id field is 16 bytes; a longer name would be
+                 * silently truncated in the request and never answered. */
+                REQUIRE (std::string (check.name).size () <= 16);
+            }
+        }
+    }
 }
 
 TEST_CASE ("mission_item_for lays out a goto mission", "[mission]")

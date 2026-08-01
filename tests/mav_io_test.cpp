@@ -818,6 +818,34 @@ waitForColdStartThenUp (MavLoopbackServer &server, CommsRecorder &recorder) -> b
         io_timeout);
 }
 
+/* Every param_id the failsafe-config check has requested and not yet been read
+ * off the wire (todo/91, extended by todo/104). A single check now issues
+ * several PARAM_REQUEST_READs, so a test that pulled just the first message
+ * would be asserting on the order this list happens to be built in rather than
+ * on its contents. Blocks for io_timeout on the first, then drains whatever
+ * else has already arrived. */
+auto
+collectParamRequests (MavLoopbackServer &server) -> std::vector<std::string>
+{
+    std::vector<std::string> requested;
+    mavlink_message_t msg;
+    auto timeout = std::chrono::duration_cast<std::chrono::milliseconds> (io_timeout);
+    while (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, timeout))
+    {
+        char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
+        mavlink_msg_param_request_read_get_param_id (&msg, buf);
+        requested.emplace_back (buf);
+        timeout = no_message_timeout;
+    }
+    return requested;
+}
+
+auto
+requested (const std::vector<std::string> &params, const std::string &name) -> bool
+{
+    return std::find (params.begin (), params.end (), name) != params.end ();
+}
+
 } // namespace
 
 TEST_CASE ("mav_connection reports the link down at cold start, then up once a heartbeat arrives", "[mav_io]")
@@ -2584,25 +2612,16 @@ TEST_CASE ("todo/91: --terminate-action=disarm never requests AFS params, but st
     REQUIRE (server.waitForClient (io_timeout));
     REQUIRE (waitForColdStartThenUp (server, recorder));
 
-    mavlink_message_t msg;
-    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
-    std::vector<std::string> requested;
-    {
-        char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
-        mavlink_msg_param_request_read_get_param_id (&msg, buf);
-        requested.emplace_back (buf);
-    }
-    while (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, no_message_timeout))
-    {
-        char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
-        mavlink_msg_param_request_read_get_param_id (&msg, buf);
-        requested.emplace_back (buf);
-    }
+    auto params = collectParamRequests (server);
 
-    REQUIRE (std::find (requested.begin (), requested.end (), "AFS_ENABLE") == requested.end ());
-    REQUIRE (std::find (requested.begin (), requested.end (), "AFS_TERM_ACTION") == requested.end ());
+    REQUIRE_FALSE (requested (params, "AFS_ENABLE"));
+    REQUIRE_FALSE (requested (params, "AFS_TERM_ACTION"));
     /* waitForColdStartThenUp's heartbeats default to MAV_TYPE_QUADROTOR. */
-    REQUIRE (std::find (requested.begin (), requested.end (), "FS_GCS_ENABLE") != requested.end ());
+    REQUIRE (requested (params, "FS_GCS_ENABLE"));
+    /* todo/104's additions apply regardless of --terminate-action too: they
+     * back the comms-loss/low-battery latches, not termination. */
+    REQUIRE (requested (params, "FS_OPTIONS"));
+    REQUIRE (requested (params, "SYSID_MYGCS"));
 }
 
 TEST_CASE ("todo/91: the GCS-failsafe param name requested is airframe-specific", "[mav_io]")
@@ -2632,11 +2651,12 @@ TEST_CASE ("todo/91: the GCS-failsafe param name requested is airframe-specific"
         },
         io_timeout));
 
-    mavlink_message_t msg;
-    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
-    char buf[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
-    mavlink_msg_param_request_read_get_param_id (&msg, buf);
-    REQUIRE (std::string (buf) == "FS_GCS_ENABL");
+    auto params = collectParamRequests (server);
+    REQUIRE (requested (params, "FS_GCS_ENABL"));
+    REQUIRE_FALSE (requested (params, "FS_GCS_ENABLE"));
+    /* Plane-only: Copter encodes the same trap in FS_OPTIONS instead (todo/104). */
+    REQUIRE (requested (params, "FS_LONG_ACTN"));
+    REQUIRE_FALSE (requested (params, "FS_OPTIONS"));
 }
 
 TEST_CASE ("todo/91: the failsafe-config check re-runs if a later heartbeat reports a different autopilot type",
@@ -2654,21 +2674,14 @@ TEST_CASE ("todo/91: the failsafe-config check re-runs if a later heartbeat repo
     /* First heartbeat: MAV_TYPE_QUADROTOR, resolving to FS_GCS_ENABLE. */
     REQUIRE (waitForColdStartThenUp (server, recorder));
 
-    mavlink_message_t msg;
-    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
-    char buf1[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
-    mavlink_msg_param_request_read_get_param_id (&msg, buf1);
-    REQUIRE (std::string (buf1) == "FS_GCS_ENABLE");
+    REQUIRE (requested (collectParamRequests (server), "FS_GCS_ENABLE"));
 
     /* MAV_TYPE is fixed by firmware and never changes at runtime for a
      * genuine autopilot; this stands in for the todo/97 residual risk (a
      * second vehicle sharing this sysid on a hub) to prove the check
      * doesn't stay silent forever once latched for the first-seen type. */
     server.sendHeartbeat (MAV_TYPE_FIXED_WING);
-    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_PARAM_REQUEST_READ, msg, io_timeout));
-    char buf2[MAVLINK_MSG_PARAM_REQUEST_READ_FIELD_PARAM_ID_LEN + 1] = { 0 };
-    mavlink_msg_param_request_read_get_param_id (&msg, buf2);
-    REQUIRE (std::string (buf2) == "FS_GCS_ENABL");
+    REQUIRE (requested (collectParamRequests (server), "FS_GCS_ENABL"));
 }
 
 TEST_CASE ("todo/91: a disabled GCS/telemetry failsafe on the autopilot logs a distinct warning", "[mav_io]")
@@ -2688,4 +2701,107 @@ TEST_CASE ("todo/91: a disabled GCS/telemetry failsafe on the autopilot logs a d
      * resolves to FS_GCS_ENABLE. */
     server.sendParamValue ("FS_GCS_ENABLE", 0.0F);
     REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("FS_GCS_ENABLE=0"); }, io_timeout));
+}
+
+/* todo/104: the gap this closes is a *nonzero* value that still leaves no
+ * backstop -- the enable flag says the failsafe fires, not what it does. Each
+ * case below would have passed the todo/91 nonzero test in silence. */
+TEST_CASE ("todo/104: a GCS failsafe that continues the mission logs a warning despite being enabled", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::none);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    SECTION ("Copter: FS_GCS_ENABLE=2 continues the mission in AUTO")
+    {
+        server.sendParamValue ("FS_GCS_ENABLE", 2.0F);
+        REQUIRE (
+            MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("FS_GCS_ENABLE=2"); }, io_timeout));
+    }
+
+    SECTION ("Copter: FS_OPTIONS bit 1 set is the same trap")
+    {
+        server.sendParamValue ("FS_OPTIONS", 2.0F);
+        REQUIRE (
+            MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("FS_OPTIONS=2"); }, io_timeout));
+    }
+
+    SECTION ("SYSID_MYGCS at its 255 default watches MAVProxy, not the FMU")
+    {
+        server.sendParamValue ("SYSID_MYGCS", 255.0F);
+        REQUIRE (
+            MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("SYSID_MYGCS=255"); }, io_timeout));
+    }
+}
+
+TEST_CASE ("todo/104: Plane's FS_LONG_ACTN=0 warns even with FS_GCS_ENABL=1", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::none);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+
+    /* Cold start with a Plane heartbeat, so the check resolves to the Plane
+     * parameter set rather than waitForColdStartThenUp's quadrotor. */
+    REQUIRE (
+        MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendHeartbeat (MAV_TYPE_FIXED_WING);
+            return recorder.lastStatus () == MavCommsStatus::ok;
+        },
+        io_timeout));
+
+    /* Exactly the configuration todo/104 was filed about: the failsafe is
+     * enabled, and its action is the firmware default, Continue. */
+    server.sendParamValue ("FS_GCS_ENABL", 1.0F);
+    server.sendParamValue ("FS_LONG_ACTN", 0.0F);
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("FS_LONG_ACTN=0"); }, io_timeout));
+    REQUIRE_FALSE (capture.containsSubstring ("FS_GCS_ENABL="));
+}
+
+TEST_CASE ("todo/104: a fleet-configured airframe stays silent", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+    PositionRecorder positions;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture, terminate_action::none);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.registerPositionCB ([&positions] (const PositionData &pd) { positions.record (pd); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* The decided fleet configuration for a Copter (todo/103's table). */
+    server.sendParamValue ("FS_GCS_ENABLE", 1.0F);
+    server.sendParamValue ("FS_OPTIONS", 0.0F);
+    server.sendParamValue ("SYSID_MYGCS", 200.0F);
+    /* Same ordering argument as the AFS silence test above: once a position
+     * sent after them is echoed back, they have already been processed. */
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            server.sendPosition ();
+            return positions.count_at_least (1);
+        },
+        io_timeout));
+    REQUIRE_FALSE (capture.containsSubstring ("FS_GCS_ENABLE="));
+    REQUIRE_FALSE (capture.containsSubstring ("FS_OPTIONS="));
+    REQUIRE_FALSE (capture.containsSubstring ("SYSID_MYGCS="));
 }
