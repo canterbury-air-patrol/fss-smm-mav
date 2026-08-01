@@ -83,9 +83,9 @@ mav_connection::heartbeat_loop ()
             this->mav_comms_ok.store (up);
             if (!up)
             {
-                this->logger.log (LogLevel::error, std::string ("WARN: Autopilot link down (")
-                                                       + (fd_open ? "no heartbeat" : "no link")
-                                                       + ") — MAV comms failure");
+                this->logger.log (LogLevel::warning, std::string ("Autopilot link down (")
+                                                         + (fd_open ? "no heartbeat" : "no link")
+                                                         + ") — MAV comms failure");
                 if (fd_open)
                 {
                     /* A stale heartbeat on a socket that is still locally open is a
@@ -110,8 +110,8 @@ mav_connection::heartbeat_loop ()
                 }
                 if (goto_upload_lost)
                 {
-                    this->logger.log (LogLevel::error,
-                                      "WARN: MAV link lost with a goto mission upload in flight (MISSION_COUNT sent, "
+                    this->logger.log (LogLevel::warning,
+                                      "MAV link lost with a goto mission upload in flight (MISSION_COUNT sent, "
                                       "no MISSION_ACK) — the goto did not take effect");
                 }
             }
@@ -143,9 +143,9 @@ mav_connection::sendADSB (uint32_t icao_address, double lat, double lng, double 
 void
 mav_connection::warnUnresolvedMode (MavModeCommand command)
 {
-    this->logger.log (LogLevel::error, std::string ("WARN: ") + mav_mode_command_name (command)
-                                           + " command received before the autopilot type is known (no heartbeat "
-                                             "yet); deferring");
+    this->logger.log (LogLevel::warning, std::string (mav_mode_command_name (command))
+                                             + " command received before the autopilot type is known (no heartbeat "
+                                               "yet); deferring");
 }
 
 auto
@@ -174,9 +174,9 @@ mav_connection::invalidateInFlightUploadLocked () -> bool
 void
 mav_connection::logUploadInvalidated (const std::string &action_name)
 {
-    this->logger.log (LogLevel::error, "WARN: " + action_name
-                                           + " invalidated an in-flight goto/search mission upload; its "
-                                             "MISSION_ACK, if it arrives, will be ignored");
+    this->logger.log (LogLevel::warning, action_name
+                                             + " invalidated an in-flight goto/search mission upload; its "
+                                               "MISSION_ACK, if it arrives, will be ignored");
 }
 
 auto
@@ -331,8 +331,8 @@ mav_connection::commandGoto (Point p) -> bool
     }
     else
     {
-        this->logger.log (LogLevel::error,
-                          "WARN: goto MISSION_COUNT failed to send (MAV link down); goto did not take effect");
+        this->logger.log (LogLevel::warning,
+                          "goto MISSION_COUNT failed to send (MAV link down); goto did not take effect");
     }
     return sent;
 }
@@ -605,8 +605,8 @@ mav_connection::mission_ack (bool accepted)
     }
     if (stale_ack)
     {
-        this->logger.log (LogLevel::error,
-                          "WARN: accepted MISSION_ACK ignored — no goto/search upload was genuinely pending "
+        this->logger.log (LogLevel::warning,
+                          "accepted MISSION_ACK ignored — no goto/search upload was genuinely pending "
                           "(superseded by a newer safety-critical mode, already completed, or a duplicate delivery)");
     }
     if (goto_set_current)
@@ -651,9 +651,9 @@ mav_connection::loadSearch () -> bool
          * silently uploading a truncated mission with no idea why. */
         if (count > UINT16_MAX)
         {
-            this->logger.log (LogLevel::error, "WARN: search has " + std::to_string (this->search->getPoints ().size ())
-                                                   + " waypoints; mission count " + std::to_string (count)
-                                                   + " exceeds the 16-bit MAVLink field and will be truncated");
+            this->logger.log (LogLevel::warning, "search has " + std::to_string (this->search->getPoints ().size ())
+                                                     + " waypoints; mission count " + std::to_string (count)
+                                                     + " exceeds the 16-bit MAVLink field and will be truncated");
         }
     }
     {
@@ -738,7 +738,7 @@ mav_connection::checkFailsafeParamReply (const std::string &param_id, float valu
      * for. */
     if (match != params.end () && value == 0.0F)
     {
-        this->logger.log (LogLevel::error, match->warning);
+        this->logger.log (LogLevel::warning, match->warning);
     }
 }
 
@@ -783,8 +783,8 @@ mav_connection::noteTimeBootMs (uint32_t time_boot_ms)
 void
 mav_connection::handleAutopilotRestart ()
 {
-    this->logger.log (LogLevel::error,
-                      "WARN: Autopilot restart detected (time_boot_ms went backwards) — re-requesting streams and "
+    this->logger.log (LogLevel::warning,
+                      "Autopilot restart detected (time_boot_ms went backwards) — re-requesting streams and "
                       "re-applying commanded state");
     /* The reboot discarded the SET_MESSAGE_INTERVAL overrides and the
      * failsafe-config answers; re-arm both latches so the next message from the
@@ -1061,8 +1061,8 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
              * the old multi-field stdout dump fanned out across the operator
              * console and, for any unexpected high-rate stream, would behave as
              * a firehose at the default log level too. */
-            this->logger.log (LogLevel::debug, "WARN: unhandled MAVLink msg id " + std::to_string (msg->msgid)
-                                                   + " from sys " + std::to_string (msg->sysid) + " comp "
+            this->logger.log (LogLevel::debug, "unhandled MAVLink msg id " + std::to_string (msg->msgid) + " from sys "
+                                                   + std::to_string (msg->sysid) + " comp "
                                                    + std::to_string (msg->compid));
     }
 }
@@ -1174,9 +1174,9 @@ mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, soc
             = std::chrono::duration_cast<std::chrono::milliseconds> (deadline - std::chrono::steady_clock::now ());
         if (remaining.count () <= 0)
         {
-            this->logger.log (LogLevel::error, "WARN: Connect to " + this->addr + ":" + std::to_string (this->port)
-                                                   + " timed out after " + std::to_string (this->connect_timeout_ms)
-                                                   + "ms");
+            this->logger.log (LogLevel::warning, "Connect to " + this->addr + ":" + std::to_string (this->port)
+                                                     + " timed out after " + std::to_string (this->connect_timeout_ms)
+                                                     + "ms");
             return false;
         }
         struct pollfd pfd = { .fd = sock, .events = POLLOUT, .revents = 0 };
@@ -1192,9 +1192,9 @@ mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, soc
         }
         if (poll_rc == 0)
         {
-            this->logger.log (LogLevel::error, "WARN: Connect to " + this->addr + ":" + std::to_string (this->port)
-                                                   + " timed out after " + std::to_string (this->connect_timeout_ms)
-                                                   + "ms");
+            this->logger.log (LogLevel::warning, "Connect to " + this->addr + ":" + std::to_string (this->port)
+                                                     + " timed out after " + std::to_string (this->connect_timeout_ms)
+                                                     + "ms");
             return false;
         }
         break;
@@ -1391,7 +1391,7 @@ mav_connection::sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool
         if (transfered < 0)
         {
             /* Preserve the failure detail before tearing anything down. */
-            this->logger.log (LogLevel::error, std::string ("WARN: MAV send() failed: ") + std::strerror (errno));
+            this->logger.log (LogLevel::warning, std::string ("MAV send() failed: ") + std::strerror (errno));
             /* Only flag the connection broken and let the reconnector tear it
              * down. We must not call disconnect_from_mav() here: sendMavLinkMsg
              * can run on the recv thread (via processMessages), and that path

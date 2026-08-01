@@ -88,6 +88,27 @@ smm_cmd_name (SMMCommand cmd)
     return "unknown";
 }
 
+/* Rendered into every log line by Logger::log(), which is what lets call
+ * sites state severity once — in the level argument — instead of repeating
+ * it in the message text (todo/109). Upper case so it reads distinctly from
+ * the category tags (STATE/CMD/COMMS/...) that follow it. */
+inline const char *
+log_level_name (LogLevel level)
+{
+    switch (level)
+    {
+        case LogLevel::error:
+            return "ERROR";
+        case LogLevel::warning:
+            return "WARNING";
+        case LogLevel::info:
+            return "INFO";
+        case LogLevel::debug:
+            return "DEBUG";
+    }
+    return "UNKNOWN";
+}
+
 /* Every diagnostic (STATE/CMD/COMMS/BATTERY/...) formats and enqueues a line
  * from log() and returns immediately; a dedicated worker thread does the
  * actual write/flush/rotation. This mirrors SMM's and FSS's worker pattern

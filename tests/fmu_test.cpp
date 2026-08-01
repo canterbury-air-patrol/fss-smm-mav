@@ -2718,6 +2718,21 @@ TEST_CASE ("loadFmuConfig reads a custom log_dir and rejects bad ones", "[config
     REQUIRE (wrong_type.log_dir == def.log_dir);
 }
 
+/* todo/109: `warning` sits between error and info, so a config asking for it
+ * gets the degraded-but-handled lines without the full info stream. An
+ * unrecognised level must still fall back to the default rather than being
+ * coerced to the nearest match. */
+TEST_CASE ("loadFmuConfig reads every log level, including warning", "[config]")
+{
+    REQUIRE (load_config (R"({ "fmu": { "log_level": "error" } })").log_level == LogLevel::error);
+    REQUIRE (load_config (R"({ "fmu": { "log_level": "warning" } })").log_level == LogLevel::warning);
+    REQUIRE (load_config (R"({ "fmu": { "log_level": "info" } })").log_level == LogLevel::info);
+    REQUIRE (load_config (R"({ "fmu": { "log_level": "debug" } })").log_level == LogLevel::debug);
+
+    REQUIRE (load_config (R"({ "fmu": { "log_level": "warn" } })").log_level == def.log_level);
+    REQUIRE (load_config (R"({ "fmu": { "log_level": 3 } })").log_level == def.log_level);
+}
+
 TEST_CASE ("loadFmuConfig reads the MAV endpoint and fails hard on bad values", "[config]")
 {
     FmuConfig cfg = load_config (R"({ "fmu": { "mav_address": "10.0.0.2", "mav_port": 5762 } })");
@@ -2884,6 +2899,29 @@ TEST_CASE ("Logger rotates in-flight once the size threshold is exceeded", "[log
     REQUIRE (std::filesystem::exists (dir.logFile ()));
     REQUIRE (std::filesystem::exists (dir.logFile () + ".1"));
     REQUIRE (std::filesystem::file_size (dir.logFile ()) < 100);
+}
+
+/* todo/109: severity is stated once, by the level argument, and the line
+ * renders it — which is what lets call sites drop the "WARN:" prefixes that
+ * used to contradict the level they were logged at. */
+TEST_CASE ("Logger names each line's level and filters on it", "[logger]")
+{
+    TempLogDir dir;
+    Logger logger (dir.str (), LogLevel::warning);
+
+    logger.log (LogLevel::error, "an error");
+    logger.log (LogLevel::warning, "a warning");
+    /* Above the configured level: dropped, not merely untagged. */
+    logger.log (LogLevel::info, "an info");
+    logger.log (LogLevel::debug, "a debug");
+    logger.flush ();
+
+    std::ifstream check (dir.logFile ());
+    std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
+    REQUIRE (content.find ("ERROR an error") != std::string::npos);
+    REQUIRE (content.find ("WARNING a warning") != std::string::npos);
+    REQUIRE (content.find ("an info") == std::string::npos);
+    REQUIRE (content.find ("a debug") == std::string::npos);
 }
 
 TEST_CASE ("Logger in-flight rotation keeps writing after rotating", "[logger]")

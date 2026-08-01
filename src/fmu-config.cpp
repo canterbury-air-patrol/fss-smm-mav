@@ -271,6 +271,10 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         {
             cfg.log_level = LogLevel::error;
         }
+        else if (s == "warning")
+        {
+            cfg.log_level = LogLevel::warning;
+        }
         else if (s == "info")
         {
             cfg.log_level = LogLevel::info;
@@ -281,7 +285,7 @@ loadFmuConfig (const std::string &config_file) -> FmuConfig
         }
         else
         {
-            std::cerr << "Config: log_level (" << s << ") unknown (error|info|debug), using default\n";
+            std::cerr << "Config: log_level (" << s << ") unknown (error|warning|info|debug), using default\n";
         }
     }
 

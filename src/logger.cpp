@@ -108,16 +108,20 @@ void
 Logger::log (LogLevel msg_level, std::string_view msg)
 {
     /* Higher enum value == more verbose; drop anything above the configured
-     * level. The on-disk line format is unchanged so existing log consumers
-     * keep working regardless of level. */
+     * level. */
     if (msg_level > level)
     {
         return;
     }
     /* Formatting is pure CPU work (chrono + gmtime_r + ostringstream), not
      * I/O: safe to do on the caller's thread. The write itself is not
-     * (todo/88), so only the formatted line crosses onto the queue. */
-    std::string line = timestamp () + ' ' + std::string (msg) + '\n';
+     * (todo/88), so only the formatted line crosses onto the queue.
+     *
+     * The level goes in the line rather than in the message text (todo/109),
+     * so a call site states severity exactly once and the two cannot drift.
+     * This is the one change to the on-disk format: lines gained a level
+     * token between the timestamp and the message. */
+    std::string line = timestamp () + ' ' + log_level_name (msg_level) + ' ' + std::string (msg) + '\n';
     {
         std::lock_guard<std::mutex> lk (this->queue_lock);
         this->line_queue.push_back (std::move (line));
