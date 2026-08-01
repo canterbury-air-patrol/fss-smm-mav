@@ -154,12 +154,17 @@ the autopilot config the above depends on: `AFS_ENABLE`/`AFS_TERM_ACTION` when
 param in all cases (the backstop the comms-loss/low-battery RTL latches rely
 on while the MAV link is down). A mismatch logs a loud warning naming the
 missing config; it never blocks flight — the FMU only requests params, it
-never writes them. The GCS-failsafe param name is vehicle-firmware dependent
-(`FS_GCS_ENABL` for Plane, `FS_GCS_ENABLE` for Copter/Rover per current
-best-available knowledge) and has not been independently verified against
-real firmware for every airframe family — confirm it against your fleet's
-actual params if the check doesn't behave as expected; a wrong name simply
-means that one check silently doesn't fire, same as not checking at all.
+never writes them. The GCS-failsafe param name is vehicle-firmware dependent:
+`FS_GCS_ENABL` for Plane and `FS_GCS_ENABLE` for Copter are confirmed to
+exist and answer on ArduPilot 4.6 (read back by name with
+`tools/apconfig_check.py` against SITL — the same firmware source and
+parameter tables as an airframe, a different HAL). Rover's `FS_GCS_ENABLE`
+comes from `Rover/Parameters.cpp` and has never been requested from a
+running vehicle. None of that says your aircraft has the parameter set
+correctly, only that the name exists in 4.6 — confirm it against your
+fleet's actual params if the check doesn't behave as expected; a wrong name
+simply means that one check silently doesn't fire, same as not checking at
+all.
 
 That check is a last-chance warning, not a gate. Verifying the configuration
 is a ground activity — see below.
