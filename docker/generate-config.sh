@@ -106,6 +106,88 @@ if [ -n "${CLOCK_OFFSET_MS}" ] && ! [[ "${CLOCK_OFFSET_MS}" =~ ^-?[0-9]+$ ]]; th
     exit 1
 fi
 
+# The rest of the "fmu" block. Until now this script emitted only
+# mav_address/mav_port (+ log_dir), so a containerised aircraft always flew the
+# compiled-in defaults for every safety tunable -- including the regulatory
+# altitude cap, which is the one number most likely to differ between
+# jurisdictions and test flights. There was no way to change it short of
+# rebuilding the image.
+#
+# Each key below is omitted entirely when its variable is unset, so a deployment
+# that sets none of them reproduces the previous config byte-for-byte and keeps
+# FmuConfig's defaults as the single source of truth.
+#
+# Only well-formedness is checked here (an integer is an integer), NOT range.
+# loadFmuConfig already documents and enforces a range per key, warning and
+# falling back to the default; duplicating those bounds in shell would give two
+# authorities to drift apart. The exceptions are the two that are fatal in
+# loadFmuConfig rather than warn-and-default -- mav_address and mav_port,
+# validated above -- where failing before writing the config is strictly better
+# than failing after.
+FMU_EXTRA='{}'
+
+# Add "$1": <integer $2> to the optional fmu keys, if $2 is set.
+add_fmu_int () {
+    local key="$1" value="$2"
+    [ -n "${value}" ] || return 0
+    if ! [[ "${value}" =~ ^-?[0-9]+$ ]]; then
+        echo "Error: ${key} must be an integer (got '${value}')" >&2
+        exit 1
+    fi
+    FMU_EXTRA=$(jq -n --argjson base "${FMU_EXTRA}" --arg k "${key}" --argjson v "${value}" '$base + {($k): $v}')
+}
+
+# As add_fmu_int, but accepts a decimal (camera_fov_deg is a double).
+add_fmu_num () {
+    local key="$1" value="$2"
+    [ -n "${value}" ] || return 0
+    if ! [[ "${value}" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+        echo "Error: ${key} must be a number (got '${value}')" >&2
+        exit 1
+    fi
+    FMU_EXTRA=$(jq -n --argjson base "${FMU_EXTRA}" --arg k "${key}" --argjson v "${value}" '$base + {($k): $v}')
+}
+
+# As add_fmu_int, but for a string-valued key. --arg (not --argjson) so the
+# value is escaped rather than parsed.
+add_fmu_str () {
+    local key="$1" value="$2"
+    [ -n "${value}" ] || return 0
+    FMU_EXTRA=$(jq -n --argjson base "${FMU_EXTRA}" --arg k "${key}" --arg v "${value}" '$base + {($k): $v}')
+}
+
+# Altitudes: metres and feet variants both exist, and loadFmuConfig prefers feet
+# when both are given (warning about it), so both are passed through rather than
+# picking one here.
+add_fmu_int altitude_cap_m            "${ALTITUDE_CAP_M:-}"
+add_fmu_int altitude_cap_ft           "${ALTITUDE_CAP_FT:-}"
+add_fmu_int altitude_floor_m          "${ALTITUDE_FLOOR_M:-}"
+add_fmu_int altitude_floor_ft         "${ALTITUDE_FLOOR_FT:-}"
+add_fmu_int goto_altitude_m           "${GOTO_ALTITUDE_M:-}"
+add_fmu_int goto_altitude_ft          "${GOTO_ALTITUDE_FT:-}"
+add_fmu_int altitude_breach_latch_count "${ALTITUDE_BREACH_LATCH_COUNT:-}"
+
+# Battery.
+add_fmu_int lowbat_threshold          "${LOWBAT_THRESHOLD:-}"
+add_fmu_int low_battery_latch_count   "${LOW_BATTERY_LATCH_COUNT:-}"
+
+# Search geometry.
+add_fmu_num camera_fov_deg            "${CAMERA_FOV_DEG:-}"
+
+# Timing and link tuning.
+add_fmu_int reconnect_interval_s      "${RECONNECT_INTERVAL_S:-}"
+add_fmu_int position_stream_interval_ms "${POSITION_STREAM_INTERVAL_MS:-}"
+add_fmu_int battery_stream_interval_ms  "${BATTERY_STREAM_INTERVAL_MS:-}"
+add_fmu_int smm_position_report_interval_ms "${SMM_POSITION_REPORT_INTERVAL_MS:-}"
+add_fmu_int smm_connect_timeout_s     "${SMM_CONNECT_TIMEOUT_S:-}"
+add_fmu_int smm_transfer_timeout_s    "${SMM_TRANSFER_TIMEOUT_S:-}"
+add_fmu_int mav_connect_timeout_s     "${MAV_CONNECT_TIMEOUT_S:-}"
+add_fmu_int mav_send_timeout_s        "${MAV_SEND_TIMEOUT_S:-}"
+
+# Logging verbosity (error|warning|info|debug). Validated by loadFmuConfig,
+# which warns and keeps the default on an unrecognised value.
+add_fmu_str log_level                 "${LOG_LEVEL:-}"
+
 # jq -n builds the document from typed arguments: --arg values are always
 # emitted as properly-escaped JSON strings (a NAME/SERVER1_ADDR/MAVPROXY_HOST
 # containing a quote, backslash, or newline cannot break the document or
@@ -128,6 +210,7 @@ jq -n \
     --argjson mav_port "${MAVPROXY_PORT}" \
     --arg log_dir "${LOG_DIR}" \
     --argjson clock_offset_ms "${CLOCK_OFFSET_MS:-null}" \
+    --argjson fmu_extra "${FMU_EXTRA}" \
     '{
         name: $name,
         ssl: {
@@ -143,7 +226,8 @@ jq -n \
         fmu: ({
             mav_address: $mav_host,
             mav_port: $mav_port
-        } + (if $log_dir != "" then { log_dir: $log_dir } else {} end))
+        } + (if $log_dir != "" then { log_dir: $log_dir } else {} end)
+          + $fmu_extra)
     }' > "${CONFIG_FILE}"
 
 # Belt-and-braces: confirm the file we just wrote actually parses, rather than
