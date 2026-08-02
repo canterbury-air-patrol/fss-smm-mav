@@ -161,6 +161,56 @@ jobs:
         fi
         test ! -e "${CONFIG_FILE}"
 
+        # The FMU safety tunables. Previously the container could only set
+        # mav_address/mav_port, so an aircraft always flew the compiled-in
+        # altitude cap, battery thresholds and so on.
+        #
+        # Unset must stay absent, so a deployment setting none of them keeps
+        # FmuConfig's defaults as the single source of truth.
+        rm -f "${CONFIG_FILE}"
+        ./docker/generate-config.sh
+        for key in altitude_cap_ft altitude_cap_m lowbat_threshold camera_fov_deg log_level; do
+          test "$(jq -r --arg k "$key" '.fmu | has($k)' "${CONFIG_FILE}")" = "false"
+        done
+
+        # Set values must land in the fmu block with their JSON types intact:
+        # numbers as numbers (loadFmuConfig's isIntegral/isNumeric checks reject
+        # a quoted string), the one double as a double, log_level as a string.
+        rm -f "${CONFIG_FILE}"
+        ALTITUDE_CAP_FT=250 ALTITUDE_FLOOR_FT=40 GOTO_ALTITUDE_FT=180 \
+        ALTITUDE_BREACH_LATCH_COUNT=7 LOWBAT_THRESHOLD=25 LOW_BATTERY_LATCH_COUNT=6 \
+        CAMERA_FOV_DEG=62.2 RECONNECT_INTERVAL_S=15 POSITION_STREAM_INTERVAL_MS=100 \
+        BATTERY_STREAM_INTERVAL_MS=2000 SMM_POSITION_REPORT_INTERVAL_MS=500 \
+        SMM_CONNECT_TIMEOUT_S=8 SMM_TRANSFER_TIMEOUT_S=20 \
+        MAV_CONNECT_TIMEOUT_S=7 MAV_SEND_TIMEOUT_S=3 LOG_LEVEL=debug \
+          ./docker/generate-config.sh
+        test "$(jq -r '.fmu.altitude_cap_ft' "${CONFIG_FILE}")" = "250"
+        test "$(jq -r '.fmu.altitude_cap_ft | type' "${CONFIG_FILE}")" = "number"
+        test "$(jq -r '.fmu.camera_fov_deg' "${CONFIG_FILE}")" = "62.2"
+        test "$(jq -r '.fmu.camera_fov_deg | type' "${CONFIG_FILE}")" = "number"
+        test "$(jq -r '.fmu.log_level' "${CONFIG_FILE}")" = "debug"
+        test "$(jq -r '.fmu.log_level | type' "${CONFIG_FILE}")" = "string"
+        test "$(jq -r '.fmu.mav_send_timeout_s' "${CONFIG_FILE}")" = "3"
+        # mav_address/mav_port must survive alongside the added keys.
+        test "$(jq -r '.fmu.mav_port' "${CONFIG_FILE}")" = "5760"
+
+        # A non-numeric tunable must fail before anything is written, rather
+        # than producing malformed JSON (jq --argjson would abort mid-redirect).
+        rm -f "${CONFIG_FILE}"
+        if ALTITUDE_CAP_FT=four-hundred ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric ALTITUDE_CAP_FT" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
+
+        # A tunable value carrying JSON metacharacters must not be able to
+        # inject structure --- log_level goes through --arg, so it is escaped.
+        rm -f "${CONFIG_FILE}"
+        LOG_LEVEL='debug","injected":1' ./docker/generate-config.sh
+        jq empty "${CONFIG_FILE}"
+        test "$(jq -r '.fmu.log_level' "${CONFIG_FILE}")" = 'debug","injected":1'
+        test "$(jq -r '.fmu | has("injected")' "${CONFIG_FILE}")" = "false"
+
   distcheck:
     runs-on: ubuntu-latest
     container: debian:trixie

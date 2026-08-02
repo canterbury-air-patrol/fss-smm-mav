@@ -177,6 +177,53 @@ is a ground activity — see below.
 
 This requires [MAVProxy](https://ardupilot.org/mavproxy/) on the local device with `--tcpin:127.0.0.1:5760` you can adjust parameters as required to access a remote device.
 
+#### Running in Docker
+
+The `canterburyairpatrol/cap-fmu` image generates `client.json` at container
+start from environment variables (`docker/generate-config.sh`), so the file
+above is not mounted — it is rebuilt on every start and any hand edit is lost.
+
+Required:
+
+| Variable | Meaning |
+|---|---|
+| `TERMINATE_ACTION` | `none`, `disarm` or `terminate`; see `--terminate-action` above |
+| `NAME` | FSS asset/client name; also selects `/certs/<NAME>.{private,public}.pem` |
+| `MAVPROXY_HOST` / `MAVPROXY_PORT` | The MAVLink endpoint (`mav_address` / `mav_port`) |
+| `SERVER1_ADDR` / `SERVER1_PORT` | The FSS server |
+
+Optional: `SERVER2_ADDR` / `SERVER2_PORT` (a second, independent FSS server for
+redundancy), `LOG_DIR`, `CLOCK_OFFSET_MS`, and `RUN_IN_VALGRIND=yes`.
+
+Every key in the `fmu` block above also has an environment variable, named as
+the uppercased key — `ALTITUDE_CAP_FT`, `LOWBAT_THRESHOLD`, `CAMERA_FOV_DEG`,
+`LOG_LEVEL`, and so on for the whole table. **Each is omitted from the
+generated config unless set**, so a container that sets none of them runs on
+exactly the defaults documented above; the defaults live in `FmuConfig`, not
+duplicated in the entrypoint.
+
+This matters most for `ALTITUDE_CAP_FT`. The regulatory ceiling is the one
+number most likely to differ between jurisdictions, airframes and test flights,
+and until these variables existed the only way to change it in a container was
+to rebuild the image.
+
+`generate-config.sh` only checks that a value is well-formed (an integer is an
+integer) and fails before writing anything if it is not. The **ranges** are
+enforced by `loadFmuConfig`, which warns and falls back to the default for an
+out-of-range value — one authority for the bounds rather than two that can
+drift apart. So a rejected value shows up as a `Config:` warning at startup,
+not as a container that refuses to launch.
+
+```
+docker run \
+  -e TERMINATE_ACTION=none -e NAME=test-1 \
+  -e MAVPROXY_HOST=127.0.0.1 -e MAVPROXY_PORT=5760 \
+  -e SERVER1_ADDR=fss.example.org -e SERVER1_PORT=20202 \
+  -e ALTITUDE_CAP_FT=250 -e LOG_LEVEL=debug \
+  -v /path/to/certs:/certs \
+  canterburyairpatrol/cap-fmu
+```
+
 ## Required autopilot configuration
 
 The FMU relies on the autopilot's own GCS/telemetry failsafe as the backstop
