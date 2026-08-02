@@ -1,4 +1,10 @@
-FROM debian:bookworm
+# Must track the base image every job in .github/workflows/verify.yml runs on.
+# While this was bookworm and CI was trixie, the binary that actually flew was
+# compiled by a different toolchain against different library versions than
+# anything CI had ever exercised --- the gates were green for a build nobody
+# shipped. (bullseye -> bookworm in Jan 2025 was following the then-current
+# stable; CI moved on to trixie afterwards and this did not.)
+FROM debian:trixie
 
 # Update the database
 RUN apt update

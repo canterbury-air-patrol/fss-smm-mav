@@ -1,0 +1,405 @@
+name: Verify
+
+# The reusable half of CI: every gate that must be green for a commit to be
+# considered good. It has no triggers of its own --- two callers invoke it:
+#
+#   build.yml        push/PR to develop (the ordinary development gate)
+#   docker-build.yml before publishing an image
+#
+# Both callers check out and verify the *same* commit they act on, which is what
+# ties a DockerHub push to a tested SHA rather than to timing luck. Keeping the
+# jobs here rather than duplicating them means the publish gate cannot quietly
+# drift into testing less than development does.
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+
+    steps:
+    - name: Install git
+      run: |
+        apt-get update
+        apt-get install -y git
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Add CAP apt repository
+      run: |
+        apt-get update
+        apt-get install -y lsb-release ca-certificates curl gnupg
+        echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+          > /etc/apt/sources.list.d/cap.list
+        curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
+          | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
+        apt-get update
+
+    - name: Install dependencies
+      run: |
+        apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          catch2 \
+          libfss-client-ssl \
+          libsmm-asset-dev \
+          libjsoncpp-dev \
+          jq \
+          python3
+
+    - name: Build and test
+      run: |
+        autoreconf -fi
+        # --enable-tests makes Catch2 a hard requirement, so a runner that
+        # somehow ends up without it fails here, naming the missing package,
+        # instead of building a tree with no test suite in it.
+        ./configure --enable-tests
+        # VERBOSE=1 makes automake's test harness print test-suite.log (the
+        # failed tests' own output) into the job log on failure; otherwise the
+        # detail is lost when the runner is torn down.
+        make check VERBOSE=1
+
+    - name: Test-plan traceability
+      run: python3 tools/traceability.py --out traceability-report.json
+
+    # The config checker's expectations are deliberately free of pymavlink,
+    # so this needs nothing beyond the python3 installed above -- no
+    # aircraft, no simulator.
+    - name: Autopilot config checker unit tests
+      run: python3 -m unittest discover -s tools -p 'test_*.py' --verbose
+
+    - name: Upload traceability report
+      uses: actions/upload-artifact@v4
+      with:
+        name: traceability-report
+        path: traceability-report.json
+
+    - name: Smoke test (CLI and docker entrypoint scripts)
+      run: |
+        # The binary must start and handle --help/--version cleanly.
+        ./src/cap-fmu --help
+        ./src/cap-fmu --version
+        # A missing --terminate-action must fail (exit non-zero), matching the
+        # contract the Docker entrypoint now satisfies.
+        if ./src/cap-fmu; then echo "expected failure without --terminate-action" >&2; exit 1; fi
+        # The deployment scripts must at least parse.
+        bash -n docker/cap-fmu.sh
+        bash -n docker/generate-config.sh
+        bash -n docker/setup.sh
+        bash -n docker/build.sh
+        bash -n docker/install.sh
+
+    - name: Smoke test (docker config generation)
+      run: |
+        export CONFIG_FILE=/tmp/fmu-client-smoke-test.json
+        export TERMINATE_ACTION=none
+        export MAVPROXY_HOST=127.0.0.1
+        export MAVPROXY_PORT=5760
+        export SERVER1_ADDR=smm.example.org
+        export SERVER1_PORT=20202
+        # A name containing JSON-significant characters (quote, backslash) must
+        # not break the generated document or inject a field.
+        export NAME='weird"name\with/slash'
+
+        ./docker/generate-config.sh
+        jq empty "${CONFIG_FILE}"
+        # The escaped name must round-trip exactly, and be reused verbatim (not
+        # re-interpreted) in the derived cert paths.
+        test "$(jq -r '.name' "${CONFIG_FILE}")" = "${NAME}"
+        test "$(jq -r '.ssl.client_private_key' "${CONFIG_FILE}")" = "/certs/${NAME}.private.pem"
+        test "$(jq -r '.servers[0].port' "${CONFIG_FILE}")" = "20202"
+        test "$(jq -r '.fmu.mav_port' "${CONFIG_FILE}")" = "5760"
+        # log_dir is omitted unless LOG_DIR is set, so the default in
+        # FmuConfig (and the image's own /var/log/cap-fmu) applies.
+        test "$(jq -r '.fmu | has("log_dir")' "${CONFIG_FILE}")" = "false"
+
+        # LOG_DIR, when set, must appear in the generated config verbatim.
+        rm -f "${CONFIG_FILE}"
+        LOG_DIR=/mnt/logs/cap-fmu ./docker/generate-config.sh
+        test "$(jq -r '.fmu.log_dir' "${CONFIG_FILE}")" = "/mnt/logs/cap-fmu"
+
+        # An invalid SERVER1_PORT (previously unvalidated) must fail early,
+        # not write a config with a malformed or out-of-range port.
+        rm -f "${CONFIG_FILE}"
+        if SERVER1_PORT=not-a-port ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric SERVER1_PORT" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
+
+        # SERVER2_ADDR/PORT (Path D redundancy): optional second server,
+        # appended as a second servers[] entry.
+        rm -f "${CONFIG_FILE}"
+        SERVER2_ADDR=fss2.example.org SERVER2_PORT=20203 ./docker/generate-config.sh
+        test "$(jq -r '.servers | length' "${CONFIG_FILE}")" = "2"
+        test "$(jq -r '.servers[1].address' "${CONFIG_FILE}")" = "fss2.example.org"
+        test "$(jq -r '.servers[1].port' "${CONFIG_FILE}")" = "20203"
+
+        # An invalid SERVER2_PORT must fail early too, same as SERVER1_PORT.
+        rm -f "${CONFIG_FILE}"
+        if SERVER2_ADDR=fss2.example.org SERVER2_PORT=not-a-port ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric SERVER2_PORT" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
+
+        # clock_offset_ms is omitted unless CLOCK_OFFSET_MS is set,
+        # reproducing today's config byte-for-byte.
+        rm -f "${CONFIG_FILE}"
+        ./docker/generate-config.sh
+        test "$(jq -r 'has("clock_offset_ms")' "${CONFIG_FILE}")" = "false"
+
+        # CLOCK_OFFSET_MS, when set (including to a negative skew), must
+        # appear verbatim as a top-level integer key, not inside "fmu".
+        rm -f "${CONFIG_FILE}"
+        CLOCK_OFFSET_MS=-300000 ./docker/generate-config.sh
+        test "$(jq -r '.clock_offset_ms' "${CONFIG_FILE}")" = "-300000"
+        test "$(jq -r 'has("clock_offset_ms")' "${CONFIG_FILE}")" = "true"
+
+        # An invalid CLOCK_OFFSET_MS must fail early, not write a config with
+        # a non-numeric clock_offset_ms.
+        rm -f "${CONFIG_FILE}"
+        if CLOCK_OFFSET_MS=not-a-number ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric CLOCK_OFFSET_MS" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
+
+        # The FMU safety tunables. Previously the container could only set
+        # mav_address/mav_port, so an aircraft always flew the compiled-in
+        # altitude cap, battery thresholds and so on.
+        #
+        # Unset must stay absent, so a deployment setting none of them keeps
+        # FmuConfig's defaults as the single source of truth.
+        rm -f "${CONFIG_FILE}"
+        ./docker/generate-config.sh
+        for key in altitude_cap_ft altitude_cap_m lowbat_threshold camera_fov_deg log_level; do
+          test "$(jq -r --arg k "$key" '.fmu | has($k)' "${CONFIG_FILE}")" = "false"
+        done
+
+        # Set values must land in the fmu block with their JSON types intact:
+        # numbers as numbers (loadFmuConfig's isIntegral/isNumeric checks reject
+        # a quoted string), the one double as a double, log_level as a string.
+        rm -f "${CONFIG_FILE}"
+        ALTITUDE_CAP_FT=250 ALTITUDE_FLOOR_FT=40 GOTO_ALTITUDE_FT=180 \
+        ALTITUDE_BREACH_LATCH_COUNT=7 LOWBAT_THRESHOLD=25 LOW_BATTERY_LATCH_COUNT=6 \
+        CAMERA_FOV_DEG=62.2 RECONNECT_INTERVAL_S=15 POSITION_STREAM_INTERVAL_MS=100 \
+        BATTERY_STREAM_INTERVAL_MS=2000 SMM_POSITION_REPORT_INTERVAL_MS=500 \
+        SMM_CONNECT_TIMEOUT_S=8 SMM_TRANSFER_TIMEOUT_S=20 \
+        MAV_CONNECT_TIMEOUT_S=7 MAV_SEND_TIMEOUT_S=3 LOG_LEVEL=debug \
+          ./docker/generate-config.sh
+        test "$(jq -r '.fmu.altitude_cap_ft' "${CONFIG_FILE}")" = "250"
+        test "$(jq -r '.fmu.altitude_cap_ft | type' "${CONFIG_FILE}")" = "number"
+        test "$(jq -r '.fmu.camera_fov_deg' "${CONFIG_FILE}")" = "62.2"
+        test "$(jq -r '.fmu.camera_fov_deg | type' "${CONFIG_FILE}")" = "number"
+        test "$(jq -r '.fmu.log_level' "${CONFIG_FILE}")" = "debug"
+        test "$(jq -r '.fmu.log_level | type' "${CONFIG_FILE}")" = "string"
+        test "$(jq -r '.fmu.mav_send_timeout_s' "${CONFIG_FILE}")" = "3"
+        # mav_address/mav_port must survive alongside the added keys.
+        test "$(jq -r '.fmu.mav_port' "${CONFIG_FILE}")" = "5760"
+
+        # A non-numeric tunable must fail before anything is written, rather
+        # than producing malformed JSON (jq --argjson would abort mid-redirect).
+        rm -f "${CONFIG_FILE}"
+        if ALTITUDE_CAP_FT=four-hundred ./docker/generate-config.sh; then
+          echo "expected failure with a non-numeric ALTITUDE_CAP_FT" >&2
+          exit 1
+        fi
+        test ! -e "${CONFIG_FILE}"
+
+        # A tunable value carrying JSON metacharacters must not be able to
+        # inject structure --- log_level goes through --arg, so it is escaped.
+        rm -f "${CONFIG_FILE}"
+        LOG_LEVEL='debug","injected":1' ./docker/generate-config.sh
+        jq empty "${CONFIG_FILE}"
+        test "$(jq -r '.fmu.log_level' "${CONFIG_FILE}")" = 'debug","injected":1'
+        test "$(jq -r '.fmu | has("injected")' "${CONFIG_FILE}")" = "false"
+
+  distcheck:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+
+    steps:
+    - name: Install git
+      run: |
+        apt-get update
+        apt-get install -y git
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Add CAP apt repository
+      run: |
+        apt-get update
+        apt-get install -y lsb-release ca-certificates curl gnupg
+        echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+          > /etc/apt/sources.list.d/cap.list
+        curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
+          | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
+        apt-get update
+
+    - name: Install dependencies
+      run: |
+        apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          catch2 \
+          libfss-client-ssl \
+          libsmm-asset-dev \
+          libjsoncpp-dev
+
+    # make distcheck builds the release tarball, then configures/builds/tests it
+    # in a clean out-of-tree (VPATH) directory and checks install/uninstall. This
+    # catches a source or header that the build uses but a Makefile.am forgets to
+    # distribute (a _SOURCES/EXTRA_DIST omission) -- an in-tree `make check` finds
+    # the file in the working tree and so passes even when the tarball is broken.
+    - name: Distcheck (tarball builds out-of-tree)
+      run: |
+        autoreconf -fi
+        ./configure
+        # The tarball's own configure is the one whose `make check' runs the
+        # suite here, so it is the one that has to demand Catch2 -- otherwise a
+        # distcheck could pass having built and run no tests at all.
+        make distcheck DISTCHECK_CONFIGURE_FLAGS=--enable-tests
+
+    # distcheck proves the tarball *builds*; it says nothing about files that
+    # are shipped for a human rather than for the compiler. These were all
+    # missing from EXTRA_DIST at one point: the licence (a GPLv2 compliance
+    # problem), and tools/apconfig_check.py, which README documents as the way
+    # to verify the autopilot configuration every failsafe latch depends on.
+    - name: Release tarball carries the licence and the ground tools
+      run: |
+        make dist
+        tarball=$(ls -1 cap-fmu-*.tar.gz | head -1)
+        for want in LICENSE.md tools/apconfig_check.py check-code.sh; do
+          if ! tar tzf "${tarball}" | grep -qx "cap-fmu-[^/]*/${want}"; then
+            echo "::error::${want} is missing from ${tarball} (check EXTRA_DIST)"
+            exit 1
+          fi
+        done
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # AddressSanitizer, UndefinedBehaviorSanitizer and ThreadSanitizer each
+        # get their own job; ASan and TSan cannot be combined in one build.
+        sanitizer: [ asan, ubsan, tsan ]
+
+    steps:
+    - name: Install git
+      run: |
+        apt-get update
+        apt-get install -y git
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Add CAP apt repository
+      run: |
+        apt-get update
+        apt-get install -y lsb-release ca-certificates curl gnupg
+        echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+          > /etc/apt/sources.list.d/cap.list
+        curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
+          | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
+        apt-get update
+
+    - name: Install dependencies
+      run: |
+        apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          catch2 \
+          libfss-client-ssl \
+          libsmm-asset-dev \
+          libjsoncpp-dev
+
+    - name: Build and test (${{ matrix.sanitizer }})
+      env:
+        # Make any finding abort the run so the job fails loudly.
+        ASAN_OPTIONS: abort_on_error=1
+        UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        TSAN_OPTIONS: halt_on_error=1
+      run: |
+        autoreconf -fi
+        ./configure --enable-tests --enable-${{ matrix.sanitizer }}
+        # VERBOSE=1 makes automake's test harness print test-suite.log (the
+        # failed tests' own output, e.g. a TSan race report) into the job log
+        # on failure; otherwise the detail is lost when the runner is torn down.
+        make check VERBOSE=1
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+
+    steps:
+    - name: Install git
+      run: |
+        apt-get update
+        apt-get install -y git
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Add CAP apt repository
+      run: |
+        apt-get update
+        apt-get install -y lsb-release ca-certificates curl gnupg
+        echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" \
+          > /etc/apt/sources.list.d/cap.list
+        curl -fsSL https://apt.canterburyairpatrol.org/repository.key \
+          | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
+        apt-get update
+
+    - name: Install dependencies
+      run: |
+        apt-get install -y \
+          build-essential \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          catch2 \
+          libfss-client-ssl \
+          libsmm-asset-dev \
+          libjsoncpp-dev \
+          cppcheck \
+          clang-tidy \
+          shellcheck \
+          bear \
+          python3-venv
+
+    # clang-format output is version-dependent; pin the exact version the tree
+    # is formatted with so the formatting gate is reproducible.
+    - name: Install pinned clang-format
+      run: |
+        python3 -m venv /tmp/clang-format-venv
+        /tmp/clang-format-venv/bin/pip install -q clang-format==22.1.5
+
+    - name: Build with a compile database
+      run: |
+        autoreconf -fi
+        ./configure
+        bear -- make
+
+    - name: Static analysis (clang-format, cppcheck, clang-tidy)
+      run: CLANG_FORMAT=/tmp/clang-format-venv/bin/clang-format ./check-code.sh
