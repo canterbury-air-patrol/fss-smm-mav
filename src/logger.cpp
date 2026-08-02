@@ -1,5 +1,6 @@
 #include "logger.hpp"
 
+#include "log-rotation.hpp"
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -7,8 +8,8 @@
 #include <iostream>
 #include <sstream>
 
-Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes)
-    : log_path{}, file{}, level (t_level), max_log_bytes (max_bytes)
+Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes, std::size_t max_queued)
+    : log_path{}, file{}, level (t_level), max_log_bytes (max_bytes), max_queued_lines (max_queued)
 {
     std::string log_dir (dir);
     log_path = log_dir + "/fmu.log";
@@ -124,6 +125,17 @@ Logger::log (LogLevel msg_level, std::string_view msg)
     std::string line = timestamp () + ' ' + log_level_name (msg_level) + ' ' + std::string (msg) + '\n';
     {
         std::lock_guard<std::mutex> lk (this->queue_lock);
+        /* At the bound, drop the OLDEST queued line rather than refusing the
+         * new one. Whatever has wedged the log device will not be fixed by
+         * preserving the start of the backlog, and during an incident the most
+         * recent lines are the ones worth keeping. Blocking here instead is not
+         * an option: it would reintroduce exactly the event-loop stall that
+         * moving the I/O to this worker removed (todo/88). */
+        if (this->line_queue.size () >= this->max_queued_lines)
+        {
+            this->line_queue.pop_front ();
+            this->dropped_lines++;
+        }
         this->line_queue.push_back (std::move (line));
     }
     this->queue_cv.notify_one ();
@@ -138,13 +150,42 @@ Logger::writeLine (const std::string &line)
     }
     file << line;
     file.flush ();
-    bytes_written += line.size ();
+    bool write_ok = file.good ();
+    RotationState next = next_rotation_state (write_ok, bytes_written, line.size (), max_log_bytes);
+    bytes_written = next.bytes_written;
+    if (!write_ok)
+    {
+        /* The write did not reach the disk (full filesystem, disconnected
+         * mount, a revoked handle). Counting these bytes would drive the
+         * rotation below on output that does not exist, and rotation is
+         * destructive: every max_log_bytes of *failed* writes would shift
+         * fmu.log.1..5 along and discard fmu.log.5, so a disk-full event would
+         * quietly erase the existing log history while writing nothing in its
+         * place --- exactly when those logs matter most. Leave bytes_written
+         * alone so that cannot happen.
+         *
+         * clear() the error state so a transient failure can recover on the
+         * next line rather than latching logging off for the rest of the
+         * flight. */
+        file.clear ();
+        if (!write_failed)
+        {
+            write_failed = true;
+            std::cerr << "logger: write to " << log_path << " failed; log lines are being lost\n";
+        }
+        return;
+    }
+    if (write_failed)
+    {
+        write_failed = false;
+        std::cerr << "logger: writes to " << log_path << " have recovered\n";
+    }
     /* A long-running process previously rotated only at startup (so "5
      * rotations" retention was really "5 process starts"). Rotate here too
      * once the current file crosses the size threshold, same as a restart
      * would, so a long flight or a chatty debug level cannot grow the file
      * without bound. */
-    if (bytes_written >= max_log_bytes)
+    if (next.rotate)
     {
         openFresh ();
     }
@@ -156,6 +197,7 @@ Logger::workerLoop ()
     while (true)
     {
         std::string line;
+        std::size_t dropped = 0;
         {
             std::unique_lock<std::mutex> lk (this->queue_lock);
             this->queue_cv.wait (lk, [this] { return !this->line_queue.empty () || !this->worker_running; });
@@ -165,7 +207,20 @@ Logger::workerLoop ()
             }
             line = std::move (this->line_queue.front ());
             this->line_queue.pop_front ();
+            /* Claim any drops accumulated since the last marker, so they are
+             * reported exactly once even though log() may add more while the
+             * write below is in progress. */
+            dropped = this->dropped_lines;
+            this->dropped_lines = 0;
             this->busy = true;
+        }
+        if (dropped > 0)
+        {
+            /* Record the gap in the log itself. Written at error level: losing
+             * flight diagnostics is a failure, and the marker is what stops a
+             * reader mistaking the hole for a quiet period. */
+            this->writeLine (timestamp () + ' ' + log_level_name (LogLevel::error) + " LOG dropped "
+                             + std::to_string (dropped) + " line(s): the write queue reached its bound\n");
         }
         this->writeLine (line);
         {

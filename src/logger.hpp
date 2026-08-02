@@ -125,8 +125,21 @@ class Logger : public ILogger
      * in-flight; overridable (e.g. by tests) via the constructor. */
     static constexpr std::size_t default_max_log_bytes = 10UL * 1024 * 1024;
 
+    /* Default bound on lines waiting to be written. Moving the disk I/O off
+     * the event loop (todo/88) made log() non-blocking, but left the queue
+     * that absorbs the difference unbounded: a log_dir that stops accepting
+     * writes (full disk, disconnected mount, a hung network filesystem) does
+     * not slow the producers down, so the backlog grows for as long as the
+     * condition lasts. On a companion computer that is memory the flight
+     * software needs.
+     *
+     * ~10k lines is on the order of a megabyte of text and tens of seconds of
+     * backlog even at debug verbosity, so a transient stall is absorbed whole
+     * and only a genuinely stuck log device reaches the bound. */
+    static constexpr std::size_t default_max_queued_lines = 10000;
+
     explicit Logger (std::string_view dir, LogLevel level = LogLevel::info,
-                     std::size_t max_bytes = default_max_log_bytes);
+                     std::size_t max_bytes = default_max_log_bytes, std::size_t max_queued = default_max_queued_lines);
     Logger (const Logger &) = delete;
     Logger (Logger &&) = delete;
     auto operator= (const Logger &) -> Logger & = delete;
@@ -195,8 +208,13 @@ class Logger : public ILogger
      * worker rotates it like a restart would. */
     std::size_t max_log_bytes;
     /* Bytes written to the current file, tracked incrementally rather than
-     * stat-ing the file on every write. Worker-thread-only. */
+     * stat-ing the file on every write. Only successful writes count: a
+     * failed one must not advance this, or the rotation below would fire on
+     * bytes that never reached the disk. Worker-thread-only. */
     std::size_t bytes_written{ 0 };
+    /* Whether the last write attempt failed, so the stderr complaint is
+     * edge-triggered rather than repeated for every line. Worker-thread-only. */
+    bool write_failed{ false };
 
     /* Guards line_queue and busy (see below); queue_cv wakes the worker on a
      * new line or shutdown, idle_cv wakes flush() once the worker has fully
@@ -205,6 +223,14 @@ class Logger : public ILogger
     std::condition_variable queue_cv{};
     std::condition_variable idle_cv{};
     std::deque<std::string> line_queue{};
+    /* Bound on line_queue; see default_max_queued_lines. */
+    std::size_t max_queued_lines;
+    /* Lines discarded because the queue was at its bound, counted so the loss
+     * can be recorded in the log itself rather than happening silently --- a
+     * flight log with an unmarked hole in it is worse than one that says where
+     * the hole is. Reset once the worker has written the marker. Guarded by
+     * queue_lock. */
+    std::size_t dropped_lines{ 0 };
     bool worker_running{ true };
     /* Set by stopWorker() so a second call (e.g. Logger::~Logger() after a
      * subclass destructor already called it) is a no-op rather than trying
