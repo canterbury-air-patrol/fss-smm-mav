@@ -349,6 +349,16 @@ class mav_connection
     void setCurrentWP (uint16_t seq);
     void sendHeartBeat ();
     void heartbeat_loop ();
+    /* Upload the currently-held `search` and report whether the opening
+     * MISSION_COUNT reached the autopilot. Private, and reachable only through
+     * the public loadSearch(shared_ptr) overload below, which is what
+     * establishes the precondition this relies on: `search` is non-null. It was
+     * public, with MAV::setMode(flight_mode_search) as its only outside caller,
+     * and that caller dereferenced a null `search` on any path that had not
+     * already acquired one. Nothing issued flight_mode_search --- a search is
+     * driven through ISMM::search(), not as a mode --- so the enum member went
+     * with it. */
+    auto loadSearch () -> bool;
 
   public:
     mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger,
@@ -378,7 +388,6 @@ class mav_connection
     auto commandForceDisARM () -> bool;
     auto commandManual () -> bool;
     auto commandTerminate () -> bool;
-    auto loadSearch () -> bool;
     void sendADSB (uint32_t icao_address, double lat, double lng, double altitude_m, uint8_t altitude_type,
                    uint16_t heading, uint16_t hor_vel, uint16_t ver_vel, char *callsign, uint8_t emitter_type,
                    uint8_t tslc, uint16_t flags, uint16_t squawk);

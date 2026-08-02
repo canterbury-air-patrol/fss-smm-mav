@@ -20,9 +20,6 @@ MAV::setMode (flight_mode fm) -> bool
         case flight_mode_hold:
             /* Circle or similar */
             return this->connection->commandHold ();
-        case flight_mode_search:
-            /* Load the search */
-            return this->connection->loadSearch ();
         case flight_mode_unknown:
         case flight_mode_rtl:
             /* Enter RTL */

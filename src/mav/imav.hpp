@@ -6,11 +6,17 @@
 #include <cstdint>
 #include <memory>
 
+/* Deliberately has no "search" member. Entering a search is not a mode command:
+ * FMUStateMachine::actionState() drives fmu_state_searching through
+ * ISMM::search(), which owns the acquire and the mission upload, and the upload
+ * itself ends by commanding AUTO from the MISSION_ACK handler. A
+ * flight_mode_search did exist and reached mav_connection::loadSearch() with no
+ * search held, dereferencing a null shared_ptr; nothing ever issued it, so it
+ * was purely a way for a future caller to crash the FMU. */
 enum flight_mode
 {
     flight_mode_unknown,
     flight_mode_manual,
-    flight_mode_search,
     flight_mode_rtl,
     flight_mode_goto,
     flight_mode_hold,
