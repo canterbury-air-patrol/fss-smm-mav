@@ -9,7 +9,11 @@
 #include <sstream>
 
 Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes, std::size_t max_queued)
-    : log_path{}, file{}, level (t_level), max_log_bytes (max_bytes), max_queued_lines (max_queued)
+    /* Floor the bound at 1: log()'s drop-oldest step pops before it pushes, so
+     * a bound of 0 would pop from an empty deque. A caller asking for 0 wants
+     * "queue as little as possible", and 1 is the smallest bound that means
+     * anything. */
+    : log_path{}, file{}, level (t_level), max_log_bytes (max_bytes), max_queued_lines (max_queued > 0 ? max_queued : 1)
 {
     std::string log_dir (dir);
     log_path = log_dir + "/fmu.log";

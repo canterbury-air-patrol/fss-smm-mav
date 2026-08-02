@@ -3225,6 +3225,25 @@ TEST_CASE ("Logger bounds its write queue and records what it dropped", "[logger
     REQUIRE (content.find ("ERROR LOG dropped") != std::string::npos);
 }
 
+/* log() pops before it pushes, so a bound of zero would pop an empty deque.
+ * The constructor floors it at 1 rather than leaving that to the caller. */
+TEST_CASE ("Logger tolerates a zero queue bound", "[logger]")
+{
+    TempLogDir dir;
+    Logger logger (dir.str (), LogLevel::info, Logger::default_max_log_bytes, 0);
+
+    for (int i = 0; i < 20; i++)
+    {
+        logger.log ("line " + std::to_string (i));
+    }
+    logger.flush ();
+
+    /* The last line always survives: it is the one just pushed. */
+    std::ifstream check (dir.logFile ());
+    std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
+    REQUIRE (content.find ("line 19") != std::string::npos);
+}
+
 /* Rotation is destructive --- it shifts fmu.log.1..5 along and discards the
  * oldest --- so it must never be driven by bytes that did not reach the disk.
  * Otherwise a full or disconnected log device erases the existing log history
