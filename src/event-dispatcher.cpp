@@ -1,5 +1,6 @@
 #include "event-dispatcher.hpp"
 
+#include <iterator>
 #include <variant>
 
 namespace
@@ -23,6 +24,26 @@ void
 EventDispatcher::setNowMsFn (std::function<uint64_t ()> fn)
 {
     this->now_ms_fn = std::move (fn);
+}
+
+auto
+EventDispatcher::adsbThrottleEntries () const -> std::size_t
+{
+    return this->adsb_last_forwarded_ms.size ();
+}
+
+void
+EventDispatcher::pruneAdsbThrottle (uint64_t now)
+{
+    for (auto it = this->adsb_last_forwarded_ms.begin (); it != this->adsb_last_forwarded_ms.end ();)
+    {
+        /* Same comparison the forwarding decision makes, so an entry is only
+         * dropped once it would already permit the next forward. A timestamp
+         * somehow ahead of `now` wraps this unsigned subtraction to a huge
+         * value and is dropped too, which is the safe direction: it costs one
+         * unthrottled forward rather than suppressing an aircraft forever. */
+        it = (now - it->second >= adsb_forward_interval_ms) ? this->adsb_last_forwarded_ms.erase (it) : std::next (it);
+    }
 }
 
 void
@@ -190,7 +211,6 @@ EventDispatcher::dispatch (const event &e)
                      * second (todo/81): forward if this is the first sighting
                      * of this ICAO, or at least 1000ms has passed since the
                      * last forward. */
-                    static constexpr uint64_t adsb_forward_interval_ms = 1000;
                     uint32_t icao = oar.pd.getICAOAddress ();
                     uint64_t now = now_ms_fn ();
                     auto it = adsb_last_forwarded_ms.find (icao);
@@ -199,6 +219,11 @@ EventDispatcher::dispatch (const event &e)
                         mav.sendADSB (oar.pd);
                         adsb_last_forwarded_ms[icao] = now;
                     }
+                    /* Keep the throttle map sized by current traffic, not by
+                     * every address seen this flight. Done after the forward
+                     * above so the entry just written is never swept by its
+                     * own report. */
+                    pruneAdsbThrottle (now);
                 }
             },
             [] (const Nudge &) {},
