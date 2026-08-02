@@ -2167,16 +2167,26 @@ TEST_CASE ("a backwards jump in the autopilot's uptime is reported as a restart 
     std::sort (expected.begin (), expected.end ());
     REQUIRE (ids == expected);
 
-    /* Re-sending the same uptime is safe: equal values are not a regression, so
-     * the wait loop cannot itself trip the detector. */
+    /* Send an uptime until a position from *this* call has been processed.
+     * Re-sending the same uptime is safe: equal values are not a regression, so
+     * the loop cannot itself trip the detector.
+     *
+     * Each call marks its positions with its own longitude, and waits for that
+     * longitude to reach the callback. Waiting on the position count instead
+     * would not be a barrier at all: a message still queued from an earlier
+     * call can bump the count, ending the loop before anything it sent has been
+     * seen. */
+    int marker = 0;
     auto sendUptimeAndWait = [&] (uint32_t time_boot_ms)
     {
-        const int before = positions.count_now ();
+        /* Whole degrees apart, so no tolerance question arises. */
+        const int32_t lon = 1726000000 + (++marker) * 10000000;
+        const double want_lon = lon / 1.0e7;
         REQUIRE (MavLoopbackServer::waitFor (
             [&] ()
             {
-                server.sendPositionAt (time_boot_ms);
-                return positions.count_now () > before;
+                server.sendPositionAt (time_boot_ms, -435000000, lon);
+                return positions.lastPosition ().getP ().getLongitude () == Catch::Approx (want_lon);
             },
             io_timeout));
     };
@@ -2191,7 +2201,16 @@ TEST_CASE ("a backwards jump in the autopilot's uptime is reported as a restart 
     REQUIRE (capture.containsSubstring ("Autopilot restart detected"));
 
     /* The reboot discarded the runtime stream requests, so they are issued again
-     * on the next message from the autopilot. */
+     * on the *next* message from the autopilot: handleAutopilotRestart() re-arms
+     * the setup latch, but processMavLinkMsg() only tests that latch on entry,
+     * so the message that tripped the detector is already past it.
+     *
+     * Drive that next message explicitly rather than leaning on the wait loop
+     * above having happened to send a spare one — that is what made this case
+     * flake under tsan in CI, where the loop could exit having sent the
+     * post-reboot uptime exactly once. Observing the restart callback is enough
+     * to order this send after resetAllSetup(), which precedes it. */
+    server.sendPositionAt (1200);
     REQUIRE (recv_stream_requests (server) == expected);
 
     /* Exactly one restart: the post-reboot uptime becomes the new baseline, so
@@ -2220,15 +2239,24 @@ TEST_CASE ("SYSTEM_TIME feeds the restart detector, and only from the configured
     /* TCP delivery is ordered and mav_connection processes on a single recv
      * thread, so once a position sent afterwards is echoed back, everything
      * before it has been processed — the barrier every "and then nothing
-     * happened" assertion below relies on. */
+     * happened" assertion below relies on.
+     *
+     * That only holds if the position echoed back is one this call sent, so
+     * each marks its own with a distinct longitude (whole degrees apart, so no
+     * tolerance question arises). Waiting on the position count instead would
+     * let a message still queued from an earlier barrier end this one early,
+     * leaving the assertion that follows to run against state the FMU has not
+     * caught up with yet. */
+    int marker = 0;
     auto barrier = [&] ()
     {
-        const int before = positions.count_now ();
+        const int32_t lon = 1726000000 + (++marker) * 10000000;
+        const double want_lon = lon / 1.0e7;
         REQUIRE (MavLoopbackServer::waitFor (
             [&] ()
             {
-                server.sendPosition ();
-                return positions.count_now () > before;
+                server.sendPosition (-435000000, lon);
+                return positions.lastPosition ().getP ().getLongitude () == Catch::Approx (want_lon);
             },
             io_timeout));
     };
