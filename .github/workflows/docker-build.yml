@@ -10,7 +10,25 @@ on:
       - '[0-9]*'
 
 jobs:
+  # Publication used to be independent of verification. Both workflows triggered
+  # on a push to develop, but GitHub Actions imposes no ordering or success
+  # dependency between separate workflows, so a commit that compiled but failed
+  # its tests could publish `latest` --- sometimes before the failure was even
+  # visible. Release branches and tags were worse: Build and Test never ran for
+  # those refs at all, so the refs that become actual releases were the ones
+  # with no verification behind them.
+  #
+  # `needs: verify` on the same checked-out SHA closes both. This runs the full
+  # gate set (unit tests, distcheck, ASan/UBSan/TSan, static analysis) for
+  # release branches and tags too, which is what docs/decisions.md's note about
+  # develop-only triggers deliberately left open: that decision is about not
+  # adding redundant *branch* triggers to Build and Test, not about publishing
+  # unverified artifacts.
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   docker:
+    needs: verify
     runs-on: ubuntu-latest
 
     steps:
@@ -22,12 +40,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Log in to DockerHub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Compute image tags
         id: tags
@@ -48,18 +60,66 @@ jobs:
             echo "tags=${IMAGE}:${ver}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build and push
+      - name: No tags computed
+        if: ${{ steps.tags.outputs.tags == '' }}
+        run: |
+          echo "::error::No tags were computed for ref ${GITHUB_REF}; refusing to build."
+          exit 1
+
+      # Build into the local daemon first and smoke-test the *artifact* rather
+      # than a host build of the same source. The push below reuses this build
+      # from cache, so this costs a load, not a second compile.
+      - name: Build image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
-          push: ${{ steps.tags.outputs.tags != '' }}
-          tags: ${{ steps.tags.outputs.tags }}
+          load: true
+          tags: cap-fmu:ci-smoke
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Verify push succeeded
-        if: ${{ steps.tags.outputs.tags == '' }}
+      - name: Smoke test the built image
         run: |
-          echo "::error::No tags were computed for ref ${GITHUB_REF} — image was built but not pushed."
-          exit 1
+          # The entrypoint refuses to start without a valid TERMINATE_ACTION, so
+          # drive the binary directly for the CLI checks.
+          docker run --rm --entrypoint /src/src/cap-fmu cap-fmu:ci-smoke --version
+          docker run --rm --entrypoint /src/src/cap-fmu cap-fmu:ci-smoke --help
+
+          # The entrypoint must fail loudly on a missing TERMINATE_ACTION rather
+          # than launching with an unset flight-termination action.
+          if docker run --rm cap-fmu:ci-smoke; then
+            echo "::error::entrypoint started with no TERMINATE_ACTION set"
+            exit 1
+          fi
+
+          # Config generation must work as the unprivileged runtime user against
+          # the image's real config path --- the failure mode that a host-side
+          # run of generate-config.sh cannot reproduce.
+          docker run --rm \
+            -e TERMINATE_ACTION=none \
+            -e MAVPROXY_HOST=127.0.0.1 -e MAVPROXY_PORT=5760 \
+            -e NAME=ci-smoke \
+            -e SERVER1_ADDR=fss.example.org -e SERVER1_PORT=20202 \
+            --entrypoint /home/autopilot/scripts/generate-config.sh \
+            cap-fmu:ci-smoke
+          # The default log directory must be writable by the runtime user, or
+          # logging silently disables itself.
+          docker run --rm --entrypoint sh cap-fmu:ci-smoke \
+            -c 'test -w /var/log/cap-fmu'
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
