@@ -209,6 +209,22 @@ jobs:
         ./configure
         make distcheck
 
+    # distcheck proves the tarball *builds*; it says nothing about files that
+    # are shipped for a human rather than for the compiler. These were all
+    # missing from EXTRA_DIST at one point: the licence (a GPLv2 compliance
+    # problem), and tools/apconfig_check.py, which README documents as the way
+    # to verify the autopilot configuration every failsafe latch depends on.
+    - name: Release tarball carries the licence and the ground tools
+      run: |
+        make dist
+        tarball=$(ls -1 cap-fmu-*.tar.gz | head -1)
+        for want in LICENSE.md tools/apconfig_check.py check-code.sh; do
+          if ! tar tzf "${tarball}" | grep -qx "cap-fmu-[^/]*/${want}"; then
+            echo "::error::${want} is missing from ${tarball} (check EXTRA_DIST)"
+            exit 1
+          fi
+        done
+
   sanitizers:
     runs-on: ubuntu-latest
     container: debian:trixie
