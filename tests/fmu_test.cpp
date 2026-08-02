@@ -3577,6 +3577,51 @@ TEST_CASE ("EventDispatcher throttles ADS-B rebroadcast to one per ICAO address 
     REQUIRE (f.mav->send_adsb_calls == 3);
 }
 
+/* The throttle map must be sized by current traffic, not by every ICAO address
+ * seen this flight. It was documented as "one entry per distinct aircraft ever
+ * seen", which is not what happens: a peer that reports no ICAO address is
+ * given a synthetic one by known_aircraft, which evicts an aircraft after five
+ * quiet minutes and allocates a *fresh* synthetic address when it returns, so
+ * one aircraft drifting in and out of range accumulated an entry per
+ * reappearance. */
+TEST_CASE ("EventDispatcher prunes ADS-B throttle entries that can no longer throttle", "[event_dispatcher]")
+{
+    auto f = make_dispatcher ("MYCALL", 20);
+
+    /* A burst of distinct aircraft, each seen exactly once --- the pattern a
+     * long flight past changing traffic produces. */
+    for (uint32_t i = 0; i < 200; i++)
+    {
+        PositionData pd (0.0, 0.0, 100.0, 0, 0, 0, "TRAFFIC", 0, 0x100000 + i, 0, 0, 0, 0);
+        event e = OtherAircraftReport{ pd };
+        f.dispatcher->dispatch (e);
+        f.clock->advance (adsb_forward_interval_ms);
+    }
+    REQUIRE (f.mav->send_adsb_calls == 200);
+    /* Every one of those entries is older than the forward interval by now, so
+     * none of them can suppress anything: at most the most recent survives. */
+    REQUIRE (f.dispatcher->adsbThrottleEntries () <= 1);
+
+    /* Pruning must not weaken the throttle for aircraft still being seen: two
+     * aircraft reporting inside the same interval are both still tracked, and
+     * the second report of each is still suppressed. */
+    int before = f.mav->send_adsb_calls;
+    PositionData x (0.0, 0.0, 100.0, 0, 0, 0, "XXX", 0, 0x0C0C0C, 0, 0, 0, 0);
+    PositionData y (0.0, 0.0, 100.0, 0, 0, 0, "YYY", 0, 0x0D0D0D, 0, 0, 0, 0);
+    event ex = OtherAircraftReport{ x };
+    event ey = OtherAircraftReport{ y };
+    f.dispatcher->dispatch (ex);
+    f.dispatcher->dispatch (ey);
+    REQUIRE (f.mav->send_adsb_calls == before + 2);
+    REQUIRE (f.dispatcher->adsbThrottleEntries () == 2);
+
+    f.clock->advance (adsb_forward_interval_ms - 1);
+    f.dispatcher->dispatch (ex);
+    f.dispatcher->dispatch (ey);
+    REQUIRE (f.mav->send_adsb_calls == before + 2);
+    REQUIRE (f.dispatcher->adsbThrottleEntries () == 2);
+}
+
 /* todo/85: a peer's ADS-B coordinates are untrusted. A non-finite/out-of-range
  * one must be dropped before rebroadcast rather than forwarded (even clamped)
  * to the autopilot's collision-avoidance, or counted against the per-ICAO
