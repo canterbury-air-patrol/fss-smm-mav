@@ -10,10 +10,15 @@ export CONFIG_FILE
 # generated config without launching cap-fmu itself.
 "${SCRIPT_DIR}/generate-config.sh"
 
-DEBUGGER=
+# An array, not a string: `DEBUGGER=valgrind --leak-check=full -v` parses as an
+# assignment *prefix* to the command `--leak-check=full`, which under this
+# script's `set -e` aborted the entrypoint with 127 before cap-fmu ever started.
+# An empty array expands to no words at all, so the non-valgrind path runs the
+# binary directly.
+DEBUGGER=()
 if [ "${RUN_IN_VALGRIND}" == "yes" ]
 then
-    DEBUGGER=valgrind --leak-check=full -v
+    DEBUGGER=(valgrind --leak-check=full -v)
 fi
 
-${DEBUGGER} /src/src/cap-fmu --terminate-action="${TERMINATE_ACTION}" "${CONFIG_FILE}"
+"${DEBUGGER[@]}" /src/src/cap-fmu --terminate-action="${TERMINATE_ACTION}" "${CONFIG_FILE}"

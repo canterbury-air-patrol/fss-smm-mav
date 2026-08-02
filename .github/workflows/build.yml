@@ -305,6 +305,7 @@ jobs:
           libjsoncpp-dev \
           cppcheck \
           clang-tidy \
+          shellcheck \
           bear \
           python3-venv
 
