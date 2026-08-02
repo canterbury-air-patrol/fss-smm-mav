@@ -10,6 +10,7 @@
 #include "fss/command-ack-group.hpp"
 #include "fss/command-ack.hpp"
 #include "fss/ifss.hpp"
+#include "log-rotation.hpp"
 #include "logger.hpp"
 #include "mav/battery-voltage.hpp"
 #include "mav/failsafe-params.hpp"
@@ -3172,6 +3173,88 @@ TEST_CASE ("Logger::log() does not block on a stalled write", "[logger]")
         std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
         REQUIRE (content.find ("hello") != std::string::npos);
     }
+}
+
+/* The queue that makes log() non-blocking (todo/88) has to be bounded, or a
+ * log_dir that stops accepting writes turns "never block the producer" into
+ * "grow until the companion computer runs out of memory". BlockingLogger holds
+ * the worker inside a write, which is exactly the stalled-device condition, so
+ * the backlog can be built up deterministically. */
+TEST_CASE ("Logger bounds its write queue and records what it dropped", "[logger]")
+{
+    TempLogDir dir;
+    /* Bound of 4 queued lines so the test needs a handful, not thousands. */
+    BlockingLogger logger (dir.str (), LogLevel::info, Logger::default_max_log_bytes, 4);
+
+    logger.log ("first");
+    /* Wait for the worker to take "first" and stall inside the write, so the
+     * remaining lines genuinely queue up behind it. */
+    while (!logger.write_started.load ())
+    {
+        std::this_thread::yield ();
+    }
+
+    /* Fill the queue to its bound, then overrun it. keep-1..keep-4 are the last
+     * four enqueued, so they are what must survive; drop-1/drop-2 are pushed
+     * out from the front. */
+    logger.log ("drop-1");
+    logger.log ("drop-2");
+    logger.log ("keep-1");
+    logger.log ("keep-2");
+    logger.log ("keep-3");
+    logger.log ("keep-4");
+
+    logger.release_write.set_value ();
+    logger.flush ();
+
+    std::ifstream check (dir.logFile ());
+    std::string content ((std::istreambuf_iterator<char> (check)), std::istreambuf_iterator<char> ());
+
+    /* The oldest queued lines are the ones discarded: during an incident the
+     * most recent lines are the ones worth keeping. */
+    REQUIRE (content.find ("drop-1") == std::string::npos);
+    REQUIRE (content.find ("drop-2") == std::string::npos);
+    for (const auto *kept : { "first", "keep-1", "keep-2", "keep-3", "keep-4" })
+    {
+        REQUIRE (content.find (kept) != std::string::npos);
+    }
+
+    /* The loss must be recorded in the log, so a reader cannot mistake the hole
+     * for a quiet period. */
+    REQUIRE (content.find ("LOG dropped 2 line(s)") != std::string::npos);
+    REQUIRE (content.find ("ERROR LOG dropped") != std::string::npos);
+}
+
+/* Rotation is destructive --- it shifts fmu.log.1..5 along and discards the
+ * oldest --- so it must never be driven by bytes that did not reach the disk.
+ * Otherwise a full or disconnected log device erases the existing log history
+ * while writing nothing to replace it, at exactly the moment those logs matter.
+ * next_rotation_state() is the decision, factored out of writeLine() so it can
+ * be checked without a real failing filesystem. */
+TEST_CASE ("A failed write neither counts bytes nor triggers rotation", "[logger]")
+{
+    /* A successful write accumulates and rotates at the threshold. */
+    REQUIRE (next_rotation_state (true, 0, 40, 100).bytes_written == 40);
+    REQUIRE_FALSE (next_rotation_state (true, 0, 40, 100).rotate);
+    REQUIRE (next_rotation_state (true, 60, 40, 100).rotate);
+    REQUIRE (next_rotation_state (true, 60, 40, 100).bytes_written == 100);
+
+    /* A failed one does neither, however large the line or however close to
+     * the threshold the file already is. */
+    REQUIRE (next_rotation_state (false, 60, 40, 100).bytes_written == 60);
+    REQUIRE_FALSE (next_rotation_state (false, 60, 40, 100).rotate);
+    REQUIRE_FALSE (next_rotation_state (false, 99, 1000000, 100).rotate);
+    REQUIRE (next_rotation_state (false, 99, 1000000, 100).bytes_written == 99);
+
+    /* Repeated failures cannot creep the count towards the threshold either. */
+    std::size_t bytes = 0;
+    for (int i = 0; i < 1000; i++)
+    {
+        RotationState next = next_rotation_state (false, bytes, 50, 100);
+        bytes = next.bytes_written;
+        REQUIRE_FALSE (next.rotate);
+    }
+    REQUIRE (bytes == 0);
 }
 
 /* todo/59 acceptance: a subsystem's runtime diagnostic must reach the
