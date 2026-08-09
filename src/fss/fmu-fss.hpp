@@ -29,20 +29,19 @@ class FSS : public IFSSReporter
      * connection's TCP_USER_TIMEOUT (30s, set in the transport) errors it out.
      * Doing these on the event-loop thread would therefore stall queued
      * rtl/terminate commands behind a hung peer for up to ~30s. The worker below
-     * takes the same treatment SMM got (todo/33): the public report/postAck
-     * methods only enqueue a task and return, and this thread does the blocking
-     * send.
+     * takes the same treatment SMM got: the public report/postAck methods only
+     * enqueue a task and return, and this thread does the blocking send.
      *
      * The four paths are no longer alike upstream. position/reached/battery fan
      * out through fss_client::sendMsgAll(), which as of the client library's
-     * todo/66 (docs/decisions/66-67-client-outbound-fanout.md) packs once and
-     * hands the frame to each server's own outbound worker — non-blocking, with
-     * a bounded drop-oldest queue per server. The second-phase command ack is a
-     * *per-connection* sendMsg() on the originating connection, which that
-     * decision deliberately keeps inline, so it stays blocking. The floor is
-     * now fss-client-ssl >= 1.3.0, which is that release — so the ack is the
-     * path that still earns this worker, and it is the one that closes the loop
-     * on an operator's rtl/terminate. */
+     * 1.3.0 outbound-fan-out rework packs once and hands the frame to each
+     * server's own outbound worker — non-blocking, with a bounded drop-oldest
+     * queue per server. The second-phase command ack is a *per-connection*
+     * sendMsg() on the originating connection, which that decision deliberately
+     * keeps inline, so it stays blocking. The floor is now fss-client-ssl >=
+     * 1.3.0, which is that release — so the ack is the path that still earns
+     * this worker, and it is the one that closes the loop on an operator's
+     * rtl/terminate. */
     struct FssPositionTask
     {
         double lat{ 0.0 };
@@ -51,9 +50,9 @@ class FSS : public IFSSReporter
         uint16_t heading{ 0 };
         uint16_t hor_vel{ 0 };
         int16_t ver_vel{ 0 };
-        /* Whether lat/lng are backed by a valid GPS fix (todo/79); forwarded to
-         * the wire report's valid_fields so FSS-Web can show "no fix" instead of
-         * a stale position re-reported as current. */
+        /* Whether lat/lng are backed by a valid GPS fix; forwarded to the wire
+         * report's valid_fields so FSS-Web can show "no fix" instead of a stale
+         * position re-reported as current. */
         bool fix_valid{ true };
     };
     struct FssReachedTask
@@ -91,10 +90,10 @@ class FSS : public IFSSReporter
   protected:
     /* Seams over the blocking sends the worker makes, so a test can make one
      * slow and observable without a live peer (the same shape as SMM's
-     * fetchSearch/reportPositionToSmm seams, todo/33). Defaults call straight
-     * through. Each guards ssl_client itself rather than the dispatch guarding
-     * it once: sendAck runs a plain closure and has nothing to do with the
-     * client, so it must still fire when there is no client at all. */
+     * fetchSearch/reportPositionToSmm seams). Defaults call straight through.
+     * Each guards ssl_client itself rather than the dispatch guarding it once:
+     * sendAck runs a plain closure and has nothing to do with the client, so
+     * it must still fire when there is no client at all. */
     virtual void sendPosition (const FssPositionTask &t);
     virtual void sendReached (const FssReachedTask &t);
     virtual void sendBattery (const FssBatteryTask &t);

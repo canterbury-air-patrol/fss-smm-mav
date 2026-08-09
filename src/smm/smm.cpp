@@ -191,13 +191,13 @@ SMM::connect ()
         return;
     }
 
-    /* Bound how long any single SMM request can block. The library defaults
-     * (30s connect / 60s transfer) are far too long for a flight-safety loop:
-     * SMM I/O runs on the worker thread (public methods enqueue and return, so
-     * queued FSS commands are never blocked on SMM HTTP — todo/33), but an
-     * unbounded call would still pin the worker for the full TCP window, delaying
-     * shutdown, the search-acquire retry, and any SMM work queued behind it. Set
-     * before the login below so even the login is bounded. */
+    /* Bound how long any single SMM request can block. The library defaults (30s
+     * connect / 60s transfer) are far too long for a flight-safety loop: SMM I/O
+     * runs on the worker thread (public methods enqueue and return, so queued FSS
+     * commands are never blocked on SMM HTTP), but an unbounded call would still
+     * pin the worker for the full TCP window, delaying shutdown, the
+     * search-acquire retry, and any SMM work queued behind it. Set before the
+     * login below so even the login is bounded. */
     smm_asset_connection_timeouts_set (this->conn, this->connect_timeout_s, this->transfer_timeout_s);
 
     /* smm_asset_connect() only validates the host; the library authenticates
@@ -295,14 +295,14 @@ SMM::doReportPosition (PositionData t_pd)
              * the last position-report response (the library doc comment: "is
              * set in response to a position report; normally this is checked
              * after smm_asset_report_position"), so checking the cached value
-             * from the PREVIOUS report here -- rather than after the call
-             * below -- costs at most one report interval of extra latency
-             * (operator commands are latched server-side and are not
-             * sub-second time-critical), in exchange for keeping this the
-             * only virtual call in this block before the one report_calls-style
-             * test doubles (mav_io_test.cpp's TestSMM) synchronise on: putting
-             * it after would leave a virtual dispatch racing a test's
-             * destructor the instant reportPositionToSmm() returns (todo/90). */
+             * from the PREVIOUS report here -- rather than after the call below
+             * -- costs at most one report interval of extra latency (operator
+             * commands are latched server-side and are not sub-second
+             * time-critical), in exchange for keeping this the only virtual call
+             * in this block before the one report_calls-style test doubles
+             * (mav_io_test.cpp's TestSMM) synchronise on: putting it after would
+             * leave a virtual dispatch racing a test's destructor the instant
+             * reportPositionToSmm() returns. */
             this->checkOperatorCommand ();
 
             Point p = t_pd.getP ();
@@ -319,9 +319,9 @@ SMM::doReportPosition (PositionData t_pd)
     /* Opportunistic retry: a fresh position arrived, so use it to (re)attempt
      * acquisition. This is one of two retry triggers; retryPendingSearch() drives
      * the other off the reconnect timer so a search is still retried when position
-     * reports stop (see todo/41). checkOperatorCommand() above may just have
-     * dropped a held search (abandon-search), so this also serves as its
-     * immediate reacquire attempt. */
+     * reports stop. checkOperatorCommand() above may just have dropped a held
+     * search (abandon-search), so this also serves as its immediate reacquire
+     * attempt. */
     this->maybeAcquire (t_pd.getP ());
 }
 
@@ -422,9 +422,9 @@ SMM::publishSearch (std::shared_ptr<SMMSearch> acquired)
  * acquire state); a resulting flight action is reported via the rtl_cb /
  * load_search_cb callbacks, which the App applies on the event loop only while
  * still searching. search_active is re-checked right before the committing
- * accept: a command/latch that revoked the searching role during the fetch
- * aborts the accept, so nothing is committed on the SMM server when the FMU is no
- * longer searching (todo/33). */
+ * accept: a command/latch that revoked the searching role during the fetch aborts
+ * the accept, so nothing is committed on the SMM server when the FMU is no longer
+ * searching. */
 void
 SMM::tryAcquireSearch (Point current_pos)
 {
@@ -577,13 +577,13 @@ SMM::doReachedPoint (int point)
     {
         this->publishSearch (nullptr);
         /* Nothing is held now, so the FMU has nothing to search: report the
-         * same outcome as a failed (re)acquire (todo/70) so the state
-         * machine moves to waiting-for-tasking immediately, rather than only
-         * once the next opportunistic acquire attempt (still retried, since
-         * search_active is deliberately left untouched here) eventually
-         * fails. Covered end-to-end by the CAP Tier-3 suite (test_b06,
-         * todo/77); SMMSearch::reachedPoint()'s completion branch cannot be
-         * driven from a unit test without a live SMM search handle. */
+         * same outcome as a failed (re)acquire so the state machine moves to
+         * waiting-for-tasking immediately, rather than only once the next
+         * opportunistic acquire attempt (still retried, since search_active
+         * is deliberately left untouched here) eventually fails. Covered
+         * end-to-end by the CAP Tier-3 suite (test_b06);
+         * SMMSearch::reachedPoint()'s completion branch cannot be driven
+         * from a unit test without a live SMM search handle. */
         if (this->rtl_cb)
         {
             this->rtl_cb ();
@@ -607,8 +607,8 @@ SMMSearch::SMMSearch (smm_search t_search, uint16_t altitude_cap, uint16_t altit
     size_t wps_count = 0;
     /* A failed fetch (e.g. transient network error) leaves the search with no
      * points; only treat it as valid once we have at least one waypoint, and
-     * only if every one of them is a valid coordinate (todo/85) -- one bad
-     * waypoint invalidates the whole candidate rather than uploading a
+     * only if every one of them is a valid coordinate -- one bad waypoint
+     * invalidates the whole candidate rather than uploading a
      * partially-corrupt mission, and flows through the same failed-acquire
      * retry/RTL path in tryAcquireSearch() as a fetch failure. */
     if (smm_search_get_waypoints (this->search, &wps, &wps_count) && wps_count > 0)

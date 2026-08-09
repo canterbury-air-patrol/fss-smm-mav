@@ -28,9 +28,9 @@ class Point
     {
         return latitude == other.latitude && longitude == other.longitude;
     };
-    /* Shared, pure coordinate validator (todo/85): every external source of a
-     * commanded/reported position (FSS goto, SMM search waypoints, ADS-B
-     * peer reports) must pass this before the coordinates reach
+    /* Shared, pure coordinate validator: every external source of a
+     * commanded/reported position (FSS goto, SMM search waypoints, ADS-B peer
+     * reports) must pass this before the coordinates reach
      * degrees_to_degE7(), whose float-to-int32 cast is undefined behavior on
      * a non-finite or out-of-range input. */
     auto
@@ -44,7 +44,7 @@ class Point
 /* Bit in PositionData's/the FSS wire message's flags word marking the lat/lon
  * as backed by a valid GPS fix (GPS_FIX_TYPE_2D_FIX or better), not a lost/
  * no-fix estimate. Same numbering as MAVLink's ADSB_FLAGS_VALID_COORDS and
- * fss_client_ssl::sendPosition's hardcoded valid_fields bit 1 (todo/79). */
+ * fss_client_ssl::sendPosition's hardcoded valid_fields bit 1. */
 constexpr uint16_t POSITION_FLAG_VALID_COORDS = 1;
 
 class PositionData
@@ -55,7 +55,7 @@ class PositionData
      * unit via altitude-units.hpp (MAVLink mm, FSS feet, SMM metres). MSL
      * (mean sea level) — MAVLink GLOBAL_POSITION_INT's `alt` field. NOT the
      * same frame as altitude_cap_m/altitude_floor_m/goto_altitude_m, which are
-     * all AGL; see alt_agl_m below and todo/99. */
+     * all AGL; see alt_agl_m below. */
     double alt_m{ 0.0 };
     /* AGL (above ground level, relative to home) altitude in metres —
      * MAVLink GLOBAL_POSITION_INT's `relative_alt` field, the same frame
@@ -63,8 +63,8 @@ class PositionData
      * (mav_connection::report_position); ADS-B peers and any other source
      * leave it at 0.0, which is harmless since those paths never set
      * POSITION_FLAG_VALID_COORDS from a real reading either, and the only
-     * consumer (the altitude-cap breach check, todo/92) requires a valid fix
-     * before trusting it. */
+     * consumer (the altitude-cap breach check) requires a valid fix before
+     * trusting it. */
     double alt_agl_m{ 0.0 };
     uint16_t hdg{ 0 };
     uint16_t vel_hor{ 0 };
@@ -82,8 +82,8 @@ class PositionData
     /* t_alt_m is altitude in metres (see alt_m above). */
     PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver)
         : p (Point (t_lat, t_lng)), alt_m (t_alt_m), hdg (t_hdg), vel_hor (t_vel_hor), vel_ver (t_vel_ver) {};
-    /* Own-aircraft report with an explicit validity flags word (todo/79); ADSB
-     * peers carry callsign/squawk/etc too and use the constructor below instead. */
+    /* Own-aircraft report with an explicit validity flags word; ADSB peers carry
+     * callsign/squawk/etc too and use the constructor below instead. */
     PositionData (double t_lat, double t_lng, double t_alt_m, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
                   uint16_t t_flags, double t_alt_agl_m = 0.0)
         : p (Point (t_lat, t_lng)), alt_m (t_alt_m), alt_agl_m (t_alt_agl_m), hdg (t_hdg), vel_hor (t_vel_hor),
@@ -205,14 +205,14 @@ enum class MavCommsStatus
  * only errors, `warning` adds degraded-but-handled conditions, `info` adds
  * normal operation, and `debug` shows everything.
  *
- * The level is the *only* place a line's severity is stated (todo/109): a
- * message must not carry its own "WARN:"/"ERROR:" prefix, because the two
- * then drift and the prefix wins the reader's eye while the enum is what
- * actually decides whether the line is emitted at all. Logger::log() renders
- * the level into the line, so nothing is lost by leaving it out of the text.
- * `warning` exists so that rule can be followed: before it, every
- * degraded-but-handled condition had to be logged at `error` and say "WARN:"
- * to be honest about what it was. */
+ * The level is the *only* place a line's severity is stated: a message must
+ * not carry its own "WARN:"/"ERROR:" prefix, because the two then drift and
+ * the prefix wins the reader's eye while the enum is what actually decides
+ * whether the line is emitted at all. Logger::log() renders the level into
+ * the line, so nothing is lost by leaving it out of the text. `warning`
+ * exists so that rule can be followed: before it, every degraded-but-handled
+ * condition had to be logged at `error` and say "WARN:" to be honest about
+ * what it was. */
 enum class LogLevel
 {
     error,

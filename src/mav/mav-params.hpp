@@ -20,10 +20,10 @@ struct MavParams
     uint32_t battery_stream_interval_us{ 1000000 };
     /* Upper bound (milliseconds) on a MAV TCP connect attempt, and on a
      * blocking MAV send (SO_SNDTIMEO / TCP_USER_TIMEOUT) — see
-     * mav_connection::connectWithTimeout()/connect_to_mav() (todo/84).
-     * FmuConfig stores these in seconds; the App that builds this struct
-     * converts to milliseconds, matching the position/battery stream
-     * interval fields' ms->us convention just above. */
+     * mav_connection::connectWithTimeout()/connect_to_mav(). FmuConfig
+     * stores these in seconds; the App that builds this struct converts
+     * to milliseconds, matching the position/battery stream interval
+     * fields' ms->us convention just above. */
     uint32_t mav_connect_timeout_ms{ 5000 };
     uint32_t mav_send_timeout_ms{ 2000 };
 };

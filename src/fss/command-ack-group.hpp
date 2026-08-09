@@ -132,8 +132,8 @@ template <typename Target> class CommandAckGroup
     /* `t_tolerance_ms` is the window within which two timestamps count as the same
      * logical command (repeat deliveries of the same command/payload from
      * redundant servers). It does NOT bound staleness rejection: a different,
-     * older command is always superseded regardless of how far outside this
-     * window it falls (todo/86). */
+     * older command is always superseded regardless of how far outside this window
+     * it falls. */
     explicit CommandAckGroup (uint64_t t_tolerance_ms) : tolerance_ms (t_tolerance_ms) {}
 
     /* `t_command` is an opaque command-identity value (the caller's enum), matched
@@ -142,8 +142,8 @@ template <typename Target> class CommandAckGroup
      * new logical command, not a duplicate); `t_timestamp` is matched within the
      * tolerance.
      *
-     * `t_server_command_id`/`t_connection_key` are the todo/86 retry-vs-redundant
-     * signal: the dispatching server's per-connection command identifier (0 = not
+     * `t_server_command_id`/`t_connection_key` are the retry-vs-redundant signal:
+     * the dispatching server's per-connection command identifier (0 = not
      * reported, e.g. a legacy peer or the capability was not negotiated) and an
      * opaque identifier for the connection it arrived on (e.g. the originating
      * fss_server, stable across reconnects). Per the upstream contract, ids are
@@ -199,22 +199,22 @@ template <typename Target> class CommandAckGroup
         {
             /* Older, different command (different type or different payload): the
              * newer one is already in effect. This is deliberately NOT bounded by
-             * `tolerance_ms` (todo/86): that window exists only to recognise
-             * repeat deliveries of the SAME logical command across redundant
-             * servers, not to cap how stale a *different* one has to be before it
-             * stops being stale. A delayed/replayed delivery of an old command —
-             * worst case an old terminate, which latches permanently — must never
-             * be actuated as new just because the gap to the current command
-             * exceeds the dedup window, whether that gap is 61 seconds or several
-             * hours. */
+             * `tolerance_ms`: that window exists only to recognise repeat
+             * deliveries of the SAME logical command across redundant servers,
+             * not to cap how stale a *different* one has to be before it stops
+             * being stale. A delayed/replayed delivery of an old command — worst
+             * case an old terminate, which latches permanently — must never be
+             * actuated as new just because the gap to the current command exceeds
+             * the dedup window, whether that gap is 61 seconds or several hours.
+             */
             result.disposition = Disposition::stale_superseded;
             return result;
         }
 
         /* A new logical command supersedes the current group — either a different
-         * command/payload/newer timestamp, or (todo/86) the same command/payload
-         * but a fresh id from a connection that already reported a different one
-         * for the active group, i.e. a deliberate operator retry. Hand back any
+         * command/payload/newer timestamp, or the same command/payload but a
+         * fresh id from a connection that already reported a different one for
+         * the active group, i.e. a deliberate operator retry. Hand back any
          * copies of the old command that never resolved so the caller acks them
          * as superseded, then open a fresh group with this copy as its first
          * member. */
@@ -272,10 +272,10 @@ template <typename Target> class CommandAckGroup
     uint64_t timestamp{ 0 };
     std::vector<Target> pending{};
     std::optional<FSSCommandResolution> resolution{};
-    /* todo/86: last server_command_id reported by each connection (keyed by the
-     * caller's opaque `t_connection_key`) for the currently active group. Reset
-     * whenever a new logical command opens, since ids from a superseded group
-     * are no longer meaningful. Only ever compared within the same key — never
-     * across keys — because ids are not comparable across connections. */
+    /* Last server_command_id reported by each connection (keyed by the caller's
+     * opaque `t_connection_key`) for the currently active group. Reset whenever
+     * a new logical command opens, since ids from a superseded group are no
+     * longer meaningful. Only ever compared within the same key — never across
+     * keys — because ids are not comparable across connections. */
     std::unordered_map<uint64_t, uint64_t> last_id_by_connection{};
 };

@@ -46,8 +46,8 @@ class App
      * is written to match so it does not trip -Wreorder: the queue and its sync
      * primitives are constructed first, then the callback producers (fss, mav, smm)
      * last — so at destruction the producers (and their threads) are torn down
-     * before the queue they enqueue onto (todo/65). mav precedes smm (SMM holds a
-     * MAV&); fss precedes asset_name (initialised from fss->getAssetName()). */
+     * before the queue they enqueue onto. mav precedes smm (SMM holds a MAV&); fss
+     * precedes asset_name (initialised from fss->getAssetName()). */
     App (const char *config_file, terminate_action ta, const FmuConfig &cfg, Logger &t_logger)
         : event_queue{}, main_lock{}, main_cv{}, reconnect_lock{}, reconnect_cv{}, running{ true }, logger (t_logger),
           lowbat_threshold (cfg.lowbat_threshold), low_battery_latch_count (cfg.low_battery_latch_count),
@@ -73,7 +73,7 @@ class App
         FMUStateMachine state_machine{ *mav, *smm, low_battery_latch_count, altitude_cap_m,
                                        altitude_breach_latch_count };
         /* Constructing this registers it as the state machine's state-change
-         * callback (todo/76), logging the STATE line on every transition. */
+         * callback, logging the STATE line on every transition. */
         EventDispatcher dispatcher{ state_machine, *mav, *smm, *fss, logger, asset_name, lowbat_threshold };
         logger.log ("START " + asset_name);
 
@@ -108,15 +108,15 @@ class App
 
         /* SMM I/O runs on its own worker thread; its flight outcomes come back
          * through the event queue so they are applied on the event-loop thread,
-         * where the state machine arbitrates priority (todo/33). */
+         * where the state machine arbitrates priority. */
         smm->registerLoadSearchCB ([this] (const std::shared_ptr<SMMSearch> &search)
                                    { enqueue_event (std::make_shared<event> (SmmLoadSearch{ search })); });
         smm->registerRtlCB ([this] { enqueue_event (std::make_shared<event> (SmmRtl{})); });
         smm->registerOperatorCommandCB ([this] (SMMCommand cmd)
                                         { enqueue_event (std::make_shared<event> (SmmOperatorCommand{ cmd })); });
 
-        /* Start signal handling before any potentially long external operation
-         * (todo/84): SIGINT/SIGTERM are already blocked process-wide (see
+        /* Start signal handling before any potentially long external
+         * operation: SIGINT/SIGTERM are already blocked process-wide (see
          * main()), so this only decides how promptly a pending signal is
          * consumed once raised, not whether it is lost — but starting it first
          * is cheap and keeps that window as small as possible. */
@@ -157,11 +157,11 @@ class App
             sig_thread.join ();
         }
 
-        /* Drain under main_lock: the mav/smm/fss worker threads are not joined
-         * until those objects are destroyed (after run() returns), so one could
-         * still enqueue here. Holding the lock keeps this drain consistent with a
+        /* Drain under main_lock: the mav/smm/fss worker threads are not joined until
+         * those objects are destroyed (after run() returns), so one could still
+         * enqueue here. Holding the lock keeps this drain consistent with a
          * concurrent enqueue_event(); any event enqueued after it is discarded when
-         * the queue is destroyed, which now happens after the producers (todo/65). */
+         * the queue is destroyed, which now happens after the producers. */
         {
             std::lock_guard<std::mutex> lk (main_lock);
             while (!event_queue.empty ())
@@ -215,10 +215,10 @@ class App
             fss->reconnectAll ();
             mav->attemptReconnect ();
             /* Drive a timer-based retry of a pending search acquisition so it is
-             * not starved when MAV position reports stop (todo/41). Done after the
-             * reconnect attempts above so a slow SMM call cannot delay them within
-             * a cycle; the search_retry_ts backoff makes this a cheap no-op when a
-             * retry is not yet due. */
+             * not starved when MAV position reports stop. Done after the reconnect
+             * attempts above so a slow SMM call cannot delay them within a cycle;
+             * the search_retry_ts backoff makes this a cheap no-op when a retry is
+             * not yet due. */
             smm->retryPendingSearch ();
         }
         enqueue_event (std::make_shared<event> (Nudge{}));
@@ -247,10 +247,10 @@ class App
 
     /* Callback producers, declared last so they are destroyed FIRST: each joins
      * its worker/recv threads in its destructor, so those threads stop enqueuing
-     * before the queue and locks above are torn down (todo/65). Order within the
-     * group: mav before smm (SMM holds a MAV&), and asset_name after fss (it is
-     * initialised from fss->getAssetName()). aircraft is declared just above so it
-     * outlives fss, whose position callback touches it. */
+     * before the queue and locks above are torn down. Order within the group: mav
+     * before smm (SMM holds a MAV&), and asset_name after fss (it is initialised
+     * from fss->getAssetName()). aircraft is declared just above so it outlives
+     * fss, whose position callback touches it. */
     std::unique_ptr<FSS> fss;
     std::unique_ptr<MAV> mav;
     std::unique_ptr<SMM> smm;

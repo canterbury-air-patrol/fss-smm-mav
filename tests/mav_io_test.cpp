@@ -39,10 +39,10 @@ namespace
 /* main() (src/main.cpp) ignores SIGPIPE so a send() to a peer that has
  * closed its end reports EPIPE (which sendMavLinkMsg already handles)
  * instead of terminating the process. Catch2 supplies its own main() here,
- * so do the same at static-init time: a test that drops the server side
- * and leaves the connection "open" from the FMU's perspective for a while
- * (todo/61) can otherwise have a heartbeat send land on the dead socket and
- * kill the whole test binary. */
+ * so do the same at static-init time: a test that drops the server side and
+ * leaves the connection "open" from the FMU's perspective for a while can
+ * otherwise have a heartbeat send land on the dead socket and kill the
+ * whole test binary. */
 struct IgnoreSigpipe
 {
     IgnoreSigpipe () { std::signal (SIGPIPE, SIG_IGN); }
@@ -78,13 +78,12 @@ class MavLoopbackServer
 {
   public:
     /* `listen_recv_buf_bytes`, if non-zero, shrinks the receive buffer on the
-     * *listening* socket before bind()/listen() (todo/84): every accepted
-     * connection inherits it, so the TCP window advertised in that
-     * connection's very first SYN-ACK is already small. Doing this on the
-     * per-connection fd after accept() is too late — the initial window was
-     * already advertised using whatever the default was at handshake time,
-     * and a receiver that never reads never sends a window update to shrink
-     * it further. */
+     * *listening* socket before bind()/listen(): every accepted connection
+     * inherits it, so the TCP window advertised in that connection's very
+     * first SYN-ACK is already small. Doing this on the per-connection fd
+     * after accept() is too late — the initial window was already advertised
+     * using whatever the default was at handshake time, and a receiver that
+     * never reads never sends a window update to shrink it further. */
     explicit MavLoopbackServer (int listen_recv_buf_bytes = 0)
     {
         this->listen_fd = socket (AF_INET, SOCK_STREAM, 0);
@@ -186,8 +185,8 @@ class MavLoopbackServer
 
     /* Send a HEARTBEAT as if from `sysid` (the autopilot, sysid 1, by default),
      * so the FMU records a fresh last_heartbeat_ts and the heartbeat loop
-     * reports the link up. A non-default sysid (todo/83) stands in for another
-     * vehicle or GCS sharing the link. */
+     * reports the link up. A non-default sysid stands in for another vehicle or
+     * GCS sharing the link. */
     void
     sendHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR, uint8_t sysid = 1)
     {
@@ -206,19 +205,19 @@ class MavLoopbackServer
         sendPosition (/*lat*/ -435000000, /*lon*/ 1726000000);
     }
 
-    /* Same, with an explicit lat/lon (todo/68) and sysid (todo/83): lets a test
-     * send the exact same coordinates repeatedly, e.g. to simulate an EKF
-     * position estimate that has frozen rather than genuinely updating, or
-     * attribute the report to a system other than the configured autopilot. */
+    /* Same, with an explicit lat/lon and sysid: lets a test send the exact same
+     * coordinates repeatedly, e.g. to simulate an EKF position estimate that
+     * has frozen rather than genuinely updating, or attribute the report to a
+     * system other than the configured autopilot. */
     void
     sendPosition (int32_t lat, int32_t lon, uint8_t sysid = 1)
     {
         sendPosition (lat, lon, /*alt mm*/ 100000, /*rel alt mm*/ 100000, sysid);
     }
 
-    /* Same, with alt (MSL) and relative_alt (AGL) set independently (todo/92):
-     * every other overload above packs both to the same value, so no test
-     * using them can distinguish which field a consumer actually read. */
+    /* Same, with alt (MSL) and relative_alt (AGL) set independently: every
+     * other overload above packs both to the same value, so no test using them
+     * can distinguish which field a consumer actually read. */
     void
     sendPosition (int32_t lat, int32_t lon, int32_t alt_mm, int32_t relative_alt_mm, uint8_t sysid = 1)
     {
@@ -228,9 +227,9 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
-    /* Same, with the autopilot's uptime (time_boot_ms) set explicitly
-     * (todo/108): every overload above packs 0, which the restart detector
-     * treats as "nothing observed yet", so no test using them can drive it. */
+    /* Same, with the autopilot's uptime (time_boot_ms) set explicitly: every
+     * overload above packs 0, which the restart detector treats as "nothing
+     * observed yet", so no test using them can drive it. */
     void
     sendPositionAt (uint32_t time_boot_ms, int32_t lat = -435000000, int32_t lon = 1726000000, uint8_t sysid = 1)
     {
@@ -240,10 +239,10 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
-    /* Send a SYSTEM_TIME carrying the autopilot's uptime (todo/108) — the second
-     * source the restart detector reads, so a reboot is still caught when the
-     * position stream is not flowing. A non-default sysid (todo/83) stands in
-     * for another vehicle or GCS sharing the link. */
+    /* Send a SYSTEM_TIME carrying the autopilot's uptime — the second source the
+     * restart detector reads, so a reboot is still caught when the position
+     * stream is not flowing. A non-default sysid stands in for another vehicle
+     * or GCS sharing the link. */
     void
     sendSystemTime (uint32_t time_boot_ms, uint8_t sysid = 1)
     {
@@ -252,11 +251,11 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
-    /* Send a GPS_RAW_INT with the given fix_type (todo/68) — e.g.
-     * GPS_FIX_TYPE_NO_FIX — as ArduPilot would report GPS health directly
-     * (distinct from GLOBAL_POSITION_INT, which carries the EKF's position
-     * estimate and has no fix-validity field of its own). A non-default sysid
-     * (todo/83) stands in for another vehicle or GCS sharing the link. */
+    /* Send a GPS_RAW_INT with the given fix_type — e.g. GPS_FIX_TYPE_NO_FIX —
+     * as ArduPilot would report GPS health directly (distinct from
+     * GLOBAL_POSITION_INT, which carries the EKF's position estimate and has
+     * no fix-validity field of its own). A non-default sysid stands in for
+     * another vehicle or GCS sharing the link. */
     void
     sendGpsRawInt (uint8_t fix_type, uint8_t sysid = 1)
     {
@@ -270,8 +269,8 @@ class MavLoopbackServer
     }
 
     /* Send a BATTERY_STATUS as ArduPilot would, with the pack voltage in cell 0
-     * (see battery-voltage.hpp). A non-default sysid (todo/83) stands in for
-     * another vehicle or GCS sharing the link. */
+     * (see battery-voltage.hpp). A non-default sysid stands in for another
+     * vehicle or GCS sharing the link. */
     void
     sendBatteryStatus (int8_t remaining, int32_t consumed, uint16_t cell0_mv, uint8_t sysid = 1)
     {
@@ -285,10 +284,10 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
-    /* Send a PARAM_VALUE reply for `name` (todo/91), as ArduPilot would reply
-     * to a PARAM_REQUEST_READ — always a float on the wire regardless of the
-     * declared param_type. A non-default sysid (todo/83) stands in for
-     * another vehicle or GCS sharing the link. */
+    /* Send a PARAM_VALUE reply for `name`, as ArduPilot would reply to a
+     * PARAM_REQUEST_READ — always a float on the wire regardless of the
+     * declared param_type. A non-default sysid stands in for another vehicle
+     * or GCS sharing the link. */
     void
     sendParamValue (const char *name, float value, uint8_t sysid = 1)
     {
@@ -297,7 +296,7 @@ class MavLoopbackServer
          * pointer it is given, so a `name` shorter than that must first be
          * copied into a buffer that size, zero-padded, or the call reads out
          * of bounds (pack_fixed_width_field(), mav-comms.hpp — shared with
-         * mav_connection::checkFailsafeConfig()'s identical need, todo/91). */
+         * mav_connection::checkFailsafeConfig()'s identical need). */
         char param_id_buf[MAVLINK_MSG_PARAM_VALUE_FIELD_PARAM_ID_LEN];
         pack_fixed_width_field (param_id_buf, sizeof (param_id_buf), name);
         mavlink_message_t msg;
@@ -306,8 +305,8 @@ class MavLoopbackServer
         sendMsg (msg);
     }
 
-    /* Send a MISSION_ITEM_REACHED for `seq`. A non-default sysid (todo/83)
-     * stands in for another vehicle or GCS sharing the link. */
+    /* Send a MISSION_ITEM_REACHED for `seq`. A non-default sysid stands in
+     * for another vehicle or GCS sharing the link. */
     void
     sendMissionItemReached (uint16_t seq, uint8_t sysid = 1)
     {
@@ -318,7 +317,7 @@ class MavLoopbackServer
 
     /* Send a MISSION_REQUEST_INT for `seq` as the autopilot would during a
      * mission upload (addressed to the FMU at SYS_ID/COMP_ID). A non-default
-     * sysid (todo/83) stands in for another vehicle or GCS sharing the link. */
+     * sysid stands in for another vehicle or GCS sharing the link. */
     void
     sendMissionRequestInt (uint16_t seq, uint8_t mission_type, uint8_t sysid = 1)
     {
@@ -329,7 +328,7 @@ class MavLoopbackServer
     }
 
     /* Acknowledge a completed mission upload as accepted. A non-default sysid
-     * (todo/83) stands in for another vehicle or GCS sharing the link. */
+     * stands in for another vehicle or GCS sharing the link. */
     void
     sendMissionAck (uint8_t mission_type, uint8_t sysid = 1)
     {
@@ -340,8 +339,8 @@ class MavLoopbackServer
     }
 
     /* Build a valid HEARTBEAT frame's raw wire bytes without sending it, so a
-     * fuzz test can truncate or corrupt them before injecting via sendRaw()
-     * (todo/67). */
+     * fuzz test can truncate or corrupt them before injecting via sendRaw().
+     */
     auto
     packHeartbeat (uint8_t type = MAV_TYPE_QUADROTOR) -> std::vector<uint8_t>
     {
@@ -354,10 +353,10 @@ class MavLoopbackServer
     }
 
     /* Send bytes directly to the FMU's connection, bypassing MAVLink framing
-     * entirely — used to inject garbage/truncated/corrupted frames (todo/67).
-     * Surfaces a short/failed send instead of silently swallowing it: an
-     * intermittent socket issue that dropped bytes would otherwise look like
-     * a parser-robustness failure and produce a misleading test result. */
+     * entirely — used to inject garbage/truncated/corrupted frames. Surfaces
+     * a short/failed send instead of silently swallowing it: an intermittent
+     * socket issue that dropped bytes would otherwise look like a
+     * parser-robustness failure and produce a misleading test result. */
     void
     sendRaw (const std::vector<uint8_t> &data)
     {
@@ -485,16 +484,16 @@ class MavLoopbackServer
  * queue can be deliberately filled and then a further connect() attempt
  * reliably times out (its SYN is dropped by the kernel, not merely delayed)
  * — a deterministic, root-free, firewall-free local stand-in for a
- * black-holed remote endpoint (todo/84). Distinct from MavLoopbackServer,
- * which always accepts.
+ * black-holed remote endpoint. Distinct from MavLoopbackServer, which always
+ * accepts.
  *
  * The accept queue is filled by self-calibration rather than assuming
  * listen(fd, 1) leaves room for exactly one connection: each filler
  * connection is itself bounded by a short non-blocking connect+poll, so a
  * filler that lands on an already-full queue cannot hang the test; the loop
- * stops as soon as one filler fails to complete quickly, which is the
- * signal that the queue is now genuinely full regardless of the exact
- * backlog rounding a given kernel applies. */
+ * stops as soon as one filler fails to complete quickly, which is the signal
+ * that the queue is now genuinely full regardless of the exact backlog
+ * rounding a given kernel applies. */
 class BlackholeListener
 {
   public:
@@ -616,7 +615,7 @@ class CommsRecorder
 };
 
 /* Discards everything: these tests exercise the I/O boundary, not logging, and
- * a real Logger would need a file-backed directory (todo/59). */
+ * a real Logger would need a file-backed directory. */
 class NullLogger : public ILogger
 {
   public:
@@ -629,10 +628,10 @@ class NullLogger : public ILogger
 NullLogger test_logger{};
 
 /* Records every message logged, so a test can assert a specific warning was
- * emitted (todo/61's goto-upload-lost warning is only observable this way,
- * since nothing else about the FMU's state changes when the upload is
- * abandoned mid-handshake). Thread-safe: log() runs on mav_connection's
- * heartbeat thread. */
+ * emitted (the goto-upload-lost warning is only observable this way, since
+ * nothing else about the FMU's state changes when the upload is abandoned
+ * mid-handshake). Thread-safe: log() runs on mav_connection's heartbeat
+ * thread. */
 class CapturingLogger : public ILogger
 {
   public:
@@ -673,11 +672,11 @@ constexpr MavParams test_mav_params{ test_goto_altitude_m,
                                      test_mav_connect_timeout_ms,
                                      test_mav_send_timeout_ms };
 constexpr auto io_timeout = std::chrono::seconds (8);
-/* Bound for asserting a message is *not* sent: unlike a positive wait, there is
- * no early exit (the loop must run out the clock), so this stays far shorter
- * than io_timeout. Any erroneous MISSION_SET_CURRENT/SET_MODE(AUTO) a todo/82
- * regression would emit happens synchronously while processing the incoming
- * MISSION_ACK, well within this margin. */
+/* Bound for asserting a message is *not* sent: unlike a positive wait, there is no early
+ * exit (the loop must run out the clock), so this stays far shorter than io_timeout. Any
+ * erroneous MISSION_SET_CURRENT/SET_MODE(AUTO) an ack-correlation regression would emit
+ * happens synchronously while processing the incoming MISSION_ACK, well within this margin.
+ */
 constexpr auto no_message_timeout = std::chrono::milliseconds (300);
 
 /* mav_connection parses on the single global channel MAVLINK_COMM_0. In the real
@@ -717,7 +716,7 @@ class PositionRecorder
         return this->count.load ();
     }
     /* Latest PositionData received, for tests that need to inspect the exact
-     * values that reached the callback (todo/68), not just that one arrived. */
+     * values that reached the callback, not just that one arrived. */
     auto
     lastPosition () -> PositionData
     {
@@ -731,7 +730,7 @@ class PositionRecorder
     PositionData last{};
 };
 
-/* Thread-safe counter of battery callbacks (todo/83: proves a foreign sysid's
+/* Thread-safe counter of battery callbacks (proves a foreign sysid's
  * BATTERY_STATUS never reaches it). */
 class BatteryRecorder
 {
@@ -763,7 +762,7 @@ class BatteryRecorder
     BatteryData last{};
 };
 
-/* Thread-safe counter of reached-point callbacks (todo/83: proves a foreign
+/* Thread-safe counter of reached-point callbacks (proves a foreign
  * sysid's MISSION_ITEM_REACHED never reaches it). */
 class ReachedRecorder
 {
@@ -819,11 +818,10 @@ waitForColdStartThenUp (MavLoopbackServer &server, CommsRecorder &recorder) -> b
 }
 
 /* Every param_id the failsafe-config check has requested and not yet been read
- * off the wire (todo/91, extended by todo/104). A single check now issues
- * several PARAM_REQUEST_READs, so a test that pulled just the first message
- * would be asserting on the order this list happens to be built in rather than
- * on its contents. Blocks for io_timeout on the first, then drains whatever
- * else has already arrived. */
+ * off the wire. A single check now issues several PARAM_REQUEST_READs, so a
+ * test that pulled just the first message would be asserting on the order this
+ * list happens to be built in rather than on its contents. Blocks for
+ * io_timeout on the first, then drains whatever else has already arrived. */
 auto
 collectParamRequests (MavLoopbackServer &server) -> std::vector<std::string>
 {
@@ -877,8 +875,7 @@ TEST_CASE ("mav_connection reports the link down at cold start, then up once a h
         io_timeout));
 }
 
-TEST_CASE ("start() does not block beyond the configured connect deadline against a black-holed endpoint (todo/84)",
-           "[mav_io]")
+TEST_CASE ("start() does not block beyond the configured connect deadline against a black-holed endpoint", "[mav_io]")
 {
     reset_mav_parser ();
     BlackholeListener blackhole;
@@ -900,7 +897,7 @@ TEST_CASE ("start() does not block beyond the configured connect deadline agains
     REQUIRE (capture.containsSubstring ("timed out"));
 }
 
-TEST_CASE ("a send to a peer that stops reading is bounded by the configured send timeout (todo/84)", "[mav_io]")
+TEST_CASE ("a send to a peer that stops reading is bounded by the configured send timeout", "[mav_io]")
 {
     reset_mav_parser ();
     /* Shrink the listening socket's receive buffer before any connection
@@ -945,7 +942,7 @@ TEST_CASE ("a send to a peer that stops reading is bounded by the configured sen
     REQUIRE (elapsed < std::chrono::seconds (10));
 }
 
-TEST_CASE ("a stale heartbeat on an otherwise-open socket is retired and reconnected (todo/84)", "[mav_io]")
+TEST_CASE ("a stale heartbeat on an otherwise-open socket is retired and reconnected", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1136,11 +1133,11 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
     conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
     conn.start ();
     REQUIRE (server.waitForClient (io_timeout));
-    /* Establish the link as genuinely up first (todo/82): otherwise the
-     * cold-start "no heartbeat yet" detection (heartbeat_loop) can invalidate
-     * the goto's own MISSION_ACK correlation (goto_ack_pending) before this
-     * upload completes, exactly as a real comms-loss failsafe would — which
-     * is not what this test is exercising. */
+    /* Establish the link as genuinely up first: otherwise the cold-start "no
+     * heartbeat yet" detection (heartbeat_loop) can invalidate the goto's own
+     * MISSION_ACK correlation (goto_ack_pending) before this upload
+     * completes, exactly as a real comms-loss failsafe would — which is not
+     * what this test is exercising. */
     REQUIRE (waitForColdStartThenUp (server, recorder));
 
     /* A goto lays out seq 0/1 = waypoint, seq 2 = RTL terminator (count 3). */
@@ -1153,7 +1150,7 @@ TEST_CASE ("a goto mission uploads three items and sets current to sequence 0", 
     REQUIRE (result.set_current == 0);
 }
 
-TEST_CASE ("a goto mission selects current before engaging AUTO after upload (todo/77)", "[mav_io]")
+TEST_CASE ("a goto mission selects current before engaging AUTO after upload", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1173,12 +1170,12 @@ TEST_CASE ("a goto mission selects current before engaging AUTO after upload (to
     expect_auto_mode (server);
 }
 
-/* todo/61: unlike RTL/failsafe/low-battery/terminate, a goto's "sent" only
- * reflects the opening MISSION_COUNT — the rest of the upload is request-
- * driven and has no replay-on-recovery guarantee. A link drop before the
+/* Unlike RTL/failsafe/low-battery/terminate, a goto's "sent" only reflects
+ * the opening MISSION_COUNT — the rest of the upload is request- driven
+ * and has no replay-on-recovery guarantee. A link drop before the
  * MISSION_ACK must not be a silent no-op reported as a successful goto; it
  * must surface a clear, operator-visible warning instead. */
-TEST_CASE ("a link drop mid goto-upload logs a warning instead of silently succeeding (todo/61)", "[mav_io]")
+TEST_CASE ("a link drop mid goto-upload logs a warning instead of silently succeeding", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1211,7 +1208,7 @@ TEST_CASE ("a link drop mid goto-upload logs a warning instead of silently succe
         io_timeout));
 }
 
-TEST_CASE ("a search mission resume sets current past the setup items (todo/48)", "[mav_io]")
+TEST_CASE ("a search mission resume sets current past the setup items", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1232,7 +1229,7 @@ TEST_CASE ("a search mission resume sets current past the setup items (todo/48)"
     REQUIRE (result.set_current == 2);
 }
 
-TEST_CASE ("a search mission selects current before engaging AUTO after upload (todo/77)", "[mav_io]")
+TEST_CASE ("a search mission selects current before engaging AUTO after upload", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1252,12 +1249,12 @@ TEST_CASE ("a search mission selects current before engaging AUTO after upload (
     expect_auto_mode (server);
 }
 
-/* todo/82: a late MISSION_ACK for a goto upload must not be able to select a
- * mission item or command AUTO once a newer safety-critical mode (here, RTL —
+/* A late MISSION_ACK for a goto upload must not be able to select a mission
+ * item or command AUTO once a newer safety-critical mode (here, RTL —
  * standing in for a real low-battery/comms-loss/operator RTL, all of which
  * reach the autopilot the same way via commandRTL()) has taken control while
  * the upload was still open. */
-TEST_CASE ("a newer RTL invalidates an in-flight goto upload; its late ACCEPTED ack is ignored (todo/82)", "[mav_io]")
+TEST_CASE ("a newer RTL invalidates an in-flight goto upload; its late ACCEPTED ack is ignored", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1302,11 +1299,11 @@ TEST_CASE ("a newer RTL invalidates an in-flight goto upload; its late ACCEPTED 
                                          io_timeout));
 }
 
-/* todo/82: the equivalent interrupted-search-upload case. loadSearch() itself
- * issues its own RTL before the upload (existing "enter RTL while loading"
+/* The equivalent interrupted-search-upload case. loadSearch() itself issues
+ * its own RTL before the upload (existing "enter RTL while loading"
  * behaviour); the second RTL here stands in for a newer safety state — e.g.
  * low battery — arriving before the search's own MISSION_ACK. */
-TEST_CASE ("a newer RTL invalidates an in-flight search upload; its late ACCEPTED ack is ignored (todo/82)", "[mav_io]")
+TEST_CASE ("a newer RTL invalidates an in-flight search upload; its late ACCEPTED ack is ignored", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1344,11 +1341,11 @@ TEST_CASE ("a newer RTL invalidates an in-flight search upload; its late ACCEPTE
                                          io_timeout));
 }
 
-/* todo/82: a duplicate/retransmitted accepted MISSION_ACK arriving after a
- * goto upload already completed must not repeat the MISSION_SET_CURRENT/AUTO
+/* A duplicate/retransmitted accepted MISSION_ACK arriving after a goto
+ * upload already completed must not repeat the MISSION_SET_CURRENT/AUTO
  * transition. goto_active alone used to be a long-lived signal — it never
  * cleared after a first ack — so a second ack would re-fire it. */
-TEST_CASE ("a duplicate accepted goto ACK after completion does not re-enter AUTO (todo/82)", "[mav_io]")
+TEST_CASE ("a duplicate accepted goto ACK after completion does not re-enter AUTO", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1408,12 +1405,12 @@ struct SMMTestAccess
     }
 };
 
-/* todo/85: parse_waypoints() is the pure decision SMMSearch's constructor
- * uses to decide whether a fetched search is loadable -- tested directly here
- * against plain smm_waypoint_s structs, without a live smm_search handle
- * (there is no lightweight way to fabricate one; smm_search is opaque and
- * only populated via the real HTTP-backed library). */
-TEST_CASE ("parse_waypoints reports all_valid only when every waypoint is a valid coordinate (todo/85)", "[smm]")
+/* Parse_waypoints() is the pure decision SMMSearch's constructor uses to
+ * decide whether a fetched search is loadable -- tested directly here against
+ * plain smm_waypoint_s structs, without a live smm_search handle (there is no
+ * lightweight way to fabricate one; smm_search is opaque and only populated
+ * via the real HTTP-backed library). */
+TEST_CASE ("parse_waypoints reports all_valid only when every waypoint is a valid coordinate", "[smm]")
 {
     smm_waypoint_s a{ -43.5, 172.6 };
     smm_waypoint_s b{ -41.0, 174.0 };
@@ -1461,10 +1458,10 @@ class TestSMM : public SMM
     std::atomic<int> report_calls{ 0 };
     std::atomic<bool> fetch_entered{ false };
     std::atomic<bool> block_fetch{ false };
-    /* Test-controlled stand-in for smm_asset_last_command() (todo/90): no
-     * live SMM server to make the C library return a real operator command
-     * from, so this seam lets a test set what checkOperatorCommand() sees on
-     * the next reportPosition(). */
+    /* Test-controlled stand-in for smm_asset_last_command(): no live SMM
+     * server to make the C library return a real operator command from, so
+     * this seam lets a test set what checkOperatorCommand() sees on the next
+     * reportPosition(). */
     std::atomic<smm_asset_command> next_operator_command{ SMM_COMMAND_UNKNOWN };
 
     void
@@ -1513,7 +1510,7 @@ class TestSMM : public SMM
     bool fetch_released{ false };
 };
 
-TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "[mav_io]")
+TEST_CASE ("SMM resumes a held search by re-loading it on continue", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1533,7 +1530,7 @@ TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "
      * rtl: still held locally, but no longer loaded on the autopilot. */
     SMMTestAccess::setSearch (smm, std::make_shared<SMMSearch> ());
 
-    /* `continue` re-enters searching, which calls SMM::search. Before todo/50 this
+    /* `continue` re-enters searching, which calls SMM::search. This once
      * early-returned and never re-commanded the autopilot; it must now re-issue
      * the mission upload so the search resumes. */
     smm.search (Point (-43.5, 172.6));
@@ -1543,7 +1540,7 @@ TEST_CASE ("SMM resumes a held search by re-loading it on continue (todo/50)", "
     REQUIRE (mavlink_msg_mission_count_get_count (&msg) == 3);
 }
 
-TEST_CASE ("a pending search acquisition is retried off the timer, not just on position (todo/41)", "[mav_io]")
+TEST_CASE ("a pending search acquisition is retried off the timer, not just on position", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1587,7 +1584,7 @@ TEST_CASE ("a pending search acquisition is retried off the timer, not just on p
     REQUIRE (server.recvMessage (MAVLINK_MSG_ID_SET_MODE, msg, io_timeout));
 }
 
-TEST_CASE ("SMM public methods stay responsive while the worker is in a slow SMM call (todo/33)", "[mav_io]")
+TEST_CASE ("SMM public methods stay responsive while the worker is in a slow SMM call", "[mav_io]")
 {
     reset_mav_parser ();
     /* No loopback server / start(): the SMM worker never touches MAV on the
@@ -1631,7 +1628,7 @@ TEST_CASE ("SMM public methods stay responsive while the worker is in a slow SMM
     REQUIRE (MavLoopbackServer::waitFor ([&] { return smm.report_calls.load () >= 1; }, io_timeout));
 }
 
-TEST_CASE ("SMM keeps reporting position even when not searching (todo/33)", "[mav_io]")
+TEST_CASE ("SMM keeps reporting position even when not searching", "[mav_io]")
 {
     reset_mav_parser ();
     MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
@@ -1653,7 +1650,7 @@ TEST_CASE ("SMM keeps reporting position even when not searching (todo/33)", "[m
     REQUIRE (smm.commit_calls.load () == 0);
 }
 
-TEST_CASE ("SMM does not accept a search if the searching role is revoked mid-fetch (todo/33)", "[mav_io]")
+TEST_CASE ("SMM does not accept a search if the searching role is revoked mid-fetch", "[mav_io]")
 {
     reset_mav_parser ();
     MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
@@ -1688,7 +1685,7 @@ TEST_CASE ("SMM does not accept a search if the searching role is revoked mid-fe
 }
 
 TEST_CASE ("SMM drops a held search and reattempts acquisition on an operator abandon-search command, once per "
-           "distinct command (todo/90)",
+           "distinct command",
            "[mav_io]")
 {
     reset_mav_parser ();
@@ -1748,8 +1745,7 @@ TEST_CASE ("SMM drops a held search and reattempts acquisition on an operator ab
     }
 }
 
-TEST_CASE ("SMM reports an operator mission-complete command once, without touching the held search (todo/90)",
-           "[mav_io]")
+TEST_CASE ("SMM reports an operator mission-complete command once, without touching the held search", "[mav_io]")
 {
     reset_mav_parser ();
     MAV mav ("127.0.0.1", 1, terminate_action::none, test_mav_params, test_logger);
@@ -1797,15 +1793,15 @@ TEST_CASE ("SMM reports an operator mission-complete command once, without touch
     }
 }
 
-/* todo/67: malformed-byte-stream robustness, the single-repo share of Tier-3
- * Path K k01. These drive the real mav_connection recv path (not a mock)
- * over the loopback socket, so hostile bytes exercise the actual MAVLink
- * parser and its resync behaviour; the full-system flood (SITL + FSS + the
- * cap-fmu binary) stays in Tier-3 Path K as the cross-check. Run under the
- * same TSan `make check` as everything else, so a parser-state race would
+/* Malformed-byte-stream robustness, the single-repo share of Tier-3 Path K
+ * k01. These drive the real mav_connection recv path (not a mock) over the
+ * loopback socket, so hostile bytes exercise the actual MAVLink parser and
+ * its resync behaviour; the full-system flood (SITL + FSS + the cap-fmu
+ * binary) stays in Tier-3 Path K as the cross-check. Run under the same
+ * TSan `make check` as everything else, so a parser-state race would
  * surface here too. */
 
-TEST_CASE ("mav_connection survives a stream of random garbage bytes (todo/67)", "[mav_io][fuzz]")
+TEST_CASE ("mav_connection survives a stream of random garbage bytes", "[mav_io][fuzz]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1843,7 +1839,7 @@ TEST_CASE ("mav_connection survives a stream of random garbage bytes (todo/67)",
         io_timeout));
 }
 
-TEST_CASE ("mav_connection resynchronises after a truncated frame (todo/67)", "[mav_io][fuzz]")
+TEST_CASE ("mav_connection resynchronises after a truncated frame", "[mav_io][fuzz]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1885,7 +1881,7 @@ TEST_CASE ("mav_connection resynchronises after a truncated frame (todo/67)", "[
     }
 }
 
-TEST_CASE ("mav_connection drops a corrupted-CRC frame without flapping link state (todo/67)", "[mav_io][fuzz]")
+TEST_CASE ("mav_connection drops a corrupted-CRC frame without flapping link state", "[mav_io][fuzz]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1927,7 +1923,7 @@ TEST_CASE ("mav_connection drops a corrupted-CRC frame without flapping link sta
     REQUIRE (recorder.lastStatus () == MavCommsStatus::ok);
 }
 
-TEST_CASE ("mav_connection keeps routing valid messages between garbage bursts (todo/67)", "[mav_io][fuzz]")
+TEST_CASE ("mav_connection keeps routing valid messages between garbage bursts", "[mav_io][fuzz]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -1964,18 +1960,18 @@ TEST_CASE ("mav_connection keeps routing valid messages between garbage bursts (
     }
 }
 
-/* todo/68/79: cap-fmu's GPS-denial/no-fix handling, the single-repo share of
- * Tier-3 Path M m03. Investigation found that mav_connection's
- * MAVLINK_MSG_ID_GPS_RAW_INT case (fix_type — the autopilot's own no-fix/2D/
- * 3D indicator) was a recognised no-op: received and silently dropped, while
- * GLOBAL_POSITION_INT (the EKF's position estimate, which has no fix-validity
- * field of its own) was always forwarded as if fresh. todo/79 closed that gap:
- * fix_type is now tracked and the next GLOBAL_POSITION_INT's report carries a
- * POSITION_FLAG_VALID_COORDS bit reflecting it — the position is still
- * delivered (not suppressed), but downstream (FSS-Web) can now tell a fix-
- * backed report from a degraded/lost one instead of treating both as current. */
+/* Cap-fmu's GPS-denial/no-fix handling, the single-repo share of Tier-3 Path M
+ * m03. Investigation found that mav_connection's MAVLINK_MSG_ID_GPS_RAW_INT case
+ * (fix_type — the autopilot's own no-fix/2D/ 3D indicator) was a recognised
+ * no-op: received and silently dropped, while GLOBAL_POSITION_INT (the EKF's
+ * position estimate, which has no fix-validity field of its own) was always
+ * forwarded as if fresh. That gap is now closed: fix_type is now tracked and the
+ * next GLOBAL_POSITION_INT's report carries a POSITION_FLAG_VALID_COORDS bit
+ * reflecting it — the position is still delivered (not suppressed), but
+ * downstream (FSS-Web) can now tell a fix- backed report from a degraded/lost
+ * one instead of treating both as current. */
 
-TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag (todo/79)", "[mav_io]")
+TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2032,12 +2028,12 @@ TEST_CASE ("GPS_RAW_INT fix_type gates the position report's valid-coords flag (
     REQUIRE ((pd_good_fix.getFlags () & POSITION_FLAG_VALID_COORDS) != 0);
 }
 
-/* todo/92: GLOBAL_POSITION_INT carries two altitude fields -- alt (MSL) and
+/* GLOBAL_POSITION_INT carries two altitude fields -- alt (MSL) and
  * relative_alt (AGL, relative to home) -- and PositionData now carries both
  * separately (alt_m / alt_agl_m). This proves the recv path reads each field
  * into the right one, by setting them to different values: if the
  * implementation accidentally read alt for both, this test would fail. */
-TEST_CASE ("GLOBAL_POSITION_INT's alt and relative_alt populate separate PositionData fields (todo/92)", "[mav_io]")
+TEST_CASE ("GLOBAL_POSITION_INT's alt and relative_alt populate separate PositionData fields", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2071,7 +2067,7 @@ TEST_CASE ("GLOBAL_POSITION_INT's alt and relative_alt populate separate Positio
     REQUIRE (pd.getAltitudeAGLMetres () == Catch::Approx (80.0));
 }
 
-TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged each time (todo/68)", "[mav_io]")
+TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged each time", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2110,7 +2106,7 @@ TEST_CASE ("GLOBAL_POSITION_INT with frozen coordinates is reported unchanged ea
     REQUIRE (positions.count_now () >= 5);
 }
 
-/* todo/108: an ArduPilot reboot is typically a ~3s heartbeat gap, well under
+/* An ArduPilot reboot is typically a ~3s heartbeat gap, well under
  * heartbeat_loop()'s 5s link-down timeout, so it produces no comms edge and the
  * FSS connection never notices either. A backwards jump in the autopilot's own
  * uptime counter is the only evidence this end gets. These cases pin the
@@ -2141,7 +2137,7 @@ const std::vector<uint32_t> expected_stream_ids{ MAVLINK_MSG_ID_GPS_RAW_INT, MAV
                                                  MAVLINK_MSG_ID_BATTERY_STATUS };
 } // namespace
 
-TEST_CASE ("a backwards jump in the autopilot's uptime is reported as a restart and re-requests the streams (todo/108)",
+TEST_CASE ("a backwards jump in the autopilot's uptime is reported as a restart and re-requests the streams",
            "[mav_io]")
 {
     reset_mav_parser ();
@@ -2219,7 +2215,7 @@ TEST_CASE ("a backwards jump in the autopilot's uptime is reported as a restart 
     REQUIRE (restarts.load () == 1);
 }
 
-TEST_CASE ("SYSTEM_TIME feeds the restart detector, and only from the configured autopilot (todo/108)", "[mav_io]")
+TEST_CASE ("SYSTEM_TIME feeds the restart detector, and only from the configured autopilot", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2266,7 +2262,7 @@ TEST_CASE ("SYSTEM_TIME feeds the restart detector, and only from the configured
     REQUIRE (restarts.load () == 0);
 
     /* A backwards jump attributed to some other system on the link (a second
-     * vehicle, a GCS) must not be read as this autopilot restarting (todo/83). */
+     * vehicle, a GCS) must not be read as this autopilot restarting. */
     server.sendSystemTime (1200, /*sysid*/ 2);
     barrier ();
     REQUIRE (restarts.load () == 0);
@@ -2277,7 +2273,7 @@ TEST_CASE ("SYSTEM_TIME feeds the restart detector, and only from the configured
     REQUIRE (restarts.load () == 1);
 }
 
-TEST_CASE ("an autopilot uptime that only advances is never read as a restart (todo/108)", "[mav_io]")
+TEST_CASE ("an autopilot uptime that only advances is never read as a restart", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2312,7 +2308,7 @@ TEST_CASE ("an autopilot uptime that only advances is never read as a restart (t
     REQUIRE (restarts.load () == 0);
 }
 
-TEST_CASE ("a restart drops the loaded-search belief so the next load re-uploads (todo/108)", "[mav_io]")
+TEST_CASE ("a restart drops the loaded-search belief so the next load re-uploads", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2363,7 +2359,7 @@ TEST_CASE ("a restart drops the loaded-search belief so the next load re-uploads
 }
 
 TEST_CASE ("A heartbeat from a system other than the configured autopilot does not affect comms health or a "
-           "deferred mode (todo/83)",
+           "deferred mode",
            "[mav_io]")
 {
     reset_mav_parser ();
@@ -2379,8 +2375,8 @@ TEST_CASE ("A heartbeat from a system other than the configured autopilot does n
     REQUIRE (
         MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
 
-    /* Defer an RTL while the autopilot type is unknown (the todo/82 deferred-
-     * mode path): resolve_mav_mode(unknown, rtl) has no mapping, so the
+    /* Defer an RTL while the autopilot type is unknown (the deferred-mode
+     * path): resolve_mav_mode(unknown, rtl) has no mapping, so the
      * SET_MODE is held until a heartbeat resolves the airframe type. */
     conn.commandRTL ();
 
@@ -2411,8 +2407,7 @@ TEST_CASE ("A heartbeat from a system other than the configured autopilot does n
     REQUIRE (mavlink_msg_set_mode_get_custom_mode (&msg) == COPTER_MODE_RTL);
 }
 
-TEST_CASE ("A GLOBAL_POSITION_INT or GPS_RAW_INT from a system other than the configured autopilot has no effect "
-           "(todo/83)",
+TEST_CASE ("A GLOBAL_POSITION_INT or GPS_RAW_INT from a system other than the configured autopilot has no effect",
            "[mav_io]")
 {
     reset_mav_parser ();
@@ -2474,7 +2469,7 @@ TEST_CASE ("A GLOBAL_POSITION_INT or GPS_RAW_INT from a system other than the co
 }
 
 TEST_CASE ("A BATTERY_STATUS or MISSION_ITEM_REACHED from a system other than the configured autopilot produces no "
-           "callback (todo/83)",
+           "callback",
            "[mav_io]")
 {
     reset_mav_parser ();
@@ -2529,7 +2524,7 @@ TEST_CASE ("A BATTERY_STATUS or MISSION_ITEM_REACHED from a system other than th
 }
 
 TEST_CASE ("A MISSION_REQUEST_INT or MISSION_ACK from a system other than the configured autopilot has no mission "
-           "side effects (todo/83)",
+           "side effects",
            "[mav_io]")
 {
     reset_mav_parser ();
@@ -2575,8 +2570,7 @@ TEST_CASE ("A MISSION_REQUEST_INT or MISSION_ACK from a system other than the co
     expect_auto_mode (server);
 }
 
-TEST_CASE ("todo/91: --terminate-action=terminate against AFS_ENABLE=0 logs a distinct failsafe-config warning",
-           "[mav_io]")
+TEST_CASE ("--terminate-action=terminate against AFS_ENABLE=0 logs a distinct failsafe-config warning", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2593,7 +2587,7 @@ TEST_CASE ("todo/91: --terminate-action=terminate against AFS_ENABLE=0 logs a di
     REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("AFS_ENABLE=0"); }, io_timeout));
 }
 
-TEST_CASE ("todo/91: --terminate-action=terminate against a matching AFS config stays silent", "[mav_io]")
+TEST_CASE ("--terminate-action=terminate against a matching AFS config stays silent", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2626,8 +2620,7 @@ TEST_CASE ("todo/91: --terminate-action=terminate against a matching AFS config 
     REQUIRE_FALSE (capture.containsSubstring ("AFS_TERM_ACTION"));
 }
 
-TEST_CASE ("todo/91: --terminate-action=disarm never requests AFS params, but still checks the GCS failsafe",
-           "[mav_io]")
+TEST_CASE ("--terminate-action=disarm never requests AFS params, but still checks the GCS failsafe", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2646,13 +2639,13 @@ TEST_CASE ("todo/91: --terminate-action=disarm never requests AFS params, but st
     REQUIRE_FALSE (requested (params, "AFS_TERM_ACTION"));
     /* waitForColdStartThenUp's heartbeats default to MAV_TYPE_QUADROTOR. */
     REQUIRE (requested (params, "FS_GCS_ENABLE"));
-    /* todo/104's additions apply regardless of --terminate-action too: they
+    /* The GCS-failsafe checks apply regardless of --terminate-action too: they
      * back the comms-loss/low-battery latches, not termination. */
     REQUIRE (requested (params, "FS_OPTIONS"));
     REQUIRE (requested (params, "SYSID_MYGCS"));
 }
 
-TEST_CASE ("todo/91: the GCS-failsafe param name requested is airframe-specific", "[mav_io]")
+TEST_CASE ("the GCS-failsafe param name requested is airframe-specific", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2665,7 +2658,7 @@ TEST_CASE ("todo/91: the GCS-failsafe param name requested is airframe-specific"
     REQUIRE (server.waitForClient (io_timeout));
 
     /* Cold start: no heartbeat yet, so the first one sent below is genuinely
-     * the one that resolves the airframe type and drives the todo/91 check
+     * the one that resolves the airframe type and drives the failsafe check
      * (mirroring the other-system heartbeat test above, not
      * waitForColdStartThenUp, since that helper's heartbeats are always
      * MAV_TYPE_QUADROTOR). */
@@ -2682,13 +2675,12 @@ TEST_CASE ("todo/91: the GCS-failsafe param name requested is airframe-specific"
     auto params = collectParamRequests (server);
     REQUIRE (requested (params, "FS_GCS_ENABL"));
     REQUIRE_FALSE (requested (params, "FS_GCS_ENABLE"));
-    /* Plane-only: Copter encodes the same trap in FS_OPTIONS instead (todo/104). */
+    /* Plane-only: Copter encodes the same trap in FS_OPTIONS instead. */
     REQUIRE (requested (params, "FS_LONG_ACTN"));
     REQUIRE_FALSE (requested (params, "FS_OPTIONS"));
 }
 
-TEST_CASE ("todo/91: the failsafe-config check re-runs if a later heartbeat reports a different autopilot type",
-           "[mav_io]")
+TEST_CASE ("the failsafe-config check re-runs if a later heartbeat reports a different autopilot type", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2705,14 +2697,14 @@ TEST_CASE ("todo/91: the failsafe-config check re-runs if a later heartbeat repo
     REQUIRE (requested (collectParamRequests (server), "FS_GCS_ENABLE"));
 
     /* MAV_TYPE is fixed by firmware and never changes at runtime for a
-     * genuine autopilot; this stands in for the todo/97 residual risk (a
-     * second vehicle sharing this sysid on a hub) to prove the check
-     * doesn't stay silent forever once latched for the first-seen type. */
+     * genuine autopilot; this stands in for the residual risk (a second
+     * vehicle sharing this sysid on a hub) to prove the check doesn't stay
+     * silent forever once latched for the first-seen type. */
     server.sendHeartbeat (MAV_TYPE_FIXED_WING);
     REQUIRE (requested (collectParamRequests (server), "FS_GCS_ENABL"));
 }
 
-TEST_CASE ("todo/91: a disabled GCS/telemetry failsafe on the autopilot logs a distinct warning", "[mav_io]")
+TEST_CASE ("a disabled GCS/telemetry failsafe on the autopilot logs a distinct warning", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2731,10 +2723,10 @@ TEST_CASE ("todo/91: a disabled GCS/telemetry failsafe on the autopilot logs a d
     REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("FS_GCS_ENABLE=0"); }, io_timeout));
 }
 
-/* todo/104: the gap this closes is a *nonzero* value that still leaves no
- * backstop -- the enable flag says the failsafe fires, not what it does. Each
- * case below would have passed the todo/91 nonzero test in silence. */
-TEST_CASE ("todo/104: a GCS failsafe that continues the mission logs a warning despite being enabled", "[mav_io]")
+/* The gap this closes is a *nonzero* value that still leaves no backstop --
+ * the enable flag says the failsafe fires, not what it does. Each case below
+ * would have passed a bare nonzero test in silence. */
+TEST_CASE ("a GCS failsafe that continues the mission logs a warning despite being enabled", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2769,7 +2761,7 @@ TEST_CASE ("todo/104: a GCS failsafe that continues the mission logs a warning d
     }
 }
 
-TEST_CASE ("todo/104: Plane's FS_LONG_ACTN=0 warns even with FS_GCS_ENABL=1", "[mav_io]")
+TEST_CASE ("Plane's FS_LONG_ACTN=0 warns even with FS_GCS_ENABL=1", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2793,7 +2785,7 @@ TEST_CASE ("todo/104: Plane's FS_LONG_ACTN=0 warns even with FS_GCS_ENABL=1", "[
         },
         io_timeout));
 
-    /* Exactly the configuration todo/104 was filed about: the failsafe is
+    /* Exactly the configuration this check exists for: the failsafe is
      * enabled, and its action is the firmware default, Continue. */
     server.sendParamValue ("FS_GCS_ENABL", 1.0F);
     server.sendParamValue ("FS_LONG_ACTN", 0.0F);
@@ -2801,7 +2793,7 @@ TEST_CASE ("todo/104: Plane's FS_LONG_ACTN=0 warns even with FS_GCS_ENABL=1", "[
     REQUIRE_FALSE (capture.containsSubstring ("FS_GCS_ENABL="));
 }
 
-TEST_CASE ("todo/104: a fleet-configured airframe stays silent", "[mav_io]")
+TEST_CASE ("a fleet-configured airframe stays silent", "[mav_io]")
 {
     reset_mav_parser ();
     MavLoopbackServer server;
@@ -2816,7 +2808,7 @@ TEST_CASE ("todo/104: a fleet-configured airframe stays silent", "[mav_io]")
     REQUIRE (server.waitForClient (io_timeout));
     REQUIRE (waitForColdStartThenUp (server, recorder));
 
-    /* The decided fleet configuration for a Copter (todo/103's table). */
+    /* The decided fleet configuration for a Copter (see the README table). */
     server.sendParamValue ("FS_GCS_ENABLE", 1.0F);
     server.sendParamValue ("FS_OPTIONS", 0.0F);
     server.sendParamValue ("SYSID_MYGCS", 200.0F);

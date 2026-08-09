@@ -19,9 +19,9 @@ enum FSSCommand
 /* The target a goto/altitude command carries. Delivered together with its
  * FSSCommand (in the FSSCommandEvent and through FSSNewCommand) so a command and
  * its target travel as a single unit, rather than the target arriving via a
- * separate FSS side-channel that the state machine re-reads at action time
- * (todo/53). Fields stay default for commands that carry no target; only the one
- * matching the command is meaningful (position for goto, altitude for altitude). */
+ * separate FSS side-channel that the state machine re-reads at action time. Fields
+ * stay default for commands that carry no target; only the one matching the command
+ * is meaningful (position for goto, altitude for altitude). */
 struct FSSCommandTarget
 {
     Point position{};
@@ -29,7 +29,7 @@ struct FSSCommandTarget
      * is uint32_t). Kept full-width here so the value is narrowed only by the
      * regulatory [floor, cap] clamp in clamp_command_altitude(), never by a lossy
      * cast that could wrap a large altitude down to a low one before the clamp
-     * ever sees it (todo/55). */
+     * ever sees it. */
     uint32_t altitude{ 0 };
 };
 

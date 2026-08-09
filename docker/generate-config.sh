@@ -1,7 +1,7 @@
 #!/bin/bash -e
 
 # Generates the FSS client config (fmu-client.json) from environment
-# variables using jq, so string values are properly JSON-escaped (todo/56)
+# variables using jq, so string values are properly JSON-escaped
 # instead of raw echo/interpolation, which could break the config or inject
 # additional fields on a value containing a quote, backslash, or newline.
 #
@@ -54,7 +54,7 @@ if [ -z "${SERVER1_ADDR}" ]; then
     echo "Error: SERVER1_ADDR must be set (the FSS server address)" >&2
     exit 1
 fi
-# SERVER1_PORT previously had no validation at all (todo/56); apply the same
+# SERVER1_PORT previously had no validation at all; apply the same
 # numeric/range check as MAVPROXY_PORT.
 case "${SERVER1_PORT}" in
     '' | *[!0-9]*)
@@ -85,7 +85,7 @@ if [ -n "${SERVER2_ADDR}" ]; then
     fi
 fi
 
-# LOG_DIR is optional (todo/78): the image creates and owns the cap-fmu
+# LOG_DIR is optional: the image creates and owns the cap-fmu
 # default (/var/log/cap-fmu) so logging works out of the box, but a
 # deployment that wants logs to survive container recreation can set LOG_DIR
 # to a mounted volume instead. Omitted entirely when unset, so the default
@@ -93,7 +93,7 @@ fi
 # duplicated literal here that could drift from it.
 LOG_DIR="${LOG_DIR:-}"
 
-# CLOCK_OFFSET_MS is optional (todo/88): a signed millisecond offset applied
+# CLOCK_OFFSET_MS is optional: a signed millisecond offset applied
 # to every wall-clock-stamped outbound FSS message, letting a test harness
 # give this FMU a deliberately skewed idea of time without touching the
 # container's real (host-kernel-global, non-namespaced) CLOCK_REALTIME.

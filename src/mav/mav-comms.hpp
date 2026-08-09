@@ -11,7 +11,7 @@
  * -Wstringop-truncation flags that as a mistake, which for this field it is
  * not: the field is a fixed-width slot, not a C string). Shared by every
  * caller that packs a MAVLink param_id (checkFailsafeConfig() and the
- * mav_io_test.cpp loopback server's sendParamValue(), todo/91) so the
+ * mav_io_test.cpp loopback server's sendParamValue()) so the
  * out-of-bounds-read hazard of passing a short literal straight to a
  * mavlink_msg_*_pack_chan() call (which always reads dest_len bytes from its
  * source pointer) is fixed in exactly one place. */
@@ -64,21 +64,20 @@ inline constexpr uint32_t autopilot_restart_margin_ms = 3000;
  * mav_connection::noteTimeBootMs() so the boundaries can be unit tested without
  * a socket (same reason as mav_comms_is_up() above).
  *
- * This is the detector for the restart shape nothing else on this end can see
- * (todo/108): an ArduPilot reboot is typically a ~3s heartbeat gap, under
- * heartbeat_loop()'s 5s timeout, so it produces no comms down/up edge at all —
- * the FSS connection never notices either, so the server has nothing to
- * re-dispatch on. A backwards jump in the autopilot's own uptime counter is the
- * evidence that survives.
+ * This is the detector for the restart shape nothing else on this end can see:
+ * an ArduPilot reboot is typically a ~3s heartbeat gap, under heartbeat_loop()'s
+ * 5s timeout, so it produces no comms down/up edge at all — the FSS connection
+ * never notices either, so the server has nothing to re-dispatch on. A backwards
+ * jump in the autopilot's own uptime counter is the evidence that survives.
  *
  * A zero on either side means "no reading", not "uptime zero", and is never a
  * restart. For last_time_boot_ms that is the initial state: nothing has been
  * observed yet, so the first sample cannot itself look like one. For
  * now_time_boot_ms it is MAVLink's convention for a field the sender did not
  * populate — treating that as a jump back to the epoch would report a restart on
- * every such message. Nothing is lost: a real reboot is not observable at
- * uptime exactly 0 (no stream emits its first message that instant), and the
- * next message milliseconds later still reads far below the pre-reboot value.
+ * every such message. Nothing is lost: a real reboot is not observable at uptime
+ * exactly 0 (no stream emits its first message that instant), and the next
+ * message milliseconds later still reads far below the pre-reboot value.
  *
  * Known false positive, deliberately accepted: time_boot_ms is uint32
  * milliseconds and wraps after ~49.7 days of continuous autopilot uptime, which

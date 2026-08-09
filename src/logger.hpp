@@ -90,8 +90,8 @@ smm_cmd_name (SMMCommand cmd)
 
 /* Rendered into every log line by Logger::log(), which is what lets call
  * sites state severity once — in the level argument — instead of repeating
- * it in the message text (todo/109). Upper case so it reads distinctly from
- * the category tags (STATE/CMD/COMMS/...) that follow it. */
+ * it in the message text. Upper case so it reads distinctly from the
+ * category tags (STATE/CMD/COMMS/...) that follow it. */
 inline const char *
 log_level_name (LogLevel level)
 {
@@ -111,13 +111,13 @@ log_level_name (LogLevel level)
 
 /* Every diagnostic (STATE/CMD/COMMS/BATTERY/...) formats and enqueues a line
  * from log() and returns immediately; a dedicated worker thread does the
- * actual write/flush/rotation. This mirrors SMM's and FSS's worker pattern
- * (todo/33, todo/51): several EventDispatcher branches call log() before the
- * state-machine method that commands the autopilot (e.g. the FSS command
- * event logs before FSSNewCommand(), which is what sends rtl/terminate/etc.),
- * so a blocking log() — a full disk, a wedged network log_dir, an in-flight
- * rotation — would otherwise stall the event-loop thread that arbitrates
- * every flight-safety command (todo/88). */
+ * actual write/flush/rotation. This mirrors SMM's and FSS's worker pattern:
+ * several EventDispatcher branches call log() before the state-machine method
+ * that commands the autopilot (e.g. the FSS command event logs before
+ * FSSNewCommand(), which is what sends rtl/terminate/etc.), so a blocking
+ * log() — a full disk, a wedged network log_dir, an in-flight rotation —
+ * would otherwise stall the event-loop thread that arbitrates every
+ * flight-safety command. */
 class Logger : public ILogger
 {
   public:
@@ -126,12 +126,12 @@ class Logger : public ILogger
     static constexpr std::size_t default_max_log_bytes = 10UL * 1024 * 1024;
 
     /* Default bound on lines waiting to be written. Moving the disk I/O off
-     * the event loop (todo/88) made log() non-blocking, but left the queue
-     * that absorbs the difference unbounded: a log_dir that stops accepting
-     * writes (full disk, disconnected mount, a hung network filesystem) does
-     * not slow the producers down, so the backlog grows for as long as the
-     * condition lasts. On a companion computer that is memory the flight
-     * software needs.
+     * the event loop made log() non-blocking, but left the queue that absorbs
+     * the difference unbounded: a log_dir that stops accepting writes (full
+     * disk, disconnected mount, a hung network filesystem) does not slow the
+     * producers down, so the backlog grows for as long as the condition
+     * lasts. On a companion computer that is memory the flight software
+     * needs.
      *
      * ~10k lines is on the order of a megabyte of text and tens of seconds of
      * backlog even at debug verbosity, so a transient stall is absorbed whole

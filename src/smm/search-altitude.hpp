@@ -61,7 +61,7 @@ clamp_search_altitude (double altitude, uint16_t altitude_floor, uint16_t altitu
  * altitude_ft is taken full-width (uint32_t): this clamp is the single narrowing
  * authority for a commanded altitude. An oversized value converts to a large
  * metre count and is pinned to the cap, so it can never wrap to a low altitude
- * that the [floor, cap] range would then wave through (todo/55). */
+ * that the [floor, cap] range would then wave through. */
 inline auto
 clamp_command_altitude (uint32_t altitude_ft, uint16_t altitude_floor, uint16_t altitude_cap) -> uint16_t
 {

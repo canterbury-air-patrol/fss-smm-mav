@@ -16,16 +16,15 @@
  * -----------------------------------
  * Every state-mutating method below (FSSNewCommand, SMMNewCommand,
  * setLowBattery, setCommsFailure, setMavCommsFailure, setCurrentAltitude) and
- * the work they drive
- * (updateState / actionState, which touch mav, smm and state_change_cb) run on
- * the ONE event-loop thread. All external inputs — FSS/SMM/MAV callbacks — are
- * funnelled through the App event queue and applied here on that thread, which
- * is what makes the priority arbitration and the state fields safe to reason
- * about without locking beyond the small guarded region that publishes to worker
- * threads (pending_replay_state). Calling any of these methods from another
- * thread (e.g. directly from a MAV/SMM/FSS callback instead of enqueuing an
- * event) would introduce a silent data race on the state fields.
- * assert_event_loop_thread() defends this in debug builds (todo/52). */
+ * the work they drive (updateState / actionState, which touch mav, smm and
+ * state_change_cb) run on the ONE event-loop thread. All external inputs —
+ * FSS/SMM/MAV callbacks — are funnelled through the App event queue and applied
+ * here on that thread, which is what makes the priority arbitration and the
+ * state fields safe to reason about without locking beyond the small guarded
+ * region that publishes to worker threads (pending_replay_state). Calling any of
+ * these methods from another thread (e.g. directly from a MAV/SMM/FSS callback
+ * instead of enqueuing an event) would introduce a silent data race on the state
+ * fields. assert_event_loop_thread() defends this in debug builds. */
 class FMUStateMachine
 {
   private:
@@ -47,9 +46,9 @@ class FMUStateMachine
      * search, fire the state-change callback). Returns whether the MAV command was
      * transmitted; a false result is not recorded anywhere, because the recovery
      * rule no longer depends on it — every MAV-link recovery re-applies the
-     * current state whether or not the earlier send got through (todo/108,
-     * generalising todo/46's narrower replay-on-failure).
-     * Must be called WITHOUT this->lock held (it locks internally). */
+     * current state whether or not the earlier send got through, generalising an
+     * earlier, narrower replay-on-failure rule. Must be called WITHOUT this->lock
+     * held (it locks internally). */
     auto actionState (FMUState state) -> bool;
     /* Debug-only guard for the single-event-loop-thread invariant documented
      * above the class: assert this call runs on the event-loop thread that owns
@@ -70,8 +69,8 @@ class FMUStateMachine
      * ownership and locks" table is the canonical inventory of what that lock
      * guards: adding a field here means adding it there too, or the document
      * that contributors are told to reason from before running TSan quietly
-     * stops being the complete map it claims to be (todo/95, which is exactly
-     * how `terminated` came to be missing from it). */
+     * stops being the complete map it claims to be — which is exactly how
+     * `terminated` came to be missing from it. */
     FMUState current_state{ fmu_state_manual };
     FSSCommand fss_command{ fss_cmd_unknown };
     /* Target of the most recent goto/altitude FSS command, retained so
@@ -79,8 +78,8 @@ class FMUStateMachine
      * (re-)entered — including a later transition (e.g. a comms latch clearing)
      * that re-applies the stored fss_command. Set alongside fss_command in
      * FSSNewCommand; the command carries its own target through the event queue
-     * rather than the state machine reading it back from FSS (todo/53). Only the
-     * field matching fss_command is meaningful. */
+     * rather than the state machine reading it back from FSS. Only the field
+     * matching fss_command is meaningful. */
     FSSCommandTarget fss_command_target{};
     SMMCommand smm_command{ smm_cmd_none };
     int low_battery_count{ 0 };
@@ -90,21 +89,19 @@ class FMUStateMachine
     int altitude_clear_count{ 0 };
     int altitude_breach_latch_count;
     uint16_t altitude_cap_m;
-    /* Unlike low_battery/terminated, this latch is self-clearing (todo/92):
-     * a sustained run of under-cap readings clears it again, returning
-     * control to whatever FSS/SMM command is current. Modelled on the
-     * comms-failsafe precedent (fss_comms_lost/mav_comms_lost below), not
-     * the restart-only latches, per todo/17's geofence design note that a
-     * breach RTL should not be an un-overridable latch. */
+    /* Unlike low_battery/terminated, this latch is self-clearing: a
+     * sustained run of under-cap readings clears it again, returning control
+     * to whatever FSS/SMM command is current. Modelled on the comms-failsafe
+     * precedent (fss_comms_lost/mav_comms_lost below), not the restart-only
+     * latches: a breach RTL should not be an un-overridable latch. */
     bool altitude_breach{ false };
     /* Latches true the first time fss_command is seen as fss_cmd_terminate and
-     * is never cleared (todo/63): the flight-termination action (motor cut /
-     * parachute / force-disarm) is physically irreversible, so a later FSS
-     * command silently moving the FMU's own state back out of terminate would
-     * be misleading (FSS telemetry would claim e.g. "searching" for an
-     * aircraft that already terminated) even though it cannot undo the
-     * airframe action. Recovery requires an FMU restart, matching the
-     * low_battery latch. */
+     * is never cleared: the flight-termination action (motor cut / parachute /
+     * force-disarm) is physically irreversible, so a later FSS command
+     * silently moving the FMU's own state back out of terminate would be
+     * misleading (FSS telemetry would claim e.g. "searching" for an aircraft
+     * that already terminated) even though it cannot undo the airframe action.
+     * Recovery requires an FMU restart, matching the low_battery latch. */
     bool terminated{ false };
     bool fss_comms_lost{ false };
     bool mav_comms_lost{ false };
@@ -152,18 +149,18 @@ class FMUStateMachine
     /* Report the MAV link's health. On a genuine down->up edge the current state
      * is re-commanded to the autopilot unconditionally -- whether or not the
      * earlier send succeeded, and whether or not the recovery produced a state
-     * transition (todo/108). A link gap is not distinguishable from an autopilot
-     * reboot from here, so the safe reading is that the autopilot came back with
-     * no memory: a redundant SET_MODE costs nothing, a low-battery RTL that is
+     * transition. A link gap is not distinguishable from an autopilot reboot
+     * from here, so the safe reading is that the autopilot came back with no
+     * memory: a redundant SET_MODE costs nothing, a low-battery RTL that is
      * never re-sent costs the aircraft. */
     void setMavCommsFailure (bool failed);
     /* Re-apply the current state to the autopilot with no state change: the
-     * autopilot restarted underneath us (todo/108) and has forgotten its mode
-     * and its mission, but nothing about the FMU's own state is stale. Runs the
-     * full side effects of entering that state -- including the SMM
-     * search/cancel calls and the state-change log -- because the restart
-     * invalidated all of them; SMM::doSearch()'s held-search resume path makes
-     * the searching case idempotent. */
+     * autopilot restarted underneath us and has forgotten its mode and its
+     * mission, but nothing about the FMU's own state is stale. Runs the full
+     * side effects of entering that state -- including the SMM search/cancel
+     * calls and the state-change log -- because the restart invalidated all of
+     * them; SMM::doSearch()'s held-search resume path makes the searching case
+     * idempotent. */
     void reassertState ();
     /* Report the latest own-aircraft AGL altitude reading and whether it is
      * backed by a valid fix. Called for *every* own-ship position report
@@ -180,17 +177,16 @@ class FMUStateMachine
      * gate SMM worker outcomes (load-search / RTL-fallback): an outcome that
      * raced a higher-priority transition out of searching is dropped rather than
      * commanding the autopilot. Reads current_state under this->lock; since every
-     * transition runs on the event loop too, the guard sees a consistent value
-     * (todo/33). */
+     * transition runs on the event loop too, the guard sees a consistent value.
+     */
     auto isSearching () -> bool;
     /* True while the FMU is waiting for tasking: SMM reported it has nothing
      * to search right now (a completed search with none queued behind it, or
      * a failed acquire attempt). The aircraft is flying the same RTL flight
      * mode as fmu_state_rtl, but -- unlike a real RTL -- the SMM searching
      * role was deliberately left granted, so SMM's own background
-     * acquire-retry loop keeps running (todo/70, todo/77). The event loop
-     * uses this to resume searching (rather than re-uploading directly) when
-     * SMM reports a freshly (re)acquired search. Reads current_state under
-     * this->lock (todo/33). */
+     * acquire-retry loop keeps running. The event loop uses this to resume
+     * searching (rather than re-uploading directly) when SMM reports a
+     * freshly (re)acquired search. Reads current_state under this->lock. */
     auto isWaitingForTasking () -> bool;
 };

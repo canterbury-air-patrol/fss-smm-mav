@@ -220,13 +220,13 @@ class TestFSS : public FSS
     }
 };
 
-/* This is the case that still bites after the client library's todo/66: the
- * position/reached/battery reports fan out through the (now non-blocking)
- * sendMsgAll, but the second-phase command ack is a per-connection sendMsg that
- * stays blocking. So it is the ack that the send worker still has to keep off
- * the event loop -- and it is the path that closes the loop on an operator's
- * rtl/terminate. */
-TEST_CASE ("FSS callers stay responsive while the worker is wedged in a command-ack send (todo/98)", "[fss]")
+/* This is the case that still bites after the client library's outbound fan-out
+ * rework: the position/reached/battery reports fan out through the (now
+ * non-blocking) sendMsgAll, but the second-phase command ack is a
+ * per-connection sendMsg that stays blocking. So it is the ack that the send
+ * worker still has to keep off the event loop -- and it is the path that closes
+ * the loop on an operator's rtl/terminate. */
+TEST_CASE ("FSS callers stay responsive while the worker is wedged in a command-ack send", "[fss]")
 {
     TestFSS fss{ no_config };
     fss.block_sends = true;
@@ -252,7 +252,7 @@ TEST_CASE ("FSS callers stay responsive while the worker is wedged in a command-
     REQUIRE (waitFor ([&] { return responder_calls.load () >= 2; }, io_timeout));
 }
 
-TEST_CASE ("FSS::enqueue coalesces queued position reports and leaves every other task alone (todo/98)", "[fss]")
+TEST_CASE ("FSS::enqueue coalesces queued position reports and leaves every other task alone", "[fss]")
 {
     TestFSS fss{ no_config };
     fss.block_sends = true;
@@ -299,7 +299,7 @@ TEST_CASE ("FSS::enqueue coalesces queued position reports and leaves every othe
     REQUIRE (waitFor ([&] { return responder_calls.load () >= 1; }, io_timeout));
 }
 
-TEST_CASE ("FSS drains the coalesced queue once the wedged send clears (todo/98)", "[fss]")
+TEST_CASE ("FSS drains the coalesced queue once the wedged send clears", "[fss]")
 {
     TestFSS fss{ no_config };
     fss.block_sends = true;
@@ -340,7 +340,7 @@ TEST_CASE ("FSS drains the coalesced queue once the wedged send clears (todo/98)
  * when the destructor starts, and a subclass is destroyed derived-part-first, so
  * parking the worker in a subclass seam across ~FSS would tear down the seam's
  * own members underneath it. */
-TEST_CASE ("~FSS drains queued tasks, and a queued ack fires without a usable client (todo/98)", "[fss]")
+TEST_CASE ("~FSS drains queued tasks, and a queued ack fires without a usable client", "[fss]")
 {
     constexpr int queued_acks = 64;
     std::atomic<int> responder_calls{ 0 };

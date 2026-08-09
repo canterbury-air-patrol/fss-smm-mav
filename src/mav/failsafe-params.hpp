@@ -8,31 +8,30 @@
 
 #include "mav.hpp"
 
-/* todo/91, extended by todo/104: sanity-check the autopilot's own failsafe
- * config against the safety backstops the FMU's design leans on while the MAV
- * link is down (see FMUStateMachine::actionState() / sendMavLinkMsgLocked()) —
- * AFS for --terminate-action=terminate, and the autopilot's GCS/telemetry
- * failsafe for the comms-loss/low-battery latches. Read-only and advisory: the
- * FMU requests parameters, never writes them, and a mismatch warns rather than
- * blocking flight. The ground tool (tools/apconfig_check.py, todo/103) is where
- * a misconfiguration is meant to be caught; this is the last-chance warning when
- * it was not, so the two expectation tables mirror each other and must be kept
- * in step.
+/* Sanity-check the autopilot's own failsafe config against the safety backstops
+ * the FMU's design leans on while the MAV link is down (see
+ * FMUStateMachine::actionState() / sendMavLinkMsgLocked()) — AFS for
+ * --terminate-action=terminate, and the autopilot's GCS/telemetry failsafe for
+ * the comms-loss/low-battery latches. Read-only and advisory: the FMU requests
+ * parameters, never writes them, and a mismatch warns rather than blocking
+ * flight. The ground tool (tools/apconfig_check.py) is where a misconfiguration
+ * is meant to be caught; this is the last-chance warning when it was not, so the
+ * two expectation tables mirror each other and must be kept in step.
  *
- * todo/91 shipped with every check reduced to "this param must read nonzero",
- * which is not sufficient: an enable flag says the failsafe *fires*, not what it
- * does when it does. FS_GCS_ENABL=1 with FS_LONG_ACTN=0 (the Plane default)
- * triggers and then continues the mission in AUTO and GUIDED — the modes this
- * FMU flies — so the aircraft has no backstop and the check passed anyway.
- * Copter has the same trap in FS_OPTIONS bit 1, and Rover in FS_ACTION. Hence a
- * predicate per check rather than a shared nonzero test. */
+ * These checks first shipped with every one reduced to "this param must read
+ * nonzero", which is not sufficient: an enable flag says the failsafe *fires*,
+ * not what it does when it does. FS_GCS_ENABL=1 with FS_LONG_ACTN=0 (the Plane
+ * default) triggers and then continues the mission in AUTO and GUIDED — the
+ * modes this FMU flies — so the aircraft has no backstop and the check passed
+ * anyway. Copter has the same trap in FS_OPTIONS bit 1, and Rover in FS_ACTION.
+ * Hence a predicate per check rather than a shared nonzero test. */
 
 /* cap-fmu's own MAVLink system id (SYS_ID in mavlink.cpp, which static_asserts
  * against this). The autopilot's GCS failsafe must watch *this* heartbeat: under
  * the deployed topology MAVProxy runs on the same companion computer and
  * heartbeats as 255, so at SYSID_MYGCS's default the failsafe tracks MAVProxy
  * and the death of the FMU process is invisible to it. The fleet's decided
- * configuration is SYSID_MYGCS=200 (todo/103). */
+ * configuration is SYSID_MYGCS=200. */
 constexpr uint8_t fmu_gcs_sys_id = 200;
 
 /* FS_OPTIONS bit 1 (Copter): "continue if in Auto on GCS failsafe" — the same
@@ -59,9 +58,9 @@ struct FailsafeParamCheck
     bool (*accept) (float) = nullptr;
     /* Logged if accept() rejects the value, carrying no severity prefix of its
      * own — the caller logs it at LogLevel::warning, prefixed with the param
-     * name and the value actually read (todo/109). A std::string (not
-     * const char *) since the GCS-failsafe entries build their text from the
-     * resolved param name. */
+     * name and the value actually read. A std::string (not const char *) since
+     * the GCS-failsafe entries build their text from the resolved param name.
+     */
     std::string warning;
 };
 

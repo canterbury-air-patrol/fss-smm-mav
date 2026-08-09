@@ -23,7 +23,7 @@ mav_io_test_CPPFLAGS = -I$(top_srcdir)/src -isystem $(top_srcdir)/mavlink $(CATC
 mav_io_test_CXXFLAGS = $(AM_CXXFLAGS)
 mav_io_test_LDADD = $(CATCH2_LIBS) $(SMM_ASSET_LIBS) $(FSS_CLIENT_SSL_LIBS) $(JSONCPP_LIBS)
 
-# Tests over the real FSS send worker (todo/98): its task queue, the
+# Tests over the real FSS send worker: its task queue, the
 # position-report coalescing in FSS::enqueue, and workerLoop's dispatch. Links
 # the real FSS/fss_client_ssl objects, so it needs libfss-client-ssl -- but no
 # peer and no TLS: the FSS under test is built from a nonexistent config file,

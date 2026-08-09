@@ -20,8 +20,7 @@ enum FMUState
      * real RTL this is not a command to stop searching. actionState()
      * deliberately does not cancel the SMM searching role for this state, so
      * SMM's own background acquire-retry loop keeps running and a freshly
-     * reacquired search auto-engages with no operator action (todo/70,
-     * todo/77). */
+     * reacquired search auto-engages with no operator action. */
     fmu_state_waiting_for_tasking,
     fmu_state_hold,
     fmu_state_low_battery,

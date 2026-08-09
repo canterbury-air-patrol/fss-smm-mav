@@ -41,7 +41,7 @@
 #include <vector>
 
 /* Discards everything; used where a test needs an ILogger but is not
- * itself testing logging output (todo/59). */
+ * itself testing logging output. */
 class NullLogger : public ILogger
 {
   public:
@@ -66,7 +66,7 @@ class MockMAV : public IMAV
     int goto_calls{ 0 };
     /* Controls the transmission result the action methods report. Set false to
      * simulate a send that did not reach the autopilot (MAV link down) so the
-     * re-apply-on-recovery path (todo/46, todo/108) can be exercised. */
+     * re-apply-on-recovery path can be exercised. */
     bool send_succeeds{ true };
     std::shared_ptr<SMMSearch> last_loaded_search{ nullptr };
     int load_search_calls{ 0 };
@@ -314,7 +314,7 @@ TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machin
     REQUIRE (mav->last_mode == flight_mode_hold);
 }
 
-TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms recover (todo/46)",
+TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms recover",
            "[state_machine][replay][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -337,7 +337,7 @@ TEST_CASE ("a low-battery RTL that failed to send is replayed when MAV comms rec
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("a waiting_for_tasking RTL that failed to send is replayed once MAV comms report okay again (todo/46/70)",
+TEST_CASE ("a waiting_for_tasking RTL that failed to send is replayed once MAV comms report okay again",
            "[state_machine][replay]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -362,8 +362,7 @@ TEST_CASE ("a waiting_for_tasking RTL that failed to send is replayed once MAV c
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (todo/46)",
-           "[state_machine][replay][TC-FS-005]")
+TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover", "[state_machine][replay][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -381,7 +380,7 @@ TEST_CASE ("a terminate that failed to send is replayed when MAV comms recover (
     REQUIRE (mav->terminate_calls == terminate_before + 1);
 }
 
-TEST_CASE ("a safety action that was transmitted is re-applied on a genuine MAV recovery (todo/108)",
+TEST_CASE ("a safety action that was transmitted is re-applied on a genuine MAV recovery",
            "[state_machine][replay][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -391,20 +390,19 @@ TEST_CASE ("a safety action that was transmitted is re-applied on a genuine MAV 
     REQUIRE (mav->last_mode == flight_mode_rtl);
     const int calls_before = mav->set_mode_calls;
 
-    /* The link goes away and comes back. The low-battery latch outranks the
-     * comms failsafe, so current_state never moves and there is no transition to
-     * re-drive -- and under todo/46's old rule nothing was re-sent, because the
-     * original send had succeeded. But this end cannot tell a link drop from an
-     * autopilot reboot, and a rebooted autopilot has forgotten the RTL entirely.
-     * So the current state is re-commanded regardless (todo/108). */
+    /* The link goes away and comes back. The low-battery latch outranks the comms failsafe,
+     * so current_state never moves and there is no transition to re-drive -- and under the
+     * old replay-on-failure rule nothing was re-sent, because the original send had
+     * succeeded. But this end cannot tell a link drop from an autopilot reboot, and a
+     * rebooted autopilot has forgotten the RTL entirely. So the current state is
+     * re-commanded regardless. */
     sm->setMavCommsFailure (true);
     sm->setMavCommsFailure (false);
     REQUIRE (mav->set_mode_calls == calls_before + 1);
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("a redundant comms-okay report with no preceding loss re-sends nothing (todo/108)",
-           "[state_machine][replay]")
+TEST_CASE ("a redundant comms-okay report with no preceding loss re-sends nothing", "[state_machine][replay]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -440,10 +438,10 @@ TEST_CASE ("fss_cmd_continue with smm_cmd_abandon_search leads to searching", "[
     REQUIRE (smm->search_calls > 0);
 }
 
-/* The search is paused (not abandoned) by an interrupting command, so returning
- * to searching via `continue` must re-invoke SMM::search to resume it. This pins
- * the state-machine half of todo/50; the SMM half (re-issuing the mission upload)
- * is covered in mav_io_test. */
+/* The search is paused (not abandoned) by an interrupting command, so returning to
+ * searching via `continue` must re-invoke SMM::search to resume it. This pins the
+ * state-machine half of search resume; the SMM half (re-issuing the mission upload) is
+ * covered in mav_io_test. */
 TEST_CASE ("continue after a hold re-invokes the search so it can resume", "[state_machine]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -463,8 +461,8 @@ TEST_CASE ("continue after a hold re-invokes the search so it can resume", "[sta
 /* Override matrix: the searching state defers to the SMM command, and any higher
  * priority input (an explicit FSS command, low battery, or comms failure) takes
  * over an active search. These cover the transitions into/out of searching; the
- * pause/resume behaviour of the search itself is tracked separately (todo/50). */
-TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL, without cancelling the search role (todo/70)",
+ * pause/resume behaviour of the search itself is tracked separately. */
+TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL, without cancelling the search role",
            "[state_machine]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -478,8 +476,8 @@ TEST_CASE ("smm_cmd_mission_complete overrides an active search with RTL, withou
     REQUIRE (mav->last_mode == flight_mode_rtl);
     /* Unlike a real RTL, this must NOT cancel the SMM searching role: the
      * acquire-retry loop must keep running so a freshly reacquired search
-     * auto-engages with no operator action (todo/77). Contrast with "low
-     * battery forces RTL out of an active search" below. */
+     * auto-engages with no operator action. Contrast with "low battery
+     * forces RTL out of an active search" below. */
     REQUIRE (smm->cancel_calls == 0);
 }
 
@@ -658,8 +656,8 @@ TEST_CASE ("goto command passes its carried target to mav gotoPosition", "[state
 {
     auto [mav, smm, sm] = make_sm ();
 
-    /* The target travels inside the command (todo/53), not via an FSS
-     * side-channel; actionState must goto exactly the point the command carried. */
+    /* The target travels inside the command, not via an FSS side-channel;
+     * actionState must goto exactly the point the command carried. */
     sm->FSSNewCommand (fss_cmd_goto, FSSCommandTarget{ Point{ -43.5, 172.6 }, 0 });
 
     REQUIRE (mav->goto_calls == 1);
@@ -707,7 +705,7 @@ TEST_CASE ("altitude adjust carries a full-width altitude through to setAltitude
     /* An altitude that does not fit in 16 bits must reach the MAV layer intact so
      * the [floor, cap] clamp there is the only thing that narrows it. If the
      * target were still uint16_t this would wrap (70000 & 0xFFFF == 4464) and the
-     * state machine would command a low altitude instead (todo/55). */
+     * state machine would command a low altitude instead. */
     constexpr uint32_t oversized_ft = 70000;
     sm->FSSNewCommand (fss_cmd_altitude, FSSCommandTarget{ Point{}, oversized_ft });
 
@@ -747,8 +745,8 @@ TEST_CASE ("low battery does not latch before the debounce count", "[state_machi
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-/* low_battery_latch_count is configurable (todo/54): a non-default count must
- * actually change the debounce, not just be accepted and ignored. */
+/* low_battery_latch_count is configurable: a non-default count must actually
+ * change the debounce, not just be accepted and ignored. */
 TEST_CASE ("a configured low_battery_latch_count changes the debounce", "[state_machine][TC-FS-011][TC-FS-012]")
 {
     auto [mav, smm, sm] = make_sm (2);
@@ -822,8 +820,8 @@ TEST_CASE ("low battery latch saturates and stays engaged over a long run", "[st
 }
 
 /* Design decision: the altitude-cap breach latch is debounced exactly like
- * low-battery (todo/92). A single noisy over-cap EKF sample must not ground
- * the mission. */
+ * low-battery. A single noisy over-cap EKF sample must not ground the
+ * mission. */
 TEST_CASE ("altitude breach does not latch before the debounce count", "[state_machine][altitude_cap]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -863,8 +861,9 @@ TEST_CASE ("an under-cap reading resets the altitude breach trip-side debounce",
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-/* altitude_breach_latch_count is configurable, matching low_battery_latch_count
- * (todo/54): a non-default count must actually change the debounce. */
+/* altitude_breach_latch_count is configurable, matching
+ * low_battery_latch_count: a non-default count must actually change the
+ * debounce. */
 TEST_CASE ("a configured altitude_breach_latch_count changes the debounce", "[state_machine][altitude_cap]")
 {
     auto [mav, smm, sm]
@@ -878,9 +877,9 @@ TEST_CASE ("a configured altitude_breach_latch_count changes the debounce", "[st
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-/* Unlike low_battery, the altitude breach latch is self-clearing (todo/92):
- * once altitude drops back under the cap for the debounce window, control
- * returns to whatever FSS/SMM command is current -- here, a resumed search. */
+/* Unlike low_battery, the altitude breach latch is self-clearing: once
+ * altitude drops back under the cap for the debounce window, control returns
+ * to whatever FSS/SMM command is current -- here, a resumed search. */
 TEST_CASE ("altitude breach self-clears once altitude drops back under the cap", "[state_machine][altitude_cap]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -1239,10 +1238,10 @@ TEST_CASE ("FSS command superseded by comms failsafe names the latch", "[state_m
     REQUIRE (res.superseding_state == fmu_state_failsafe);
 }
 
-/* todo/43 decision: an operator RTL whose effect matches an active latch (which
- * also flies RTL) is still reported "superseded", not "actioned" — the latch,
- * not the command, is in control, and the GS surfaces it as the latch's RTL in
- * effect. These tests pin that decision so it cannot silently regress. */
+/* An operator RTL whose effect matches an active latch (which also flies RTL)
+ * is still reported "superseded", not "actioned" — the latch, not the command,
+ * is in control, and the GS surfaces it as the latch's RTL in effect. These
+ * tests pin that decision so it cannot silently regress. */
 TEST_CASE ("an explicit RTL during the low-battery latch is reported superseded", "[state_machine][command_ack]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -1285,10 +1284,10 @@ TEST_CASE ("an RTL superseded by a recoverable comms failure still applies once 
     REQUIRE (mav->last_mode == flight_mode_rtl);
 }
 
-/* terminate latches (todo/63): the flight-termination action (motor cut /
- * parachute / force-disarm) is physically irreversible, so a later FSS
- * command must not silently move the FMU's own state back out of terminate —
- * it is superseded by the latch, the same as low-battery/comms-failsafe. */
+/* terminate latches: the flight-termination action (motor cut / parachute /
+ * force-disarm) is physically irreversible, so a later FSS command must not
+ * silently move the FMU's own state back out of terminate — it is superseded
+ * by the latch, the same as low-battery/comms-failsafe. */
 TEST_CASE ("FSS command after terminate is superseded, not actioned", "[state_machine][command_ack]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -1375,11 +1374,11 @@ TEST_CASE ("ack mapping: comms-loss supersede carries the comms-loss reason", "[
     REQUIRE (fss_command_ack_reason_for (res) == fsst::supersede_comms_loss);
 }
 
-/* The transport enum has no dedicated reason for an altitude-cap breach
- * (todo/92) -- adding one is a cross-repo protocol change, out of scope
- * here. It falls back to supersede_none, the same fallback as terminate. Pin
- * this current (imperfect) behavior so a future protocol addition is a
- * deliberate, visible diff rather than a silent behavior change. */
+/* The transport enum has no dedicated reason for an altitude-cap breach --
+ * adding one is a cross-repo protocol change, out of scope here. It falls
+ * back to supersede_none, the same fallback as terminate. Pin this current
+ * (imperfect) behavior so a future protocol addition is a deliberate,
+ * visible diff rather than a silent behavior change. */
 TEST_CASE ("ack mapping: altitude-cap breach supersede falls back to no reason", "[command_ack][mapping][altitude_cap]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -1515,8 +1514,7 @@ TEST_CASE ("an older different command within the window is acked superseded, no
     REQUIRE (stale_command_ack_reason != fsst::supersede_comms_loss);
 }
 
-TEST_CASE ("a different older command is never actuated as new no matter how far outside the window "
-           "(todo/86)",
+TEST_CASE ("a different older command is never actuated as new no matter how far outside the window",
            "[command_ack][group][TC-MAV-006]")
 {
     constexpr int cmd_hold = 5;
@@ -1671,10 +1669,10 @@ TEST_CASE ("an altitude command with a different value within the window actuate
     REQUIRE (changed.disposition == CommandAckGroup<int>::Disposition::actuate);
 }
 
-/* todo/86 (retry-suppression half): a server_command_id lets a connection's
- * redelivery of the SAME operator action be told apart from that connection
- * delivering a genuinely NEW action with identical command/payload — the
- * upstream (flight-safety-system todo/49) contract cap-fmu was blocked on. */
+/* Retry suppression: a server_command_id lets a connection's redelivery of
+ * the SAME operator action be told apart from that connection delivering a
+ * genuinely NEW action with identical command/payload — the upstream
+ * flight-safety-system contract cap-fmu was blocked on. */
 
 TEST_CASE ("a same-command retry with a fresh server command id re-actuates a resolved command",
            "[command_ack][group][TC-MAV-006]")
@@ -1738,8 +1736,8 @@ TEST_CASE ("a server command id of zero never overrides the timestamp-window heu
            "[command_ack][group][TC-MAV-006]")
 {
     /* 0 means "not reported" (legacy peer, or the connection did not negotiate
-     * FSS_FEATURE_SERVER_COMMAND_ID): behaviour must stay exactly the
-     * pre-todo/86-fix timestamp-window dedup. */
+     * FSS_FEATURE_SERVER_COMMAND_ID): behaviour must stay exactly the plain
+     * timestamp-window dedup. */
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_hold = 5;
     constexpr uint64_t connection_a = 1;
@@ -1898,10 +1896,10 @@ TEST_CASE ("clamp_command_altitude converts feet to metres and clamps to [floor,
     /* Exactly at the cap in feet: 400 ft == 121.92 m, within (122) -> 121. */
     REQUIRE (clamp_command_altitude (400, floor, cap) == 121);
 
-    /* Regression (todo/55): an altitude that does not fit in 16 bits must pin to
-     * the cap, never wrap. 65536 ft (0x10000) truncates to 0 as a uint16_t, which
-     * would have clamped up to the floor -- i.e. a "far too high" command would
-     * have become "as low as allowed". Taken full-width it is ~19974 m -> cap. */
+    /* Regression: an altitude that does not fit in 16 bits must pin to the cap,
+     * never wrap. 65536 ft (0x10000) truncates to 0 as a uint16_t, which would
+     * have clamped up to the floor -- i.e. a "far too high" command would have
+     * become "as low as allowed". Taken full-width it is ~19974 m -> cap. */
     REQUIRE (clamp_command_altitude (65536, floor, cap) == cap);
     /* 65536 + 33: low 16 bits == 33 ft (~10 m, the floor). Full-width -> cap. */
     REQUIRE (clamp_command_altitude (65569, floor, cap) == cap);
@@ -1935,22 +1933,22 @@ TEST_CASE ("horizontal_velocity is a Pythagorean magnitude with no int overflow"
     REQUIRE (horizontal_velocity (0, 0) == 0);
     REQUIRE (horizontal_velocity (0, 250) == 250);
 
-    /* Regression (todo/57): the extreme inputs. sqrt((vx*vx)+(vy*vy)) does the
-     * squares in int and overflows signed int at INT16_MIN (UB / UBSan trip);
-     * hypot in double does not. hypot(32768,32768) ~= 46340.95 -> 46340, and the
+    /* Regression: the extreme inputs. sqrt((vx*vx)+(vy*vy)) does the squares in
+     * int and overflows signed int at INT16_MIN (UB / UBSan trip); hypot in
+     * double does not. hypot(32768,32768) ~= 46340.95 -> 46340, and the
      * magnitude of two int16_t components always fits in uint16_t. */
     REQUIRE (horizontal_velocity (INT16_MIN, INT16_MIN) == 46340);
     REQUIRE (horizontal_velocity (INT16_MAX, INT16_MAX) == 46339);
     REQUIRE (horizontal_velocity (INT16_MIN, 0) == 32768);
 }
 
-/* todo/80: lat/lon degrees<->degE7 encoding at the numeric extremes (TC-MAV-018
- * boundary share). The geofence *policy* half of TC-MAV-018 (southern/western
+/* Lat/lon degrees<->degE7 encoding at the numeric extremes (TC-MAV-018 boundary
+ * share). The geofence *policy* half of TC-MAV-018 (southern/western
  * coordinates, longitude wrap, coordinate-system confusion) is out of scope for
- * cap-fmu -- no fence logic exists here at all (todo/17, deferred). This is only
- * the numeric encoding used by commandGoto/send_waypoint/sendADSB and decoded
- * from GLOBAL_POSITION_INT: confirms the round-trip is exact and does not
- * silently wrap or overflow at the latitude/longitude/antimeridian extremes. */
+ * cap-fmu -- no fence logic exists here at all. This is only the numeric
+ * encoding used by commandGoto/send_waypoint/sendADSB and decoded from
+ * GLOBAL_POSITION_INT: confirms the round-trip is exact and does not silently
+ * wrap or overflow at the latitude/longitude/antimeridian extremes. */
 TEST_CASE ("degrees_to_degE7 round-trips exactly at the latitude/longitude extremes", "[mav][latlon]")
 {
     /* Latitude extremes. */
@@ -1975,14 +1973,14 @@ TEST_CASE ("degrees_to_degE7 round-trips exactly at the latitude/longitude extre
     }
 }
 
-/* todo/85: the shared coordinate validator every external source of a
+/* The shared coordinate validator every external source of a
  * commanded/reported position must pass before its coordinates reach
  * degrees_to_degE7() (whose float-to-int32 cast is undefined behavior on a
  * non-finite or out-of-range input). */
 TEST_CASE ("Point::isValid accepts the geographic range and rejects outside it", "[latlon][validate]")
 {
-    /* Boundary values remain accepted, unchanged from before validation
-     * existed (todo/80's exact round-trip test above covers their encoding). */
+    /* Boundary values remain accepted, unchanged from before validation existed
+     * (the exact round-trip test above covers their encoding). */
     REQUIRE (Point (-90.0, -180.0).isValid ());
     REQUIRE (Point (90.0, 180.0).isValid ());
     REQUIRE (Point (0.0, 0.0).isValid ());
@@ -2009,9 +2007,9 @@ TEST_CASE ("Point::isValid accepts the geographic range and rejects outside it",
     REQUIRE_FALSE (Point (0.0, -1e300).isValid ());
 }
 
-/* todo/85: degrees_to_degE7() is a last-resort backstop against UB for a
- * caller that skips Point::isValid() -- confirm it clamps to a deterministic
- * value instead of invoking undefined behavior, without disturbing the
+/* Degrees_to_degE7() is a last-resort backstop against UB for a caller that
+ * skips Point::isValid() -- confirm it clamps to a deterministic value
+ * instead of invoking undefined behavior, without disturbing the
  * representable-input behavior the round-trip test above pins. */
 TEST_CASE ("degrees_to_degE7 clamps non-finite and out-of-range input instead of invoking UB", "[latlon][validate]")
 {
@@ -2045,8 +2043,7 @@ TEST_CASE ("resolve_mav_mode maps supported airframes to command modes", "[mav]"
     REQUIRE (resolve_mav_mode (MAV_TYPE_GROUND_ROVER, MavModeCommand::auto_mode) == ROVER_MODE_AUTO);
 }
 
-TEST_CASE ("resolve_gcs_failsafe_param_name maps supported airframes, and returns nullopt for unknown ones (todo/91)",
-           "[mav]")
+TEST_CASE ("resolve_gcs_failsafe_param_name maps supported airframes, and returns nullopt for unknown ones", "[mav]")
 {
     REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_FIXED_WING) == std::optional<const char *> ("FS_GCS_ENABL"));
     REQUIRE (resolve_gcs_failsafe_param_name (MAV_TYPE_QUADROTOR) == std::optional<const char *> ("FS_GCS_ENABLE"));
@@ -2060,9 +2057,7 @@ TEST_CASE ("resolve_gcs_failsafe_param_name maps supported airframes, and return
     REQUIRE (!resolve_gcs_failsafe_param_name (MAV_TYPE_GCS).has_value ());
 }
 
-TEST_CASE ("expected_failsafe_params only requests AFS_ENABLE/AFS_TERM_ACTION for terminate_action::terminate "
-           "(todo/91)",
-           "[mav]")
+TEST_CASE ("expected_failsafe_params only requests AFS_ENABLE/AFS_TERM_ACTION for terminate_action::terminate", "[mav]")
 {
     auto has_param = [] (const std::vector<FailsafeParamCheck> &params, const std::string &name)
     { return std::any_of (params.begin (), params.end (), [&] (const auto &p) { return name == p.name; }); };
@@ -2083,7 +2078,7 @@ TEST_CASE ("expected_failsafe_params only requests AFS_ENABLE/AFS_TERM_ACTION fo
     REQUIRE (has_param (terminate_params, "FS_GCS_ENABLE"));
 }
 
-TEST_CASE ("expected_failsafe_params omits the GCS-failsafe entry for an unrecognised airframe (todo/91)", "[mav]")
+TEST_CASE ("expected_failsafe_params omits the GCS-failsafe entry for an unrecognised airframe", "[mav]")
 {
     auto params = expected_failsafe_params (0, terminate_action::terminate);
     REQUIRE (std::any_of (params.begin (), params.end (),
@@ -2099,10 +2094,10 @@ TEST_CASE ("expected_failsafe_params omits the GCS-failsafe entry for an unrecog
                            [] (const auto &p) { return std::string (p.name) == "SYSID_MYGCS"; }));
 }
 
-/* todo/104. Every todo/91 check reduced to "this param must read nonzero",
- * which an enable flag satisfies while the failsafe it enables goes on to
- * continue the mission -- so the check passed on an airframe with no backstop.
- * Each entry now judges its own value. */
+/* Every failsafe check once reduced to "this param must read nonzero", which
+ * an enable flag satisfies while the failsafe it enables goes on to continue
+ * the mission -- so the check passed on an airframe with no backstop. Each
+ * entry now judges its own value. */
 namespace
 {
 auto
@@ -2113,7 +2108,7 @@ find_check (const std::vector<FailsafeParamCheck> &params, const std::string &na
 }
 } // namespace
 
-TEST_CASE ("expected_failsafe_params rejects a failsafe that fires and then continues the mission (todo/104)", "[mav]")
+TEST_CASE ("expected_failsafe_params rejects a failsafe that fires and then continues the mission", "[mav]")
 {
     SECTION ("Plane: FS_LONG_ACTN must be RTL, not the default Continue")
     {
@@ -2178,7 +2173,7 @@ TEST_CASE ("expected_failsafe_params rejects a failsafe that fires and then cont
     }
 }
 
-TEST_CASE ("expected_failsafe_params requires the GCS failsafe to watch the FMU's own system id (todo/104)", "[mav]")
+TEST_CASE ("expected_failsafe_params requires the GCS failsafe to watch the FMU's own system id", "[mav]")
 {
     /* Uniform across the families: the default (255) is MAVProxy's, which runs
      * on the same companion computer, so an FMU process death leaves the
@@ -2194,7 +2189,7 @@ TEST_CASE ("expected_failsafe_params requires the GCS failsafe to watch the FMU'
     }
 }
 
-TEST_CASE ("the AFS checks still accept any nonzero value (todo/104 did not narrow them)", "[mav]")
+TEST_CASE ("the AFS checks still accept any nonzero value", "[mav]")
 {
     auto params = expected_failsafe_params (MAV_TYPE_QUADROTOR, terminate_action::terminate);
     for (const char *name : { "AFS_ENABLE", "AFS_TERM_ACTION" })
@@ -2207,7 +2202,7 @@ TEST_CASE ("the AFS checks still accept any nonzero value (todo/104 did not narr
     }
 }
 
-TEST_CASE ("every failsafe check carries a predicate and a warning (todo/104)", "[mav]")
+TEST_CASE ("every failsafe check carries a predicate and a warning", "[mav]")
 {
     /* A null predicate would be dereferenced by checkFailsafeParamReply, and an
      * empty warning would log a bare param name and value with no explanation. */
@@ -2289,10 +2284,10 @@ TEST_CASE ("search_point_mission_seq offsets a search point index to its mission
     REQUIRE (mission_item_for (0, num_points, MissionPlanMode::go_to).kind == MissionItemKind::goto_point);
 }
 
-/* todo/64: next_search_point_after_reached_seq is what report_reached() uses
- * to turn a MISSION_ITEM_REACHED seq into the point SMMSearch resumes from —
- * one past the point index mission_item_for would assign that same seq,
- * since SMMSearch::current_point tracks the *next* point, not the one just
+/* Next_search_point_after_reached_seq is what report_reached() uses to turn
+ * a MISSION_ITEM_REACHED seq into the point SMMSearch resumes from — one
+ * past the point index mission_item_for would assign that same seq, since
+ * SMMSearch::current_point tracks the *next* point, not the one just
  * completed. Pinned directly (as a pure function) so this relationship stays
  * correct if the setup-item count ever changes. */
 TEST_CASE ("next_search_point_after_reached_seq is one past mission_item_for's point index", "[mission]")
@@ -2334,9 +2329,9 @@ TEST_CASE ("mission_count_for advertises the RTL terminator slot", "[mission]")
 TEST_CASE ("mission_count_for and mission_item_for agree on the RTL terminator", "[mission]")
 {
     /* The count is what is sent in MISSION_COUNT; the FC then requests seq
-     * 0 .. count-1. The last requested seq must resolve to the RTL item, and
+     * 0.. count-1. The last requested seq must resolve to the RTL item, and
      * the one before it must not, so the search always ends with exactly one
-     * return-home item. This is the invariant todo/23 was about. */
+     * return-home item. */
     for (auto mode : { MissionPlanMode::search, MissionPlanMode::go_to })
     {
         for (std::size_t num_points : { std::size_t{ 0 }, std::size_t{ 1 }, std::size_t{ 3 }, std::size_t{ 50 } })
@@ -2397,11 +2392,11 @@ TEST_CASE ("mav_sys metadata defaults to unknown and reflects updates", "[mav_sy
 
 TEST_CASE ("mav_systems metadata access is race-free across recv and command threads", "[mav_sys][concurrency]")
 {
-    /* Regression guard for todo/25: the recv thread grows the systems list and
-     * writes per-system metadata while the command threads read it. This drives
-     * those paths concurrently so a reintroduced unsynchronised list mutation
-     * or non-atomic scalar shows up as a crash here, and as a reported race
-     * under -fsanitize=thread. */
+    /* Regression guard: the recv thread grows the systems list and writes
+     * per-system metadata while the command threads read it. This drives those
+     * paths concurrently so a reintroduced unsynchronised list mutation or
+     * non-atomic scalar shows up as a crash here, and as a reported race under
+     * -fsanitize=thread. */
     mav_systems systems;
     constexpr int iterations = 2000;
     std::atomic<bool> go{ false };
@@ -2507,7 +2502,7 @@ TEST_CASE ("mav_comms_is_up requires an open socket and a recent heartbeat", "[m
     REQUIRE (mav_comms_is_up (true, now, now + 1000, timeout));
 }
 
-TEST_CASE ("autopilot_restarted trips only on a real backwards jump in autopilot uptime (todo/108)", "[mav][comms]")
+TEST_CASE ("autopilot_restarted trips only on a real backwards jump in autopilot uptime", "[mav][comms]")
 {
     constexpr uint32_t margin = autopilot_restart_margin_ms;
 
@@ -2537,7 +2532,7 @@ TEST_CASE ("autopilot_restarted trips only on a real backwards jump in autopilot
     REQUIRE (autopilot_restarted (900000, 1, margin));
 }
 
-TEST_CASE ("reassertState re-commands the current state without a transition (todo/108)", "[state_machine][replay]")
+TEST_CASE ("reassertState re-commands the current state without a transition", "[state_machine][replay]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -2552,7 +2547,7 @@ TEST_CASE ("reassertState re-commands the current state without a transition (to
     REQUIRE (mav->last_mode == flight_mode_hold);
 }
 
-TEST_CASE ("reassertState re-issues a goto with its stored target (todo/108)", "[state_machine][replay]")
+TEST_CASE ("reassertState re-issues a goto with its stored target", "[state_machine][replay]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -2572,7 +2567,7 @@ TEST_CASE ("reassertState re-issues a goto with its stored target (todo/108)", "
     REQUIRE (mav->last_mode == flight_mode_goto);
 }
 
-TEST_CASE ("reassertState re-drives the search while searching (todo/108)", "[state_machine][replay]")
+TEST_CASE ("reassertState re-drives the search while searching", "[state_machine][replay]")
 {
     auto [mav, smm, sm] = make_sm ();
 
@@ -2586,7 +2581,7 @@ TEST_CASE ("reassertState re-drives the search while searching (todo/108)", "[st
     REQUIRE (smm->search_calls == 2);
 }
 
-TEST_CASE ("reassertState re-commands a latched state that no transition would re-drive (todo/108)",
+TEST_CASE ("reassertState re-commands a latched state that no transition would re-drive",
            "[state_machine][replay][TC-FS-005]")
 {
     auto [mav, smm, sm] = make_sm ();
@@ -2612,8 +2607,8 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
     NullLogger null_logger;
     known_aircraft ka (null_logger);
     /* Debounce/eviction are driven by known_aircraft's own local clock, not
-     * the report's wire timestamp (todo/89); inject a fake one so the test
-     * does not depend on real wall-clock timing. */
+     * the report's wire timestamp; inject a fake one so the test does not
+     * depend on real wall-clock timing. */
     uint64_t now = 1000;
     ka.setNowMsFn ([&now] { return now; });
     std::string callsign = "TEST123";
@@ -2637,7 +2632,7 @@ TEST_CASE ("known_aircraft evicts aircraft that go quiet past the eviction windo
     NullLogger null_logger;
     known_aircraft ka (null_logger);
     const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
-    /* todo/89: the sweep clock is known_aircraft's own now_ms_fn, not the
+    /* The sweep clock is known_aircraft's own now_ms_fn, not the
      * report's wire timestamp; a fake clock keeps this deterministic. */
     uint64_t now = 1000;
     ka.setNowMsFn ([&now] { return now; });
@@ -2662,7 +2657,7 @@ TEST_CASE ("known_aircraft keeps actively-reporting aircraft across the window",
     NullLogger null_logger;
     known_aircraft ka (null_logger);
     const uint64_t window_ms = static_cast<uint64_t> (aircraft_eviction_age.count ());
-    /* todo/89: fake clock, same reasoning as the eviction test above. */
+    /* Fake clock, same reasoning as the eviction test above. */
     uint64_t now = 1000;
     ka.setNowMsFn ([&now] { return now; });
 
@@ -2679,13 +2674,12 @@ TEST_CASE ("known_aircraft keeps actively-reporting aircraft across the window",
     REQUIRE (ka.getAircraftICAOAddress ("C") == icao_c_first);
 }
 
-/* todo/89 regression: a peer's self-reported wire timestamp must not drive
- * known_aircraft's debounce or eviction. Before the fix, a single report
- * carrying a wildly bogus (e.g. far-future) timestamp would jam that
- * aircraft's own `ts` forward, permanently rejecting every later genuine
- * report from it, and would separately drive the eviction sweep's "now" to
- * that same bogus value, evicting every other tracked aircraft in the same
- * call. */
+/* A peer's self-reported wire timestamp must not drive known_aircraft's
+ * debounce or eviction. Before the fix, a single report carrying a wildly
+ * bogus (e.g. far-future) timestamp would jam that aircraft's own `ts`
+ * forward, permanently rejecting every later genuine report from it, and
+ * would separately drive the eviction sweep's "now" to that same bogus
+ * value, evicting every other tracked aircraft in the same call. */
 TEST_CASE ("known_aircraft ignores a peer's self-reported timestamp for debounce/eviction", "[aircraft]")
 {
     NullLogger null_logger;
@@ -2854,8 +2848,8 @@ TEST_CASE ("loadFmuConfig reads a custom log_dir and rejects bad ones", "[config
     REQUIRE (wrong_type.log_dir == def.log_dir);
 }
 
-/* todo/109: `warning` sits between error and info, so a config asking for it
- * gets the degraded-but-handled lines without the full info stream. An
+/* `warning` sits between error and info, so a config asking for it gets
+ * the degraded-but-handled lines without the full info stream. An
  * unrecognised level must still fall back to the default rather than being
  * coerced to the nearest match. */
 TEST_CASE ("loadFmuConfig reads every log level, including warning", "[config]")
@@ -2959,9 +2953,9 @@ TEST_CASE ("loadFmuConfig rejects out-of-range values and keeps defaults", "[con
 
 TEST_CASE ("loadFmuConfig fails hard on malformed JSON", "[config]")
 {
-    /* The file is load-bearing for FSS regardless (todo/74), so a malformed
-     * file throws rather than silently falling back to defaults and then
-     * failing fatally moments later on the FSS side. */
+    /* The file is load-bearing for FSS regardless, so a malformed file
+     * throws rather than silently falling back to defaults and then failing
+     * fatally moments later on the FSS side. */
     REQUIRE_THROWS_AS (load_config ("{ this is not valid json "), std::runtime_error);
 }
 
@@ -3014,8 +3008,8 @@ TEST_CASE ("Logger rotates in-flight once the size threshold is exceeded", "[log
 {
     TempLogDir dir;
     /* A tiny threshold so the test writes only a handful of lines rather than
-     * megabytes (todo/75: production default is 10MB, overridable here via
-     * the constructor's max_bytes parameter). */
+     * megabytes (production default is 10MB, overridable here via the
+     * constructor's max_bytes parameter). */
     Logger logger (dir.str (), LogLevel::info, 100);
 
     REQUIRE (std::filesystem::exists (dir.logFile ()));
@@ -3027,7 +3021,7 @@ TEST_CASE ("Logger rotates in-flight once the size threshold is exceeded", "[log
     {
         logger.log ("line " + std::to_string (i));
     }
-    /* log() only enqueues (todo/88); wait for the worker to catch up before
+    /* log() only enqueues; wait for the worker to catch up before
      * inspecting the file it writes. */
     logger.flush ();
 
@@ -3037,9 +3031,9 @@ TEST_CASE ("Logger rotates in-flight once the size threshold is exceeded", "[log
     REQUIRE (std::filesystem::file_size (dir.logFile ()) < 100);
 }
 
-/* todo/109: severity is stated once, by the level argument, and the line
- * renders it — which is what lets call sites drop the "WARN:" prefixes that
- * used to contradict the level they were logged at. */
+/* Severity is stated once, by the level argument, and the line renders it —
+ * which is what lets call sites drop the "WARN:" prefixes that used to
+ * contradict the level they were logged at. */
 TEST_CASE ("Logger names each line's level and filters on it", "[logger]")
 {
     TempLogDir dir;
@@ -3085,9 +3079,9 @@ namespace
 {
 /* Test-only Logger that gates the write for one line behind a promise the
  * test controls, so a stalled disk can be simulated deterministically
- * (todo/88) instead of relying on real I/O being slow. Overrides the
- * protected writeLine() seam (mirroring SMM's fetchSearch/commitSearch test
- * seams) rather than the disk itself. */
+ * instead of relying on real I/O being slow. Overrides the protected
+ * writeLine() seam (mirroring SMM's fetchSearch/commitSearch test seams)
+ * rather than the disk itself. */
 class BlockingLogger : public Logger
 {
   public:
@@ -3136,11 +3130,11 @@ class BlockingLogger : public Logger
 };
 } // namespace
 
-/* todo/88 regression: log() must return without waiting on the write, even
- * when the write is stalled (a full/read-only disk, a wedged network log_dir,
- * an in-flight rotation). If log() regressed to a synchronous write, this
- * test would hang (the write is only ever released further down) rather than
- * reach the assertions below. */
+/* Log() must return without waiting on the write, even when the write is
+ * stalled (a full/read-only disk, a wedged network log_dir, an in-flight
+ * rotation). If log() regressed to a synchronous write, this test would hang
+ * (the write is only ever released further down) rather than reach the
+ * assertions below. */
 TEST_CASE ("Logger::log() does not block on a stalled write", "[logger]")
 {
     TempLogDir dir;
@@ -3175,11 +3169,11 @@ TEST_CASE ("Logger::log() does not block on a stalled write", "[logger]")
     }
 }
 
-/* The queue that makes log() non-blocking (todo/88) has to be bounded, or a
- * log_dir that stops accepting writes turns "never block the producer" into
- * "grow until the companion computer runs out of memory". BlockingLogger holds
- * the worker inside a write, which is exactly the stalled-device condition, so
- * the backlog can be built up deterministically. */
+/* The queue that makes log() non-blocking has to be bounded, or a log_dir that
+ * stops accepting writes turns "never block the producer" into "grow until the
+ * companion computer runs out of memory". BlockingLogger holds the worker
+ * inside a write, which is exactly the stalled-device condition, so the
+ * backlog can be built up deterministically. */
 TEST_CASE ("Logger bounds its write queue and records what it dropped", "[logger]")
 {
     TempLogDir dir;
@@ -3276,11 +3270,11 @@ TEST_CASE ("A failed write neither counts bytes nor triggers rotation", "[logger
     REQUIRE (bytes == 0);
 }
 
-/* todo/59 acceptance: a subsystem's runtime diagnostic must reach the
- * persistent log file, not only std::cout/std::cerr. known_aircraft is the
- * easiest subsystem to prove this against directly (pure, no sockets); the
- * same ILogger seam is now used by MAV/SMM (verified by compilation, since
- * their diagnostics run on real I/O paths not exercised at unit level). */
+/* A subsystem's runtime diagnostic must reach the persistent log file, not
+ * only std::cout/std::cerr. known_aircraft is the easiest subsystem to
+ * prove this against directly (pure, no sockets); the same ILogger seam is
+ * now used by MAV/SMM (verified by compilation, since their diagnostics
+ * run on real I/O paths not exercised at unit level). */
 TEST_CASE ("known_aircraft diagnostics reach the persistent log file", "[aircraft][logger]")
 {
     TempLogDir dir;
@@ -3295,16 +3289,16 @@ TEST_CASE ("known_aircraft diagnostics reach the persistent log file", "[aircraf
     REQUIRE (content.find ("Creating new aircraft with callsign LOGTEST") != std::string::npos);
 }
 
-/* EventDispatcher (todo/76) is App::run()'s std::visit dispatch policy,
- * extracted so it can be driven here with the same MockMAV/MockSMM used
- * above, plus a MockFSSReporter, instead of needing real sockets. */
+/* EventDispatcher is App::run()'s std::visit dispatch policy, extracted
+ * so it can be driven here with the same MockMAV/MockSMM used above,
+ * plus a MockFSSReporter, instead of needing real sockets. */
 namespace
 {
-/* Test double for the ADS-B throttle's "now" source (todo/81): a plain
- * counter advanced explicitly, so the 1s throttle window can be crossed
- * without a real sleep_for. Injected into EventDispatcher::setNowMsFn as a
- * lambda over a shared_ptr, mirroring the shared-mock pattern MockMAV/MockSMM
- * already use in this fixture. */
+/* Test double for the ADS-B throttle's "now" source: a plain counter advanced
+ * explicitly, so the 1s throttle window can be crossed without a real
+ * sleep_for. Injected into EventDispatcher::setNowMsFn as a lambda over a
+ * shared_ptr, mirroring the shared-mock pattern MockMAV/MockSMM already use
+ * in this fixture. */
 struct FakeClock
 {
     uint64_t t{ 0 };
@@ -3352,7 +3346,7 @@ TEST_CASE ("EventDispatcher gates SmmLoadSearch on isSearching()", "[event_dispa
     auto f = make_dispatcher ();
 
     /* FMUStateMachine starts in fmu_state_manual, not searching: a raced
-     * SmmLoadSearch outcome must be dropped (todo/33), not applied. */
+     * SmmLoadSearch outcome must be dropped, not applied. */
     event not_searching = SmmLoadSearch{ nullptr };
     f.dispatcher->dispatch (not_searching);
     REQUIRE (f.mav->load_search_calls == 0);
@@ -3363,7 +3357,7 @@ TEST_CASE ("EventDispatcher gates SmmLoadSearch on isSearching()", "[event_dispa
     REQUIRE (f.mav->load_search_calls == 1);
 }
 
-TEST_CASE ("EventDispatcher routes SmmRtl through the state machine's own arbitration (todo/70)", "[event_dispatcher]")
+TEST_CASE ("EventDispatcher routes SmmRtl through the state machine's own arbitration", "[event_dispatcher]")
 {
     auto f = make_dispatcher ();
 
@@ -3389,7 +3383,7 @@ TEST_CASE ("EventDispatcher routes SmmRtl through the state machine's own arbitr
 
     /* While genuinely searching, SmmRtl really does take effect: the FMU
      * moves to waiting_for_tasking (RTL flight mode) without cancelling the
-     * searching role (todo/77). */
+     * searching role. */
     f.sm->FSSNewCommand (fss_cmd_continue);
     int cancel_calls_before = f.smm->cancel_calls;
     event real_rtl = SmmRtl{};
@@ -3398,8 +3392,7 @@ TEST_CASE ("EventDispatcher routes SmmRtl through the state machine's own arbitr
     REQUIRE (f.smm->cancel_calls == cancel_calls_before);
 }
 
-TEST_CASE ("EventDispatcher routes an operator SmmOperatorCommand through SMMNewCommand (todo/90)",
-           "[event_dispatcher]")
+TEST_CASE ("EventDispatcher routes an operator SmmOperatorCommand through SMMNewCommand", "[event_dispatcher]")
 {
     auto f = make_dispatcher ();
 
@@ -3417,8 +3410,8 @@ TEST_CASE ("EventDispatcher routes an operator SmmOperatorCommand through SMMNew
 
     /* While genuinely searching, an operator mission-complete command really
      * does take effect: the FMU moves to waiting_for_tasking (RTL flight
-     * mode) without cancelling the searching role (todo/77), same as the
-     * internal SmmRtl outcome. */
+     * mode) without cancelling the searching role, same as the internal
+     * SmmRtl outcome. */
     f.sm->FSSNewCommand (fss_cmd_continue);
     int cancel_calls_before = f.smm->cancel_calls;
     event mc = SmmOperatorCommand{ smm_cmd_mission_complete };
@@ -3437,9 +3430,8 @@ TEST_CASE ("EventDispatcher routes an operator SmmOperatorCommand through SMMNew
     REQUIRE (f.smm->search_calls > search_calls_before);
 }
 
-TEST_CASE (
-    "EventDispatcher auto-reacquires a search while waiting_for_tasking, without a duplicate upload (todo/70/77)",
-    "[event_dispatcher]")
+TEST_CASE ("EventDispatcher auto-reacquires a search while waiting_for_tasking, without a duplicate upload",
+           "[event_dispatcher]")
 {
     auto f = make_dispatcher ();
 
@@ -3505,7 +3497,7 @@ TEST_CASE ("EventDispatcher never classifies an unknown battery reading as low, 
     REQUIRE (f.mav->last_mode == flight_mode_rtl);
 }
 
-TEST_CASE ("EventDispatcher routes ReachedPoint only while searching (todo/69)", "[event_dispatcher]")
+TEST_CASE ("EventDispatcher routes ReachedPoint only while searching", "[event_dispatcher]")
 {
     auto f = make_dispatcher ();
 
@@ -3540,12 +3532,11 @@ TEST_CASE ("EventDispatcher filters own-callsign OtherAircraftReport before ADS-
     REQUIRE (f.mav->send_adsb_calls == 1);
 }
 
-/* todo/81: the CAP test plan (uav_system_test_plan.md §4.1) requires ADS-B
+/* The CAP test plan (uav_system_test_plan.md §4.1) requires ADS-B
  * rebroadcast rate-limited to one forward per ICAO address per second, so a
  * busy receiver near a real airport cannot flood ArduPilot with ADSB_VEHICLE
  * updates at dump1090's raw rate. */
-TEST_CASE ("EventDispatcher throttles ADS-B rebroadcast to one per ICAO address per second (todo/81)",
-           "[event_dispatcher]")
+TEST_CASE ("EventDispatcher throttles ADS-B rebroadcast to one per ICAO address per second", "[event_dispatcher]")
 {
     auto f = make_dispatcher ("MYCALL", 20);
 
@@ -3622,12 +3613,11 @@ TEST_CASE ("EventDispatcher prunes ADS-B throttle entries that can no longer thr
     REQUIRE (f.dispatcher->adsbThrottleEntries () == 2);
 }
 
-/* todo/85: a peer's ADS-B coordinates are untrusted. A non-finite/out-of-range
- * one must be dropped before rebroadcast rather than forwarded (even clamped)
- * to the autopilot's collision-avoidance, or counted against the per-ICAO
- * rate limit (todo/81) as if it were a legitimate sighting. */
-TEST_CASE ("EventDispatcher drops an ADS-B report with an invalid coordinate before rebroadcast (todo/85)",
-           "[event_dispatcher]")
+/* A peer's ADS-B coordinates are untrusted. A non-finite/out-of-range one must
+ * be dropped before rebroadcast rather than forwarded (even clamped) to the
+ * autopilot's collision-avoidance, or counted against the per-ICAO rate limit
+ * as if it were a legitimate sighting. */
+TEST_CASE ("EventDispatcher drops an ADS-B report with an invalid coordinate before rebroadcast", "[event_dispatcher]")
 {
     auto f = make_dispatcher ("MYCALL", 20);
 
@@ -3645,17 +3635,16 @@ TEST_CASE ("EventDispatcher drops an ADS-B report with an invalid coordinate bef
     REQUIRE (f.mav->send_adsb_calls == 1);
 }
 
-/* todo/68 (now narrowed by todo/92): cap-fmu's own-aircraft PositionData event
- * (the FMU's MAV position report, distinct from OtherAircraftReport/ADS-B
- * above) only reaches FMUStateMachine for the altitude-cap breach check
- * (todo/92) -- and only when the position carries a valid fix
- * (POSITION_FLAG_VALID_COORDS). An invalid-fix reading (e.g. GPS-denial,
- * the 6-arg ctor below with no flags set) is fed to setCurrentAltitude but
- * ignored there, so it still causes no MAV reaction at all, however
- * degenerate the coordinates. Pinned here so a future change to GPS-denial
- * handling does so deliberately rather than silently regressing this gap
- * further. */
-TEST_CASE ("EventDispatcher never reacts to an invalid-fix PositionData (todo/68)", "[event_dispatcher]")
+/* cap-fmu's own-aircraft PositionData event (the FMU's MAV position report,
+ * distinct from OtherAircraftReport/ADS-B above) only reaches FMUStateMachine
+ * for the altitude-cap breach check -- and only when the position carries a
+ * valid fix (POSITION_FLAG_VALID_COORDS). An invalid-fix reading (e.g.
+ * GPS-denial, the 6-arg ctor below with no flags set) is fed to
+ * setCurrentAltitude but ignored there, so it still causes no MAV reaction at
+ * all, however degenerate the coordinates. Pinned here so a future change to
+ * GPS-denial handling does so deliberately rather than silently regressing
+ * this gap further. */
+TEST_CASE ("EventDispatcher never reacts to an invalid-fix PositionData", "[event_dispatcher]")
 {
     auto f = make_dispatcher ();
 
@@ -3689,12 +3678,12 @@ TEST_CASE ("EventDispatcher never reacts to an invalid-fix PositionData (todo/68
     assert_no_reaction ();
 }
 
-/* Acceptance-level proof for todo/92: a sequence of valid-fix, over-cap
+/* Acceptance-level proof: a sequence of valid-fix, over-cap
  * GLOBAL_POSITION_INT-derived PositionData events, dispatched exactly as
  * main.cpp's registerPositionCB would enqueue them, eventually forces RTL --
  * exercised through EventDispatcher::dispatch() (not FMUStateMachine
  * directly), proving the wiring, not just the state-machine unit. */
-TEST_CASE ("EventDispatcher drives the altitude-cap breach latch from over-cap PositionData (todo/92)",
+TEST_CASE ("EventDispatcher drives the altitude-cap breach latch from over-cap PositionData",
            "[event_dispatcher][altitude_cap]")
 {
     auto f = make_dispatcher ();

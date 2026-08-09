@@ -119,13 +119,13 @@ Logger::log (LogLevel msg_level, std::string_view msg)
         return;
     }
     /* Formatting is pure CPU work (chrono + gmtime_r + ostringstream), not
-     * I/O: safe to do on the caller's thread. The write itself is not
-     * (todo/88), so only the formatted line crosses onto the queue.
+     * I/O: safe to do on the caller's thread. The write itself is not, so
+     * only the formatted line crosses onto the queue.
      *
-     * The level goes in the line rather than in the message text (todo/109),
-     * so a call site states severity exactly once and the two cannot drift.
-     * This is the one change to the on-disk format: lines gained a level
-     * token between the timestamp and the message. */
+     * The level goes in the line rather than in the message text, so a call
+     * site states severity exactly once and the two cannot drift. This is
+     * the one change to the on-disk format: lines gained a level token
+     * between the timestamp and the message. */
     std::string line = timestamp () + ' ' + log_level_name (msg_level) + ' ' + std::string (msg) + '\n';
     {
         std::lock_guard<std::mutex> lk (this->queue_lock);
@@ -134,7 +134,7 @@ Logger::log (LogLevel msg_level, std::string_view msg)
          * preserving the start of the backlog, and during an incident the most
          * recent lines are the ones worth keeping. Blocking here instead is not
          * an option: it would reintroduce exactly the event-loop stall that
-         * moving the I/O to this worker removed (todo/88). */
+         * moving the I/O to this worker removed. */
         if (this->line_queue.size () >= this->max_queued_lines)
         {
             this->line_queue.pop_front ();

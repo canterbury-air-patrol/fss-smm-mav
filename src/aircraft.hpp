@@ -46,13 +46,13 @@ class aircraft_details
         return this->icao_address;
     };
     /* Debounce to at most one accepted update per second, keyed off the
-     * caller's local "now" (todo/89) -- deliberately NOT the reporting
-     * peer's own self-reported timestamp, which is untrusted, unvalidated
-     * wire data (a peer with a wrong clock, no NTP, or a glitching ADS-B
-     * decoder can send anything). A bad peer timestamp used to be able to
-     * jam `ts` far into the future, after which no genuine subsequent
-     * report from that same aircraft would ever satisfy `ts + 1s <= new_ts`
-     * again -- permanently silencing it for the life of the process. */
+     * caller's local "now" -- deliberately NOT the reporting peer's own
+     * self-reported timestamp, which is untrusted, unvalidated wire data (a
+     * peer with a wrong clock, no NTP, or a glitching ADS-B decoder can
+     * send anything). A bad peer timestamp used to be able to jam `ts` far
+     * into the future, after which no genuine subsequent report from that
+     * same aircraft would ever satisfy `ts + 1s <= new_ts` again --
+     * permanently silencing it for the life of the process. */
     auto
     acceptableUpdate (uint64_t now_ms) -> bool
     {
@@ -88,12 +88,12 @@ class known_aircraft
     /* Local "now" source (milliseconds since some fixed epoch), driving both
      * aircraft_details::acceptableUpdate()'s debounce and evictStaleLocked()'s
      * sweep below. Defaults to the FMU's own clock; overridable for tests
-     * (mirrors EventDispatcher::now_ms_fn, todo/81). Deliberately NOT the
-     * reporting peer's own PositionData::getTimeStamp() -- todo/89: trusting
-     * a peer's self-reported clock let one bad/skewed report either
-     * permanently silence that aircraft's own future updates (see
-     * acceptableUpdate) or evict every other tracked aircraft in the same
-     * evictStaleLocked() call. */
+     * (mirrors EventDispatcher::now_ms_fn). Deliberately NOT the reporting
+     * peer's own PositionData::getTimeStamp() -- trusting a peer's
+     * self-reported clock let one bad/skewed report either permanently
+     * silence that aircraft's own future updates (see acceptableUpdate) or
+     * evict every other tracked aircraft in the same evictStaleLocked() call.
+     */
     std::function<uint64_t ()> now_ms_fn{ current_timestamp_ms };
     auto
     findAircraft (const std::string &t_call_sign, uint32_t t_icao_address) -> std::shared_ptr<aircraft_details>
@@ -138,9 +138,9 @@ class known_aircraft
   public:
     explicit known_aircraft (ILogger &t_logger) : logger (t_logger) {}
 
-    /* Test seam (todo/89): inject a fake "now" source, mirroring
-     * EventDispatcher::setNowMsFn (todo/81). Production code never calls
-     * this; the default (current_timestamp_ms) is used unless overridden. */
+    /* Test seam: inject a fake "now" source, mirroring
+     * EventDispatcher::setNowMsFn. Production code never calls this; the
+     * default (current_timestamp_ms) is used unless overridden. */
     void
     setNowMsFn (std::function<uint64_t ()> fn)
     {
