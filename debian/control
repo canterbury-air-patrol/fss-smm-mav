@@ -2,10 +2,24 @@ Source: cap-fmu
 Section: main
 Priority: optional
 Maintainer: Scott Parlane <sjp@canterburyairpatrol.org>
-Build-Depends: debhelper (>= 10), autotools-dev, pkg-config, libfss-client-ssl (>=1.2.1), libsmm-asset-dev (>= 1.1.0), libjsoncpp-dev
+Build-Depends: debhelper (>= 10), autotools-dev, pkg-config,
+ libfss-client-ssl (>= 1.3.0),
+ libsmm-asset-dev (>= 1.1.0), libjsoncpp-dev
 Standards-Version: 4.1.3
 
 Package: cap-fmu
 Architecture: any
-Depends: libfss-client-ssl (>=1.2.1), libsmmasset0 (>= 1.0.0)
+# ${shlibs:Depends} is what actually protects against an ABI mismatch, whatever
+# configure.ac's version bounds guard at build time: dh_shlibdeps reads the
+# sonames the binary really links against and emits dependencies on those, so a
+# rebuild against a new flight-safety-system ABI produces a package that refuses
+# to install next to the old runtime instead of one that installs and then
+# misbehaves in flight. The hand-written floors below were doing that job badly:
+# libsmmasset0 (>= 1.0.0) sat a minor version under the smm-asset >= 1.1.0 the
+# build actually requires, and nothing constrained fss-transport at all.
+# The 1.3.0 floor is the semantic requirement, not just an ABI one -- see
+# configure.ac.
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ libfss-client-ssl (>= 1.3.0),
+ libsmmasset0 (>= 1.1.0)
 Description: Canterbury Air Patrol Flight Management Unit

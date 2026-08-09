@@ -39,10 +39,10 @@ class FSS : public IFSSReporter
      * hands the frame to each server's own outbound worker — non-blocking, with
      * a bounded drop-oldest queue per server. The second-phase command ack is a
      * *per-connection* sendMsg() on the originating connection, which that
-     * decision deliberately keeps inline, so it stays blocking. Against the
-     * currently pinned fss-client-ssl 1.2.1 all four still block; after that
-     * bump the ack is the one that still needs this worker — and it is the path
-     * that closes the loop on an operator's rtl/terminate. */
+     * decision deliberately keeps inline, so it stays blocking. The floor is
+     * now fss-client-ssl >= 1.3.0, which is that release — so the ack is the
+     * path that still earns this worker, and it is the one that closes the loop
+     * on an operator's rtl/terminate. */
     struct FssPositionTask
     {
         double lat{ 0.0 };
