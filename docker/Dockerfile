@@ -19,7 +19,7 @@ RUN apt install -y valgrind
 
 # jq generates the FSS client config from environment variables at container
 # start (docker/generate-config.sh), so string values are properly
-# JSON-escaped instead of hand-built with echo (todo/56).
+# JSON-escaped instead of hand-built with echo.
 RUN apt install -y jq
 
 RUN apt install -y build-essential libtool automake pkg-config libcurl4-openssl-dev libtidy-dev libjansson-dev

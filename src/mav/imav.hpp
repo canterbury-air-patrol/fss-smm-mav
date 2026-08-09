@@ -35,9 +35,9 @@ class IMAV
     /* The action methods that transmit a command to the autopilot return whether
      * it was actually sent (false when the MAV link is down, or for a mode
      * command, when it was deferred until the autopilot type is known). The state
-     * machine uses this to replay a safety-critical action once the link recovers
-     * (todo/46). gotoPosition only stashes the target — the goto is transmitted by
-     * the following setMode(flight_mode_goto) — so it has nothing to report. */
+     * machine uses this to replay a safety-critical action once the link recovers.
+     * gotoPosition only stashes the target — the goto is transmitted by the
+     * following setMode(flight_mode_goto) — so it has nothing to report. */
     virtual auto setMode (flight_mode fm) -> bool = 0;
     virtual auto disarm () -> bool = 0;
     virtual auto terminate () -> bool = 0;
@@ -45,17 +45,17 @@ class IMAV
     virtual auto setAltitude (uint32_t alt) -> bool = 0;
     virtual auto getCurrentPosition () -> Point = 0;
     virtual void registerMavCommsStatusCB (notify_mav_comms_cb cb) = 0;
-    /* Report that the autopilot restarted while the link stayed up (todo/108),
-     * so the event loop can re-apply the commanded state to an autopilot that
-     * has forgotten it. Distinct from the comms-status callback above: a
-     * typical ArduPilot reboot is a ~3s heartbeat gap, which never trips the
-     * 5s link-down timeout, so this fires with no comms edge either side. */
+    /* Report that the autopilot restarted while the link stayed up, so the
+     * event loop can re-apply the commanded state to an autopilot that has
+     * forgotten it. Distinct from the comms-status callback above: a typical
+     * ArduPilot reboot is a ~3s heartbeat gap, which never trips the 5s
+     * link-down timeout, so this fires with no comms edge either side. */
     virtual void registerAutopilotRestartCB (notify_autopilot_restart_cb cb) = 0;
     /* Load an SMM-acquired search mission onto the autopilot, and forward
      * another aircraft's position report for ADS-B rebroadcast. Not used by
      * FMUStateMachine (which only needs the action methods above); part of
-     * this interface so the event-loop dispatch (EventDispatcher, todo/76)
-     * can be driven by the same mock in tests. */
+     * this interface so the event-loop dispatch (EventDispatcher) can be
+     * driven by the same mock in tests. */
     virtual void loadSearch (const std::shared_ptr<SMMSearch> &search) = 0;
     virtual void sendADSB (PositionData pd) = 0;
 };

@@ -5,8 +5,8 @@
 
 /* Thin seam over Logger (src/logger.hpp) so subsystems (MAV, SMM,
  * known_aircraft) can route their runtime diagnostics to the persistent,
- * rotating fmu.log instead of std::cout/std::cerr (todo/59), without their
- * unit tests having to construct a real file-backed Logger. */
+ * rotating fmu.log instead of std::cout/std::cerr, without their unit
+ * tests having to construct a real file-backed Logger. */
 class ILogger
 {
   public:

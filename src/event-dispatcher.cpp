@@ -76,17 +76,17 @@ EventDispatcher::dispatch (const event &e)
                 /* A failed SMM-driven RTL (waiting_for_tasking) send is
                  * replayed here too: it is now tracked in the state
                  * machine's own pending_replay_state like every other
-                 * safety-critical state (todo/46, todo/70), so no separate
-                 * handling is needed in this handler. */
+                 * safety-critical state, so no separate handling is needed
+                 * in this handler. */
                 state_machine.setMavCommsFailure (status == MavCommsStatus::failure);
             },
             [&] (const MavAutopilotRestart &)
             {
                 /* The autopilot came back with no memory of what it was doing,
                  * and (unlike a link drop) with no comms edge to drive the
-                 * ordinary re-entry into the commanded state. Re-apply it
-                 * (todo/108) -- this is the case the FSS server's 10s command
-                 * redelivery used to paper over, and no longer does. */
+                 * ordinary re-entry into the commanded state. Re-apply it --
+                 * this is the case the FSS server's 10s command redelivery
+                 * used to paper over, and no longer does. */
                 logger.log (LogLevel::warning, "COMMS mav autopilot restart — re-applying commanded state");
                 state_machine.reassertState ();
             },
@@ -98,13 +98,13 @@ EventDispatcher::dispatch (const event &e)
             [&] (const PositionData &pd)
             {
                 /* Feed the continuous altitude-cap enforcement latch on every
-                 * own-ship position report (todo/92), mirroring BatteryData's
+                 * own-ship position report, mirroring BatteryData's
                  * unconditional setLowBattery call below -- the state machine
                  * debounces internally, so it must see every reading, not
                  * just over-cap ones. Uses the AGL relative_alt-derived value
-                 * (getAltitudeAGLMetres()), not getAltitudeMetres() (MSL, see
-                 * todo/99), and the same fix_valid signal FSS reporting
-                 * already derives the same way (todo/79). */
+                 * (getAltitudeAGLMetres()), not getAltitudeMetres() (MSL),
+                 * and the same fix_valid signal FSS reporting already derives
+                 * the same way. */
                 bool fix_valid = (pd.getFlags () & POSITION_FLAG_VALID_COORDS) != 0;
                 state_machine.setCurrentAltitude (fix_valid, pd.getAltitudeAGLMetres ());
                 fss.reportPosition (pd);
@@ -115,9 +115,9 @@ EventDispatcher::dispatch (const event &e)
                 /* A MISSION_ITEM_REACHED is only meaningful as search progress
                  * when the search mission is what is actually loaded on the
                  * autopilot. A goto (or its RTL terminator) can also produce a
-                 * reached event while a search is only paused (todo/69); without
-                 * this guard that would rewrite the held search's current_point
-                 * and report bogus search status to FSS. Same guard as
+                 * reached event while a search is only paused; without this
+                 * guard that would rewrite the held search's current_point and
+                 * report bogus search status to FSS. Same guard as
                  * SmmLoadSearch/SmmRtl. */
                 if (state_machine.isSearching ())
                 {
@@ -130,8 +130,8 @@ EventDispatcher::dispatch (const event &e)
             {
                 /* The SMM worker acquired/resumed a search. A command/latch that
                  * took over since the acquire started (rtl/terminate/etc.) must
-                 * win, and this outcome is dropped rather than overriding it
-                 * (todo/33) -- neither branch below fires in that case. */
+                 * win, and this outcome is dropped rather than overriding it --
+                 * neither branch below fires in that case. */
                 if (state_machine.isSearching ())
                 {
                     mav.loadSearch (ls.search);
@@ -139,42 +139,42 @@ EventDispatcher::dispatch (const event &e)
                 else if (state_machine.isWaitingForTasking ())
                 {
                     /* SMM's background retry (kept alive by waiting_for_tasking
-                     * not cancelling the searching role, todo/70/77) reacquired
-                     * a search with no operator action. Resume via SMMNewCommand
-                     * rather than uploading ls.search here: that transitions
+                     * not cancelling the searching role) reacquired a search
+                     * with no operator action. Resume via SMMNewCommand rather
+                     * than uploading ls.search here: that transitions
                      * waiting_for_tasking -> searching, whose actionState()
                      * re-invokes SMM::doSearch()'s already-held-search resume
-                     * path (todo/50) -- the same one "continue after a hold"
-                     * uses -- which re-fires load_search_cb with the same
-                     * search, landing in the isSearching() branch above. Doing
-                     * both here (this upload AND the SMMNewCommand reset) would
-                     * double-upload the same mission. */
+                     * path -- the same one "continue after a hold" uses -- which
+                     * re-fires load_search_cb with the same search, landing in
+                     * the isSearching() branch above. Doing both here (this
+                     * upload AND the SMMNewCommand reset) would double-upload
+                     * the same mission. */
                     state_machine.SMMNewCommand (smm_cmd_none);
                 }
             },
             [&] (const SmmRtl &)
             {
-                /* SMM has nothing to search right now -- either a held search's
-                 * last waypoint completed with none queued behind it, or the
-                 * next acquire attempt failed. Route through the state machine
-                 * (todo/70) rather than commanding the MAV directly: its own
-                 * priority arbitration already no-ops this call whenever a
-                 * higher-priority FSS command or latch is in control (commandedState()
-                 * only ever consults the SMM command when the FSS command alone
-                 * maps to searching), so the isSearching() guard this used to
-                 * need here is now redundant. Maps to fmu_state_waiting_for_tasking,
-                 * not fmu_state_rtl: same RTL flight mode, but this must not
-                 * cancel SMM's background acquire-retry loop (todo/77). */
+                /* SMM has nothing to search right now -- either a held search's last
+                 * waypoint completed with none queued behind it, or the next acquire
+                 * attempt failed. Route through the state machine rather than
+                 * commanding the MAV directly: its own priority arbitration already
+                 * no-ops this call whenever a higher-priority FSS command or latch is
+                 * in control (commandedState() only ever consults the SMM command when
+                 * the FSS command alone maps to searching), so the isSearching() guard
+                 * this used to need here is now redundant. Maps to
+                 * fmu_state_waiting_for_tasking, not fmu_state_rtl: same RTL flight
+                 * mode, but this must not cancel SMM's background acquire-retry loop.
+                 */
                 logger.log ("CMD smm rtl");
                 state_machine.SMMNewCommand (smm_cmd_mission_complete);
             },
             [&] (const SmmOperatorCommand &oc)
             {
-                /* An operator-issued 'AS'/'MC' command (todo/90), routed
-                 * through the state machine's own arbitration exactly like
-                 * SmmRtl above rather than acted on directly: any conflict
-                 * with an in-flight acquire-failure RTL is resolved by
-                 * SMMNewCommand's existing priority logic (todo/70). */
+                /* An operator-issued 'AS'/'MC' command, routed through the
+                 * state machine's own arbitration exactly like SmmRtl
+                 * above rather than acted on directly: any conflict with
+                 * an in-flight acquire-failure RTL is resolved by
+                 * SMMNewCommand's existing priority logic. */
                 logger.log (std::string ("CMD smm ") + smm_cmd_name (oc.command));
                 state_machine.SMMNewCommand (oc.command);
             },
@@ -197,20 +197,20 @@ EventDispatcher::dispatch (const event &e)
             {
                 if (oar.pd.getCallSign () != asset_name)
                 {
-                    /* A peer's coordinates are untrusted (todo/85): forwarding a
+                    /* A peer's coordinates are untrusted: forwarding a
                      * non-finite or out-of-range position to the autopilot's
-                     * collision-avoidance would be worse than not reporting
-                     * this contact at all, so drop it before the rate-limit
-                     * check even considers it for rebroadcast. */
+                     * collision-avoidance would be worse than not reporting this
+                     * contact at all, so drop it before the rate-limit check
+                     * even considers it for rebroadcast. */
                     if (!oar.pd.getP ().isValid ())
                     {
                         logger.log (LogLevel::debug, "ADSB: dropping a peer report with an invalid coordinate");
                         return;
                     }
                     /* Rate-limit ADS-B rebroadcast to one per ICAO address per
-                     * second (todo/81): forward if this is the first sighting
-                     * of this ICAO, or at least 1000ms has passed since the
-                     * last forward. */
+                     * second: forward if this is the first sighting of this
+                     * ICAO, or at least 1000ms has passed since the last
+                     * forward. */
                     uint32_t icao = oar.pd.getICAOAddress ();
                     uint64_t now = now_ms_fn ();
                     auto it = adsb_last_forwarded_ms.find (icao);

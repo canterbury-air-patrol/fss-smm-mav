@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for tools/apconfig_check.py (todo/103).
+Unit tests for tools/apconfig_check.py.
 
 Covers the expectation logic only -- deliberately no pymavlink and no
 aircraft, so this runs anywhere python3 does. The point of the tool is that
@@ -82,7 +82,7 @@ class HalfConfiguredAircraftFails(unittest.TestCase):
     """
     The cases this tool exists for: the failsafe looks enabled but does
     nothing. Each of these passes the in-flight advisory check today
-    (todo/104).
+   .
     """
 
     def test_plane_enabled_failsafe_that_continues_the_mission(self):

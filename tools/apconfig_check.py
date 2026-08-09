@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Verify an autopilot's configuration against what cap-fmu's safety design
-depends on (todo/103).
+depends on.
 
 cap-fmu relies on the autopilot's own GCS/telemetry failsafe as the backstop
 for a companion-computer failure (HZ-16): if the FMU stops heartbeating, the

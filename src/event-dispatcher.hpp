@@ -13,21 +13,20 @@
 #include <map>
 #include <string>
 
-/* Minimum interval between ADS-B rebroadcasts of the same ICAO address
- * (todo/81, the CAP test plan's §4.1 requirement). Also the retention window
- * for the throttle map: once an entry is this old it can no longer suppress a
- * forward, so it is dropped. Namespace scope so the dispatch path, the pruning
- * and the tests all name the same number. */
+/* Minimum interval between ADS-B rebroadcasts of the same ICAO address (the
+ * CAP test plan's §4.1 requirement). Also the retention window for the
+ * throttle map: once an entry is this old it can no longer suppress a forward,
+ * so it is dropped. Namespace scope so the dispatch path, the pruning and the
+ * tests all name the same number. */
 inline constexpr uint64_t adsb_forward_interval_ms = 1000;
 
 /* The event-loop's routing policy: which events reach the state machine,
  * which SMM/MAV outcomes are gated on isSearching()/isWaitingForTasking(),
  * what gets logged, how battery readings are classified. Extracted from
- * App::run()'s std::visit block (todo/76) so it can be driven by the
- * existing FMUStateMachine mocks in tests/fmu_test.cpp without a real
- * FSS/MAV/SMM (sockets, config files). App keeps the queue/thread/signal
- * plumbing and callback registration; this only applies one already-dequeued
- * event.
+ * App::run()'s std::visit block so it can be driven by the existing
+ * FMUStateMachine mocks in tests/fmu_test.cpp without a real FSS/MAV/SMM
+ * (sockets, config files). App keeps the queue/thread/signal plumbing and
+ * callback registration; this only applies one already-dequeued event.
  *
  * Registers itself as the state machine's state-change callback at
  * construction (folding in what App::run() used to do inline), logging the
@@ -40,8 +39,8 @@ class EventDispatcher
 
     void dispatch (const event &e);
 
-    /* Test seam (todo/81): inject a fake "now" source so the per-ICAO ADS-B
-     * throttle can be exercised without a real 1s sleep_for. */
+    /* Test seam: inject a fake "now" source so the per-ICAO ADS-B throttle
+     * can be exercised without a real 1s sleep_for. */
     void setNowMsFn (std::function<uint64_t ()> fn);
 
     /* Test seam: how many ICAO addresses the throttle map is currently holding.
@@ -58,10 +57,10 @@ class EventDispatcher
     std::string asset_name;
     int lowbat_threshold;
     std::function<uint64_t ()> now_ms_fn{ current_timestamp_ms };
-    /* Last-forwarded time per ICAO address (todo/81), throttling ADS-B
-     * rebroadcast to at most one per address per second (the CAP test plan's
-     * §4.1 requirement) so a busy receiver near a real airport cannot flood
-     * ArduPilot with ADSB_VEHICLE updates at dump1090's raw rate.
+    /* Last-forwarded time per ICAO address, throttling ADS-B rebroadcast to at
+     * most one per address per second (the CAP test plan's §4.1 requirement) so
+     * a busy receiver near a real airport cannot flood ArduPilot with
+     * ADSB_VEHICLE updates at dump1090's raw rate.
      *
      * Pruned by pruneAdsbThrottle() to just the addresses forwarded within the
      * last interval, so it is sized by current traffic rather than by history.

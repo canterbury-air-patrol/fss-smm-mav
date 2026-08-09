@@ -55,13 +55,13 @@ jobs:
         # detail is lost when the runner is torn down.
         make check VERBOSE=1
 
-    - name: Test-plan traceability (todo/66)
+    - name: Test-plan traceability
       run: python3 tools/traceability.py --out traceability-report.json
 
     # The config checker's expectations are deliberately free of pymavlink,
     # so this needs nothing beyond the python3 installed above -- no
-    # aircraft, no simulator (todo/103).
-    - name: Autopilot config checker unit tests (todo/103)
+    # aircraft, no simulator.
+    - name: Autopilot config checker unit tests
       run: python3 -m unittest discover -s tools -p 'test_*.py' --verbose
 
     - name: Upload traceability report
@@ -85,7 +85,7 @@ jobs:
         bash -n docker/build.sh
         bash -n docker/install.sh
 
-    - name: Smoke test (docker config generation, todo/56)
+    - name: Smoke test (docker config generation)
       run: |
         export CONFIG_FILE=/tmp/fmu-client-smoke-test.json
         export TERMINATE_ACTION=none
@@ -106,7 +106,7 @@ jobs:
         test "$(jq -r '.servers[0].port' "${CONFIG_FILE}")" = "20202"
         test "$(jq -r '.fmu.mav_port' "${CONFIG_FILE}")" = "5760"
         # log_dir is omitted unless LOG_DIR is set, so the default in
-        # FmuConfig (and the image's own /var/log/cap-fmu) applies (todo/78).
+        # FmuConfig (and the image's own /var/log/cap-fmu) applies.
         test "$(jq -r '.fmu | has("log_dir")' "${CONFIG_FILE}")" = "false"
 
         # LOG_DIR, when set, must appear in the generated config verbatim.
@@ -139,7 +139,7 @@ jobs:
         fi
         test ! -e "${CONFIG_FILE}"
 
-        # clock_offset_ms (todo/88) is omitted unless CLOCK_OFFSET_MS is set,
+        # clock_offset_ms is omitted unless CLOCK_OFFSET_MS is set,
         # reproducing today's config byte-for-byte.
         rm -f "${CONFIG_FILE}"
         ./docker/generate-config.sh

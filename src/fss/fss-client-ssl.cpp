@@ -117,11 +117,11 @@ fss_client_ssl::handleCommandFrom (
     }
 
     /* A goto with a non-finite or out-of-range coordinate must never reach the
-     * command group or the state machine (todo/85): degrees_to_degE7() would
-     * hit undefined behavior on it downstream, and CommandPayload::sameAs()
-     * cannot dedup a NaN target against anything (always compares unequal),
-     * so a malformed retry would be actioned repeatedly. Reject synchronously,
-     * the same way an unrecognised command is above, so the malformed command
+     * command group or the state machine: degrees_to_degE7() would hit
+     * undefined behavior on it downstream, and CommandPayload::sameAs() cannot
+     * dedup a NaN target against anything (always compares unequal), so a
+     * malformed retry would be actioned repeatedly. Reject synchronously, the
+     * same way an unrecognised command is above, so the malformed command
      * never opens or disturbs a command group. */
     if (raw_command == flight_safety_system::transport::asset_command_goto
         && !Point (msg->getLatitude (), msg->getLongitude ()).isValid ())
@@ -151,10 +151,10 @@ fss_client_ssl::handleCommandFrom (
      *
      * `origin` identifies the connection this copy arrived on: fss_server objects
      * are one-per-configured-server and persist across reconnects (only the
-     * underlying socket is replaced), so it is a stable per-connection key for
-     * the lifetime of this client (todo/86). server_command_id is 0 when the peer
-     * did not negotiate FSS_FEATURE_SERVER_COMMAND_ID; the group treats that as
-     * "no evidence" and falls back to the pre-todo/86 timestamp-window dedup. */
+     * underlying socket is replaced), so it is a stable per-connection key for the
+     * lifetime of this client. server_command_id is 0 when the peer did not
+     * negotiate FSS_FEATURE_SERVER_COMMAND_ID; the group treats that as "no
+     * evidence" and falls back to the plain timestamp-window dedup. */
     auto delivery = this->command_group.onDelivery (static_cast<int> (raw_command), ts, this_copy, payload,
                                                     msg->getServerCommandId (), reinterpret_cast<uintptr_t> (origin));
 
@@ -215,7 +215,7 @@ fss_client_ssl::handleCommandFrom (
     /* goto and altitude carry a target (position / altitude). Deliver it with the
      * command so it and the command travel as one unit through the event queue,
      * rather than reporting it up a separate side-channel the state machine would
-     * re-read at action time (todo/53). */
+     * re-read at action time. */
     FSSCommandTarget target;
     if (raw_command == flight_safety_system::transport::asset_command_goto)
     {
@@ -227,7 +227,7 @@ fss_client_ssl::handleCommandFrom (
          * narrow it here: a malformed/oversized value would wrap to a smaller
          * altitude, and the [floor, cap] clamp downstream could then accept the
          * wrapped value as legitimate. clamp_command_altitude() is the single
-         * narrowing authority (todo/55). */
+         * narrowing authority. */
         target.altitude = msg->getAltitude ();
     }
     this->report_command (fss_command, target, ack);
@@ -275,7 +275,7 @@ fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t head
     static constexpr std::chrono::milliseconds ts_1sec_interval{ 1000 };
     static constexpr uint16_t squawk_vfr = 1200;
     static constexpr uint32_t valid_fields_all = 1 | 2 | 4 | 8 | 16 | 32;
-    /* Coordinates are not backed by a real GPS fix (todo/79): drop just the
+    /* Coordinates are not backed by a real GPS fix: drop just the
      * coords-valid bit (bit 1) so FSS-Web can render "no fix" instead of
      * showing a stale/lost position as a fresh, current one. */
     static constexpr uint32_t valid_fields_no_fix = valid_fields_all & ~static_cast<uint32_t> (1);

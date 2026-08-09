@@ -46,7 +46,7 @@ class SMMSettings
 /* Result of parse_waypoints(): the decoded points plus whether every one of
  * them was a valid coordinate. Kept separate from SMMSearch so the parsing
  * decision is a pure function, testable directly against a plain
- * smm_waypoint_s array without a live smm_search handle (todo/85). */
+ * smm_waypoint_s array without a live smm_search handle. */
 struct ParsedWaypoints
 {
     std::vector<Point> points{};
@@ -54,9 +54,9 @@ struct ParsedWaypoints
 };
 
 /* Decode every waypoint into a Point and report whether all of them are valid
- * coordinates (todo/85). One invalid waypoint invalidates the whole batch
- * rather than silently dropping or clamping just that point, so a search
- * containing it is never partially loaded onto the autopilot. */
+ * coordinates. One invalid waypoint invalidates the whole batch rather than
+ * silently dropping or clamping just that point, so a search containing it is
+ * never partially loaded onto the autopilot. */
 inline auto
 parse_waypoints (smm_waypoints wps, std::size_t count) -> ParsedWaypoints
 {

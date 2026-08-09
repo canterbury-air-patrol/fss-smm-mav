@@ -20,8 +20,5 @@ endif
 #   tests come along, since CI runs them from the same directory.
 # check-code.sh/.clang-format/.clang-tidy: the static-analysis gate, so it can
 #   be reproduced from a tarball rather than only from a clone.
-#
-# todo/ is deliberately NOT distributed: it tracks in-flight work against this
-# repository, not anything a consumer of a release can act on.
 EXTRA_DIST = mavlink debian docs tools LICENSE.md \
 	check-code.sh .clang-format .clang-tidy

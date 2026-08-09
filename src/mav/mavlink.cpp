@@ -35,9 +35,9 @@ constexpr int BUFFER_LEN = 2048;
 
 constexpr uint8_t SYS_ID = 200;
 constexpr uint8_t COMP_ID = 1;
-/* The SYSID_MYGCS check (failsafe-params.hpp, todo/104) warns when the
- * autopilot's GCS failsafe is watching a system id other than the one we
- * heartbeat as. It needs the value in a header; this keeps the copy honest. */
+/* The SYSID_MYGCS check (failsafe-params.hpp) warns when the autopilot's GCS
+ * failsafe is watching a system id other than the one we heartbeat as. It
+ * needs the value in a header; this keeps the copy honest. */
 static_assert (SYS_ID == fmu_gcs_sys_id, "the SYSID_MYGCS check must expect the system id we actually heartbeat as");
 
 /* The autopilot this FMU talks to. Every direct command (mode, arm/disarm,
@@ -49,7 +49,7 @@ constexpr uint8_t TARGET_COMP_ID = 1;
  * sysid 0 rather than TARGET_SYS_ID — a deliberate ArduPilot-ism (broadcast
  * mission upload accepted by whichever system is listening), not an
  * oversight; kept distinct from TARGET_SYS_ID so a future change to one
- * cannot accidentally also move the other (todo/73). */
+ * cannot accidentally also move the other. */
 constexpr uint8_t MISSION_TARGET_SYS_ID = 0;
 constexpr mavlink_channel_t MAV_RECV_CHANNEL = MAVLINK_COMM_0;
 constexpr mavlink_channel_t MAV_SEND_CHANNEL = MAVLINK_COMM_1;
@@ -95,19 +95,19 @@ mav_connection::heartbeat_loop ()
                 if (fd_open)
                 {
                     /* A stale heartbeat on a socket that is still locally open is a
-                     * half-open link (todo/84): the network path is gone but the fd
-                     * itself has not errored, so nothing else would ever retire it.
-                     * Only flag it broken here — attemptReconnect() (the reconnector
-                     * thread, the sole owner of actual teardown; see
-                     * docs/threading.md) tears it down and dials a fresh connection
-                     * on its next pass. */
+                     * half-open link: the network path is gone but the fd itself has
+                     * not errored, so nothing else would ever retire it. Only flag
+                     * it broken here — attemptReconnect() (the reconnector thread,
+                     * the sole owner of actual teardown; see docs/threading.md)
+                     * tears it down and dials a fresh connection on its next pass.
+                     */
                     this->broken = true;
                 }
                 /* A goto's MISSION_COUNT can reach the autopilot with the rest
                  * of the upload (request-driven) never completing if the link
                  * then drops. Unlike RTL/failsafe/low-battery/terminate this
-                 * is not replayed on recovery (todo/61), so make the silent
-                 * no-op visible instead. */
+                 * is not replayed on recovery, so make the silent no-op
+                 * visible instead. */
                 bool goto_upload_lost;
                 {
                     std::lock_guard<std::mutex> state_lk{ this->state_lock };
@@ -163,8 +163,8 @@ mav_connection::invalidateInFlightUploadLocked () -> bool
         /* The abandoned search never reached search_loaded, so there is no
          * completed mission to resume; drop the reference so a later
          * MISSION_REQUEST for the abandoned upload's sequence numbers finds
-         * nothing to serve rather than reusing it (todo/82). A search that
-         * was already loaded (search_loaded, not search_loading) keeps its
+         * nothing to serve rather than reusing it. A search that was
+         * already loaded (search_loaded, not search_loading) keeps its
          * `search` reference — only the `search_loaded` flag below is
          * cleared for it, same as every other clear_search_loaded caller,
          * because control has left whatever mission was active. */
@@ -209,9 +209,9 @@ mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loade
         {
             std::lock_guard<std::mutex> lk{ this->state_lock };
             this->pending_mode_command = command;
-            /* The decision to take control has been made even though the
-             * SET_MODE itself is deferred (todo/82); an in-flight upload must
-             * not survive to complete once a heartbeat resolves and replays it. */
+            /* The decision to take control has been made even though the SET_MODE
+             * itself is deferred; an in-flight upload must not survive to complete
+             * once a heartbeat resolves and replays it. */
             if (clear_search_loaded)
             {
                 upload_invalidated = this->invalidateInFlightUploadLocked ();
@@ -325,9 +325,9 @@ mav_connection::commandGoto (Point p) -> bool
         /* The goto is a mission upload: report whether its opening MISSION_COUNT
          * reached the autopilot (the rest is request-driven). Unlike RTL/
          * failsafe/low-battery/terminate, a goto is not replayed on link
-         * recovery if the upload never completes (todo/61) — so a send
-         * failure here is surfaced immediately rather than silently treated
-         * as a successful goto by the caller. */
+         * recovery if the upload never completes — so a send failure here is
+         * surfaced immediately rather than silently treated as a successful goto
+         * by the caller. */
         sent = this->sendMavLinkMsgLocked (&msg);
     }
     if (sent)
@@ -447,10 +447,10 @@ mav_connection::send_waypoint (uint16_t seq, uint8_t mission_type)
     }
     /* Only reply while an upload is genuinely open. goto_active/search_loading
      * are exactly what a newer safety-critical mode invalidates when it takes
-     * control mid-upload (todo/82); once cleared, a request that still
-     * references the abandoned upload's sequence numbers must not be served
-     * from `search`, which can still be non-null (an unrelated, already-
-     * resumable search) even though no upload is open. */
+     * control mid-upload; once cleared, a request that still references the
+     * abandoned upload's sequence numbers must not be served from `search`,
+     * which can still be non-null (an unrelated, already- resumable search)
+     * even though no upload is open. */
     if (!local_goto_active && !local_search_loading)
     {
         return;
@@ -561,18 +561,17 @@ mav_connection::mission_ack (bool accepted)
     uint16_t search_seq = 0;
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
-        /* Correlate the ack with an upload that is still genuinely pending
-         * (todo/82): goto_active alone is long-lived (nothing clears it once
-         * an upload completes, so it cannot prove *this* ack belongs to a
-         * mission still allowed to complete). goto_ack_pending is the
-         * narrower "opening MISSION_COUNT sent, no ack processed yet" signal
-         * (todo/61), and is exactly what a newer safety-critical mode
-         * invalidates mid-upload (invalidateInFlightUploadLocked()), so it is
-         * the sole gate here. This upload's lifecycle ends with this ack
-         * either way — accepted or rejected — so goto_active must not
-         * outlive it either, or a later stale/duplicate ack (or an abandoned
-         * request for its now-closed sequence numbers) could still be
-         * actioned or served. */
+        /* Correlate the ack with an upload that is still genuinely pending:
+         * goto_active alone is long-lived (nothing clears it once an upload
+         * completes, so it cannot prove *this* ack belongs to a mission still
+         * allowed to complete). goto_ack_pending is the narrower "opening
+         * MISSION_COUNT sent, no ack processed yet" signal, and is exactly
+         * what a newer safety-critical mode invalidates mid-upload
+         * (invalidateInFlightUploadLocked()), so it is the sole gate here.
+         * This upload's lifecycle ends with this ack either way — accepted or
+         * rejected — so goto_active must not outlive it either, or a later
+         * stale/duplicate ack (or an abandoned request for its now-closed
+         * sequence numbers) could still be actioned or served. */
         bool goto_was_pending = this->goto_ack_pending;
         this->goto_ack_pending = false;
         if (goto_was_pending)
@@ -605,8 +604,8 @@ mav_connection::mission_ack (bool accepted)
         }
         /* An accepted ack that neither branch consumed is either a duplicate/
          * retransmitted delivery for an upload already completed, or one
-         * invalidated by a newer safety-critical mode while still in flight
-         * (todo/82) — both must be logged and ignored, never actioned. */
+         * invalidated by a newer safety-critical mode while still in flight —
+         * both must be logged and ignored, never actioned. */
         stale_ack = accepted && !goto_set_current && !search_set_current;
     }
     if (stale_ack)
@@ -619,7 +618,7 @@ mav_connection::mission_ack (bool accepted)
     {
         /* Select the freshly-uploaded mission item before engaging AUTO. ArduPilot
          * can otherwise race the mode change against its post-upload mission
-         * current reset and stay in the previous mode (todo/77). */
+         * current reset and stay in the previous mode. */
         this->setCurrentWP (0);
         this->commandAuto ();
     }
@@ -647,7 +646,7 @@ mav_connection::loadSearch () -> bool
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->goto_active = false;
         /* A pending goto upload is superseded by this search upload, not lost
-         * to a link drop; nothing to warn about (todo/61). */
+         * to a link drop; nothing to warn about. */
         this->goto_ack_pending = false;
         this->search_loaded = false;
         this->search_loading = true;
@@ -735,10 +734,10 @@ mav_connection::checkFailsafeParamReply (const std::string &param_id, float valu
     auto params = expected_failsafe_params (sys->getAutoPilotType (), this->term_action);
     auto match = std::find_if (params.begin (), params.end (),
                                [&] (const FailsafeParamCheck &check) { return param_id == check.name; });
-    /* Each check judges its own value (todo/104): an enable flag says the
-     * failsafe fires, not what it does when it does, so "nonzero" is not a
-     * sufficient test for every param here. See FailsafeParamCheck on why the
-     * predicates compare floats exactly. */
+    /* Each check judges its own value: an enable flag says the failsafe
+     * fires, not what it does when it does, so "nonzero" is not a sufficient
+     * test for every param here. See FailsafeParamCheck on why the predicates
+     * compare floats exactly. */
     if (match != params.end () && !match->accept (value))
     {
         /* Name the value that was actually read: the warnings say what is wrong
@@ -836,13 +835,13 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
              * intervals (microseconds; defaults are 200ms position / 1s
              * battery). Restricted to the autopilot system: any other system
              * whose first message arrives on this link (e.g. another GCS)
-             * would only ignore or NAK the request (todo/73). */
+             * would only ignore or NAK the request. */
             this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
                                  this->position_stream_interval_us);
             this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_BATTERY_STATUS,
                                  this->battery_stream_interval_us);
-            /* GPS fix health (todo/79) does not need to be faster than the
-             * battery cadence, so reuse it rather than adding a new config key. */
+            /* GPS fix health does not need to be faster than the battery cadence,
+             * so reuse it rather than adding a new config key. */
             this->requestStream (msg->sysid, msg->compid, MAVLINK_MSG_ID_GPS_RAW_INT, this->battery_stream_interval_us);
         }
         sys->setupComplete ();
@@ -881,7 +880,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
                 break;
             }
             /* GLOBAL_POSITION_INT is the fastest stream carrying the autopilot's
-             * uptime, so it is the primary restart detector (todo/108). */
+             * uptime, so it is the primary restart detector. */
             this->noteTimeBootMs (mavlink_msg_global_position_int_get_time_boot_ms (msg));
             /* New position data */
             int32_t lat = mavlink_msg_global_position_int_get_lat (msg);
@@ -901,12 +900,12 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             }
             /* GLOBAL_POSITION_INT itself has no fix-validity field (it is just the
              * EKF's estimate); GPS_RAW_INT.fix_type is the autopilot's own signal
-             * for whether that estimate is backed by a real GPS fix (todo/79). */
+             * for whether that estimate is backed by a real GPS fix. */
             bool fix_valid = this->gps_fix_type >= GPS_FIX_TYPE_2D_FIX;
             /* GLOBAL_POSITION_INT.alt is millimetres; PositionData carries metres.
              * relative_alt is AGL (the frame altitude_cap_m uses), distinct from
              * alt (MSL) — plumbed through separately for the altitude-cap breach
-             * check (todo/92); see PositionData::alt_agl_m and todo/99. */
+             * check; see PositionData::alt_agl_m. */
             this->report_position (latd, lngd, mav_mm_to_metres (alt), heading, vh, vz, fix_valid,
                                    mav_mm_to_metres (relative_alt));
         }
@@ -977,7 +976,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
                 break;
             }
             /* The autopilot's own no-fix/2D/3D health indicator, tracked for
-             * the next GLOBAL_POSITION_INT's fix-validity flag (todo/79). */
+             * the next GLOBAL_POSITION_INT's fix-validity flag. */
             this->gps_fix_type = mavlink_msg_gps_raw_int_get_fix_type (msg);
         }
         break;
@@ -990,7 +989,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             /* Nothing here consumes the autopilot's clock; SYSTEM_TIME is
              * handled purely as a second source of time_boot_ms, so a restart is
              * still detected when the position stream is not flowing (no fix, or
-             * the stream request lost to an earlier reboot) — todo/108. */
+             * the stream request lost to an earlier reboot). */
             this->noteTimeBootMs (mavlink_msg_system_time_get_time_boot_ms (msg));
         }
         break;
@@ -1007,7 +1006,7 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
             mavlink_msg_param_value_get_param_id (msg, param_id_buf);
             /* ArduPilot always transmits param_value as float on the wire,
              * regardless of the declared param_type, including for
-             * integer/bool params like AFS_ENABLE (todo/91). */
+             * integer/bool params like AFS_ENABLE. */
             float value = mavlink_msg_param_value_get_param_value (msg);
             this->checkFailsafeParamReply (param_id_buf, value);
         }
@@ -1261,9 +1260,9 @@ mav_connection::connect_to_mav ()
     setsockopt (new_fd, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof (rcv_timeout));
 
     /* Bound a blocking send() the same way: a peer that stops reading, or a
-     * network path that silently disappears, must not pin a sender —
-     * including the event-loop thread issuing a safety command — indefinitely
-     * (todo/84). SO_SNDTIMEO bounds each blocking send() call; TCP_USER_TIMEOUT
+     * network path that silently disappears, must not pin a sender — including
+     * the event-loop thread issuing a safety command — indefinitely.
+     * SO_SNDTIMEO bounds each blocking send() call; TCP_USER_TIMEOUT
      * additionally bounds data that is locally "sent" but never acknowledged
      * (or never even transmitted, e.g. a zero window), which SO_SNDTIMEO alone
      * does not cover. Guarded by #ifdef because TCP_USER_TIMEOUT is
@@ -1326,7 +1325,7 @@ mav_connection::disconnect_from_mav ()
         close (orig_fd);
     }
     /* Re-arm the per-system setup latches so a reconnect re-requests the streams
-     * and re-runs the failsafe-config check (todo/108). The old link's runtime
+     * and re-runs the failsafe-config check. The old link's runtime
      * SET_MESSAGE_INTERVAL overrides cannot be assumed to have survived — the
      * autopilot may have rebooted, or the reconnect may reach a different
      * instance entirely — and without this they were issued exactly once per FMU
@@ -1497,11 +1496,11 @@ mav_connection::report_reached (int point)
 {
     /* seq 0/1 (< search_first_point_seq) are the setup/takeoff items, which
      * have no corresponding search point and are dropped rather than passed
-     * on (see todo/69 for why a goto/RTL's own reached events must also be
+     * on (a goto/RTL's own reached events must also be
      * gated by isSearching() upstream, not just this check). The translation
      * for a real search-point seq is next_search_point_after_reached_seq's
-     * "resume from the next point" mapping, not mission_item_for's inverse
-     * (todo/64). */
+     * "resume from the next point" mapping, not mission_item_for's inverse.
+     */
     if (this->reached_cb && point >= search_first_point_seq)
     {
         this->reached_cb (next_search_point_after_reached_seq (static_cast<uint16_t> (point)));

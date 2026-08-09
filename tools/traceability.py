@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Collect CAP master test-plan (TC-MAV-*/TC-FS-*/...) traceability evidence
-from this repo's Catch2 test binaries (todo/66).
+from this repo's Catch2 test binaries.
 
 Runs each binary with the JSON reporter, extracts every `[TC-...]` Catch2
 tag together with the outcome of the test case carrying it, and emits the

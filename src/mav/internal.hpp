@@ -88,8 +88,8 @@ class mav_sys
         this->setup.store (true);
     };
     /* Re-arm both one-shot latches so the next message from this system
-     * re-issues the stream requests and re-runs the failsafe-config check
-     * (todo/108). Needed because an autopilot restart discards the runtime
+     * re-issues the stream requests and re-runs the failsafe-config check.
+     * Needed because an autopilot restart discards the runtime
      * SET_MESSAGE_INTERVAL overrides this end asked for: without this the
      * streams are requested exactly once per FMU process and a rebooted
      * autopilot silently falls back to whatever its SRx_* params give. Also
@@ -101,15 +101,15 @@ class mav_sys
         this->setup.store (false);
         this->failsafe_checked.store (false);
     };
-    /* Whether the todo/91 failsafe-config sanity check has already been
-     * issued for this system for the given (heartbeat-reported) `type`.
-     * MAV_TYPE is fixed by firmware and does not change at runtime for a
-     * genuine autopilot, so in practice this only ever fires once; it is
-     * keyed on `type` (not a plain done/not-done flag) so that if it ever
-     * does differ on a later heartbeat — e.g. a second vehicle sharing this
-     * sysid on a hub (todo/97) — the check re-runs for whichever type is now
-     * claiming this system, rather than staying silent forever on the
-     * first-seen type. */
+    /* Whether the failsafe-config sanity check has already been issued for
+     * this system for the given (heartbeat-reported) `type`. MAV_TYPE is
+     * fixed by firmware and does not change at runtime for a genuine
+     * autopilot, so in practice this only ever fires once; it is keyed on
+     * `type` (not a plain done/not-done flag) so that if it ever does
+     * differ on a later heartbeat — e.g. a second vehicle sharing this
+     * sysid on a hub — the check re-runs for whichever type is now claiming
+     * this system, rather than staying silent forever on the first-seen
+     * type. */
     auto
     checkedFailsafeFor (uint8_t type) -> bool
     {
@@ -142,11 +142,11 @@ class mav_systems
     /* Return the system for t_sysid if it already exists, else nullptr. Never
      * mutates the list, so it is safe to call from the command paths. */
     auto findExistingSystem (uint8_t t_sysid) -> std::shared_ptr<mav_sys>;
-    /* Re-arm every known system's setup/failsafe-check latches (todo/108).
-     * Called from the recv thread on a detected autopilot restart and from the
-     * reconnector thread when the link is torn down, so it takes `lock` like
-     * every other list access. Must not be called with mav_connection's
-     * send_lock held — this lock never nests with it (see docs/threading.md). */
+    /* Re-arm every known system's setup/failsafe-check latches. Called from the
+     * recv thread on a detected autopilot restart and from the reconnector
+     * thread when the link is torn down, so it takes `lock` like every other
+     * list access. Must not be called with mav_connection's send_lock held —
+     * this lock never nests with it (see docs/threading.md). */
     void resetAllSetup ();
 };
 
@@ -189,11 +189,11 @@ class mav_connection
      * is the canonical version of this list (and of the whole cross-thread
      * ownership/lock-ordering model this connection is one piece of): a field
      * added here needs a matching update there, or the document contributors
-     * reason from before running TSan drifts out of date (todo/95). Fields
-     * below that are thread-owned (gps_fix_type) or immutable after
-     * construction (goto_altitude_m, altitude_floor_m/cap_m, the stream
-     * intervals) are deliberately absent from both lists; each says so at its
-     * own declaration. */
+     * reason from before running TSan drifts out of date. Fields below that
+     * are thread-owned (gps_fix_type) or immutable after construction
+     * (goto_altitude_m, altitude_floor_m/cap_m, the stream intervals) are
+     * deliberately absent from both lists; each says so at its own
+     * declaration. */
     std::mutex state_lock{};
     Point last_position{};
     std::shared_ptr<SMMSearch> search{ nullptr };
@@ -206,25 +206,25 @@ class mav_connection
     bool goto_active{ false };
     /* True from a successfully-sent goto MISSION_COUNT until its MISSION_ACK
      * is processed (or it is superseded by a new goto/search). setMode()'s
-     * "sent" for a goto only reflects that opening packet (todo/61) — the
-     * rest of the upload is request-driven and the FMU has no replay-on-
-     * recovery guarantee for it (unlike RTL/failsafe/low-battery/terminate,
-     * todo/46). This flag lets a link drop mid-upload be reported instead of
-     * silently treated as a successful goto. */
+     * "sent" for a goto only reflects that opening packet — the rest of the
+     * upload is request-driven and the FMU has no replay-on- recovery
+     * guarantee for it (unlike RTL/failsafe/low-battery/terminate). This
+     * flag lets a link drop mid-upload be reported instead of silently
+     * treated as a successful goto. */
     bool goto_ack_pending{ false };
     /* The autopilot's own GPS health indicator (GPS_RAW_INT.fix_type), tracked
      * so a position report can carry whether its coordinates are backed by a
-     * real fix (todo/79). Defaults to NO_GPS — invalid — so a position sent
-     * before the first GPS_RAW_INT arrives is not mistaken for a good fix.
-     * Written and read only on the recv thread (processMavLinkMsg), so it
-     * needs no lock, same as goto_altitude_m above. */
+     * real fix. Defaults to NO_GPS — invalid — so a position sent before the
+     * first GPS_RAW_INT arrives is not mistaken for a good fix. Written and
+     * read only on the recv thread (processMavLinkMsg), so it needs no lock,
+     * same as goto_altitude_m above. */
     uint8_t gps_fix_type{ GPS_FIX_TYPE_NO_GPS };
     /* Highest autopilot uptime (time_boot_ms) seen so far, from whichever of
      * GLOBAL_POSITION_INT / SYSTEM_TIME reported it. A backwards jump is the
      * only evidence this end gets of an autopilot restart that was too short to
-     * break the link (todo/108). 0 means nothing has been observed yet. Written
-     * and read only on the recv thread (processMavLinkMsg), so it needs no lock,
-     * same as gps_fix_type above. */
+     * break the link. 0 means nothing has been observed yet. Written and read
+     * only on the recv thread (processMavLinkMsg), so it needs no lock, same as
+     * gps_fix_type above. */
     uint32_t last_time_boot_ms{ 0 };
     std::optional<MavModeCommand> pending_mode_command{};
     /* Altitude (metres AGL, relative to home) a goto waypoint is flown at;
@@ -243,23 +243,23 @@ class mav_connection
     uint32_t position_stream_interval_us;
     uint32_t battery_stream_interval_us;
     /* Bound (milliseconds) on how long connect_to_mav() waits for a TCP
-     * connect to complete before giving up (todo/84). Set once at
-     * construction; read only on whichever thread calls connect_to_mav()
-     * (the main thread via start(), or the FSS reconnector thread via
+     * connect to complete before giving up. Set once at construction;
+     * read only on whichever thread calls connect_to_mav() (the main
+     * thread via start(), or the FSS reconnector thread via
      * attemptReconnect()), so it needs no locking — same pattern as
      * goto_altitude_m above. */
     uint32_t connect_timeout_ms;
     /* Bound (milliseconds) applied as SO_SNDTIMEO and (where available)
      * TCP_USER_TIMEOUT on a freshly connected socket, so a peer that stops
      * reading, or a network path that silently disappears, cannot block a
-     * send indefinitely (todo/84). Set once at construction; read only
-     * inside connect_to_mav() when configuring the socket, so it needs no
+     * send indefinitely. Set once at construction; read only inside
+     * connect_to_mav() when configuring the socket, so it needs no
      * locking. */
     uint32_t send_timeout_ms;
     /* Selected --terminate-action, needed to decide which failsafe params are
-     * worth sanity-checking (todo/91). Set once at construction; read only on
-     * the recv thread (checkFailsafeConfig/checkFailsafeParamReply), so it
-     * needs no locking — same pattern as goto_altitude_m above. */
+     * worth sanity-checking. Set once at construction; read only on the recv
+     * thread (checkFailsafeConfig/checkFailsafeParamReply), so it needs no
+     * locking — same pattern as goto_altitude_m above. */
     terminate_action term_action;
     ILogger &logger;
     auto sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool;
@@ -286,55 +286,54 @@ class mav_connection
     /* Clear goto/search upload state so a MISSION_ACK for an upload that is
      * no longer allowed to complete — because a newer safety-critical mode
      * (RTL, hold, manual, disarm, force-disarm, terminate) just took control
-     * mid-upload — cannot select a mission item or command AUTO (todo/82).
-     * Also drops a search that never reached search_loaded, so a lingering
+     * mid-upload — cannot select a mission item or command AUTO. Also drops
+     * a search that never reached search_loaded, so a lingering
      * MISSION_REQUEST for the abandoned upload's sequence numbers cannot be
      * served from it. Must be called with state_lock already held. Returns
      * whether an upload was genuinely in flight (its ack still pending), so
      * the caller can log it once state_lock is released. */
     auto invalidateInFlightUploadLocked () -> bool;
     /* Log that `action_name` invalidated an in-flight goto/search mission
-     * upload (todo/82). Shared by every command that can take control
-     * mid-upload so the wording stays identical. Must be called without
-     * state_lock held. */
+     * upload. Shared by every command that can take control mid-upload so
+     * the wording stays identical. Must be called without state_lock
+     * held. */
     void logUploadInvalidated (const std::string &action_name);
     /* Whether `msg` originates from the configured autopilot system
      * (TARGET_SYS_ID). Flight-critical message handling — heartbeat,
-     * position, GPS fix, battery, mission progress/requests/acks — must
-     * gate on this so any other system sharing this MAVLink link (a GCS, a
-     * companion computer, or a second vehicle) cannot influence FMU state
-     * (todo/83). Non-matching traffic is expected on a shared link, not
-     * anomalous, so a rejection is logged at debug rather than warn/error. */
+     * position, GPS fix, battery, mission progress/requests/acks — must gate
+     * on this so any other system sharing this MAVLink link (a GCS, a
+     * companion computer, or a second vehicle) cannot influence FMU state.
+     * Non-matching traffic is expected on a shared link, not anomalous, so a
+     * rejection is logged at debug rather than warn/error. */
     auto isFromAutopilot (const mavlink_message_t *msg) -> bool;
     /* Feed an autopilot-reported uptime (GLOBAL_POSITION_INT.time_boot_ms or
      * SYSTEM_TIME.time_boot_ms) to the restart detector, then record it. A
      * backwards jump past autopilot_restart_margin_ms runs
      * handleAutopilotRestart(). Recv thread only. */
     void noteTimeBootMs (uint32_t time_boot_ms);
-    /* React to a detected autopilot restart (todo/108): warn, re-arm the
-     * per-system setup latches so the streams and the failsafe-config check are
-     * re-issued, drop this end's belief about what mission is loaded (the reboot
-     * wiped it), and tell the event loop to re-apply the commanded state. Recv
-     * thread only. */
+    /* React to a detected autopilot restart: warn, re-arm the per-system setup
+     * latches so the streams and the failsafe-config check are re-issued, drop
+     * this end's belief about what mission is loaded (the reboot wiped it), and
+     * tell the event loop to re-apply the commanded state. Recv thread only. */
     void handleAutopilotRestart ();
     void processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *status);
     /* Issue a PARAM_REQUEST_READ for each param expected_failsafe_params()
-     * returns for `autopilot_type`/this->term_action (todo/91). Called once,
-     * on the first heartbeat that resolves the autopilot type (see
+     * returns for `autopilot_type`/this->term_action. Called once, on the
+     * first heartbeat that resolves the autopilot type (see
      * mav_sys::checkedFailsafe()/markFailsafeChecked()). Read-only: never
      * writes an autopilot param, only requests and later compares. */
     void checkFailsafeConfig (uint8_t autopilot_type);
     /* Match a PARAM_VALUE reply's param_id against the current
      * expected_failsafe_params() list; log a loud warning if it is one of
-     * them and reads 0 (todo/91). Silent on no match or a nonzero value. */
+     * them and reads 0. Silent on no match or a nonzero value. */
     void checkFailsafeParamReply (const std::string &param_id, float value);
     /* Attempt a bounded TCP connect: puts `sock` in non-blocking mode, calls
      * connect(), and if it does not complete immediately, poll()s for
      * POLLOUT up to connect_timeout_ms before giving up. Returns true once
-     * the socket is confirmed connected (via SO_ERROR); false on any
-     * failure or timeout, having logged a distinguishing message either way
-     * (todo/84). Restores `sock` to blocking mode before returning true,
-     * since the rest of the connection relies on blocking I/O bounded by
+     * the socket is confirmed connected (via SO_ERROR); false on any failure
+     * or timeout, having logged a distinguishing message either way.
+     * Restores `sock` to blocking mode before returning true, since the rest
+     * of the connection relies on blocking I/O bounded by
      * SO_RCVTIMEO/SO_SNDTIMEO, not O_NONBLOCK semantics; on false, `sock` is
      * left as-is — the caller always closes it immediately. */
     auto connectWithTimeout (int sock, const struct sockaddr *remote, socklen_t remote_len) -> bool;
@@ -378,7 +377,7 @@ class mav_connection
      * the command was transmitted to the autopilot (false when the link is down,
      * or for a mode command, when it was deferred because the autopilot type is
      * not yet known). The state machine uses this to replay a safety-critical
-     * action once the MAV link recovers (todo/46). */
+     * action once the MAV link recovers. */
     auto commandRTL () -> bool;
     auto commandGoto (Point p) -> bool;
     auto commandHold () -> bool;

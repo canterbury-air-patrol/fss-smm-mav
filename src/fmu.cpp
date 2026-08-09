@@ -87,14 +87,14 @@ auto
 FMUStateMachine::updateState () -> std::optional<FMUState>
 {
     /* Priority order: terminate > low battery > comms failure > altitude-cap
-     * breach > FSS/SMM command (todo/92). Comms failure maps to
-     * fmu_state_failsafe, which is the default here, so it needs no explicit
-     * branch (and the default is never an indeterminate value). */
+     * breach > FSS/SMM command. Comms failure maps to fmu_state_failsafe,
+     * which is the default here, so it needs no explicit branch (and the
+     * default is never an indeterminate value). */
     FMUState new_state = fmu_state_failsafe;
     if (this->fss_command == fss_cmd_terminate)
     {
-        /* Engage the latch (todo/63); never cleared here, so a later command
-         * moving fss_command away from fss_cmd_terminate cannot release it. */
+        /* Engage the latch; never cleared here, so a later command moving
+         * fss_command away from fss_cmd_terminate cannot release it. */
         this->terminated = true;
     }
     if (this->terminated)
@@ -141,8 +141,8 @@ FMUStateMachine::resolveFSSCommand (FMUState desired, const std::optional<FMUSta
          * battery, comms failsafe, or a sustained altitude-cap breach) is
          * engaged. current_state is that latch's state.
          *
-         * Decision (todo/43): report "superseded" even when the command's effect
-         * matches the active latch — e.g. an operator RTL while a low-battery or
+         * Decision: report "superseded" even when the command's effect matches
+         * the active latch — e.g. an operator RTL while a low-battery or
          * comms-loss latch (which also flies RTL) is engaged. The latch, not the
          * command, is in control, and the ground station relies on this: the FSS
          * web's supersededRtlInEffect() keys off the superseded outcome and the
@@ -159,12 +159,12 @@ FMUStateMachine::resolveFSSCommand (FMUState desired, const std::optional<FMUSta
 auto
 FMUStateMachine::actionState (FMUState state) -> bool
 {
-    /* waiting_for_tasking is exempted alongside searching: it is SMM
-     * reporting it has nothing to search right now, not a command to stop
-     * searching, so the SMM searching role (and its background acquire-retry
-     * loop) must stay granted -- cancelling it here would permanently starve
-     * the retry loop after the first failure, since nothing else ever
-     * re-grants it short of a fresh explicit FSS continue (todo/70, todo/77). */
+    /* waiting_for_tasking is exempted alongside searching: it is SMM reporting
+     * it has nothing to search right now, not a command to stop searching, so
+     * the SMM searching role (and its background acquire-retry loop) must stay
+     * granted -- cancelling it here would permanently starve the retry loop
+     * after the first failure, since nothing else ever re-grants it short of a
+     * fresh explicit FSS continue. */
     if (state != fmu_state_searching && state != fmu_state_waiting_for_tasking)
     {
         this->smm.cancelSearch ();
@@ -191,10 +191,10 @@ FMUStateMachine::actionState (FMUState state) -> bool
              * skipped (sendMavLinkMsg short-circuits with the link down), so the
              * RTL does not reach the autopilot now. ArduPilot's own comms/GCS
              * failsafe is the immediate backstop; in addition, a failed send here
-             * is recorded below and replayed once the MAV link recovers (todo/46).
-             * waiting_for_tasking commands the identical RTL flight mode as a
-             * real RTL -- only the cancelSearch() exemption above and the
-             * FMUState label itself differ. */
+             * is recorded below and replayed once the MAV link recovers.
+             * waiting_for_tasking commands the identical RTL flight mode as a real
+             * RTL -- only the cancelSearch() exemption above and the FMUState
+             * label itself differ. */
             sent = this->mav.setMode (flight_mode_rtl);
             break;
         case fmu_state_goto:
@@ -205,12 +205,11 @@ FMUStateMachine::actionState (FMUState state) -> bool
              * IMPORTANT: `sent` here only reflects the opening MISSION_COUNT
              * packet, not the whole (request-driven) mission upload — unlike
              * RTL/failsafe/low-battery/terminate, goto is deliberately absent
-             * from requires_replay_on_failure() below, so a link drop after
-             * this returns true but before the upload's MISSION_ACK is NOT
-             * replayed on MAV recovery (todo/61). mav_connection surfaces that
-             * case as a logged warning instead (see goto_ack_pending in
-             * mavlink.cpp), since there is no cheap way to re-drive a
-             * mid-upload handshake from here. */
+             * from requires_replay_on_failure() below, so a link drop after this
+             * returns true but before the upload's MISSION_ACK is NOT replayed on
+             * MAV recovery. mav_connection surfaces that case as a logged warning
+             * instead (see goto_ack_pending in mavlink.cpp), since there is no
+             * cheap way to re-drive a mid-upload handshake from here. */
             this->mav.gotoPosition (this->fss_command_target.position);
             sent = this->mav.setMode (flight_mode_goto);
             break;
@@ -356,9 +355,9 @@ FMUStateMachine::setCurrentAltitude (bool fix_valid, double altitude_agl_m)
             {
                 /* Mirror image: count consecutive under-cap readings to clear
                  * the latch. Unlike low_battery, this latch is self-clearing
-                 * (todo/92) -- once altitude_breach_latch_count readings in a
-                 * row are back under the cap, control returns to whatever
-                 * FSS/SMM command is current. */
+                 * -- once altitude_breach_latch_count readings in a row are
+                 * back under the cap, control returns to whatever FSS/SMM
+                 * command is current. */
                 if (this->altitude_clear_count < altitude_breach_latch_count)
                 {
                     this->altitude_clear_count++;
@@ -424,10 +423,10 @@ FMUStateMachine::setMavCommsFailure (bool failed)
         /* The link came back with no transition to re-drive: a non-clearing
          * latch (low-battery, a still-current terminate) held current_state the
          * whole time. Re-command it regardless of whether the original send
-         * succeeded (todo/108) — the gap may have been an autopilot reboot,
-         * which this end cannot distinguish from a link drop and which leaves
-         * the autopilot with no memory of the command. This supersedes todo/46's
-         * narrower replay-only-if-the-send-failed rule, which silently lost a
+         * succeeded — the gap may have been an autopilot reboot, which this end
+         * cannot distinguish from a link drop and which leaves the autopilot
+         * with no memory of the command. This supersedes an earlier, narrower
+         * replay-only-if-the-send-failed rule, which silently lost a
          * successfully-transmitted RTL to a reboot. */
         this->actionState (reassert);
     }

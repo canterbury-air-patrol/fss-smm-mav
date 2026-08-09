@@ -18,12 +18,12 @@ struct Nudge
 {
 };
 
-/* The autopilot restarted underneath the FMU while both links stayed up
- * (todo/108). Distinct from MavCommsStatus: a typical ArduPilot reboot is a ~3s
- * heartbeat gap, well under the 5s link-down timeout, so neither the MAV comms
- * status nor the FSS connection changes — but the autopilot has lost its
- * commanded mode and its uploaded mission all the same. Carries nothing; the
- * state machine re-applies the state it already holds. */
+/* The autopilot restarted underneath the FMU while both links stayed up.
+ * Distinct from MavCommsStatus: a typical ArduPilot reboot is a ~3s heartbeat
+ * gap, well under the 5s link-down timeout, so neither the MAV comms status nor
+ * the FSS connection changes — but the autopilot has lost its commanded mode
+ * and its uploaded mission all the same. Carries nothing; the state machine
+ * re-applies the state it already holds. */
 struct MavAutopilotRestart
 {
 };
@@ -32,10 +32,9 @@ struct MavAutopilotRestart
  * so it is applied on the event-loop thread. SmmLoadSearch is only applied while
  * the FMU is still searching or waiting for tasking, so a stale action that
  * raced a higher-priority command (rtl/terminate/latch) is simply dropped —
- * keeping the single-threaded state machine the sole arbiter of priority
- * (todo/33). SmmRtl flows unconditionally into FMUStateMachine::SMMNewCommand,
- * whose own priority arbitration performs the equivalent suppression
- * (todo/70). */
+ * keeping the single-threaded state machine the sole arbiter of priority. SmmRtl
+ * flows unconditionally into FMUStateMachine::SMMNewCommand, whose own priority
+ * arbitration performs the equivalent suppression. */
 struct SmmLoadSearch
 {
     std::shared_ptr<SMMSearch> search;
@@ -44,12 +43,11 @@ struct SmmRtl
 {
 };
 
-/* An operator-issued SMM command ('AS'/'MC' via smm_asset_last_command(),
- * todo/90), fed back the same way: through the event queue to
- * FMUStateMachine::SMMNewCommand, whose existing priority arbitration (todo/70)
- * resolves any conflict with an in-flight acquire-failure RTL, keeping the
- * state machine the sole decision maker rather than SMM commanding it
- * directly. */
+/* An operator-issued SMM command ('AS'/'MC' via smm_asset_last_command()), fed
+ * back the same way: through the event queue to FMUStateMachine::SMMNewCommand,
+ * whose existing priority arbitration resolves any conflict with an in-flight
+ * acquire-failure RTL, keeping the state machine the sole decision maker rather
+ * than SMM commanding it directly. */
 struct SmmOperatorCommand
 {
     SMMCommand command;
@@ -63,7 +61,7 @@ struct FSSCommandEvent
     FSSCommand command{ fss_cmd_unknown };
     /* The goto/altitude target this command carries (default for commands that
      * carry none), delivered with the command so the state machine actions it
-     * from the event rather than an FSS side-channel (todo/53). */
+     * from the event rather than an FSS side-channel. */
     FSSCommandTarget target{};
     fss_command_ack_responder ack;
 };

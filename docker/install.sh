@@ -11,7 +11,7 @@ su - autopilot -c "cp ${SETUP_PATH}/cap-fmu.sh ${SETUP_PATH}/generate-config.sh 
 su - autopilot -c "mkdir -p /home/autopilot/config"
 su - autopilot -c "touch /home/autopilot/config/fmu-client.json"
 
-# Create the default log directory (todo/78). Unlike the two directories
+# Create the default log directory. Unlike the two directories
 # above (under /home/autopilot, already autopilot-owned), /var/log itself is
 # root-owned, so the non-root autopilot user can't mkdir under it at
 # runtime -- Logger then silently disables logging (see README). Create it

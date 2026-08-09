@@ -7,7 +7,7 @@
 /* Thin seam over the outbound reports the event-loop dispatch makes to FSS —
  * not the connection/callback-registration machinery, which stays App's job
  * and is never touched per-event. Lets EventDispatcher be exercised with a
- * mock in tests/fmu_test.cpp without a real FSS/SSL connection (todo/76). */
+ * mock in tests/fmu_test.cpp without a real FSS/SSL connection. */
 class IFSSReporter
 {
   public:

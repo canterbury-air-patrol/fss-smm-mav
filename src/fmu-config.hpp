@@ -17,8 +17,8 @@ struct FmuConfig
      * (400ft ~= 122m). */
     uint16_t altitude_cap_m{ 122 };
     /* Number of consecutive over-/under-cap AGL readings required to trip, or
-     * clear, the continuous altitude-cap enforcement latch (todo/92,
-     * FMUStateMachine::setCurrentAltitude). Symmetric: the same count
+     * clear, the continuous altitude-cap enforcement latch
+     * (FMUStateMachine::setCurrentAltitude). Symmetric: the same count
      * debounces both directions. A single noisy EKF altitude sample must not
      * trip a hard RTL, nor must a single dip back under the cap release one
      * prematurely. Its real-world duration scales with
@@ -79,16 +79,16 @@ struct FmuConfig
     int mav_port{ 5760 };
     /* Upper bound (seconds) on a MAV TCP connect attempt: a black-holed or
      * unreachable autopilot endpoint must not stall startup/reconnect beyond
-     * this (todo/84). */
+     * this. */
     int mav_connect_timeout_s{ 5 };
     /* Upper bound (seconds) applied to a blocking MAV send (SO_SNDTIMEO and,
      * where available, TCP_USER_TIMEOUT): a peer that stops reading, or a
      * network path that silently disappears, must not pin a sender —
      * including the event-loop thread issuing a safety command — beyond
-     * this (todo/84). Kept tighter than mav_connect_timeout_s by
-     * default/range: unlike a slow connect, a blocked send runs on/behind
-     * the live event loop, so a large configured value directly extends
-     * comms-failure detection latency. */
+     * this. Kept tighter than mav_connect_timeout_s by default/range: unlike
+     * a slow connect, a blocked send runs on/behind the live event loop, so
+     * a large configured value directly extends comms-failure detection
+     * latency. */
     int mav_send_timeout_s{ 2 };
     /* Logging verbosity: error, info (default), or debug. */
     LogLevel log_level{ LogLevel::info };

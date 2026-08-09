@@ -60,16 +60,16 @@ search_point_mission_seq (int point_index) -> uint16_t
 
 /* The search-point index MISSION_ITEM_REACHED(seq) resumes from, for a seq at
  * or past search_first_point_seq (the caller must guard seq <
- * search_first_point_seq itself — see report_reached, todo/64).
+ * search_first_point_seq itself — see report_reached).
  *
  * This is NOT the inverse of search_point_mission_seq (`seq -
  * search_first_point_seq`, which would give the index of the point just
  * reached): SMMSearch::current_point tracks the *next* point to resume from,
  * one past the item MISSION_ITEM_REACHED names, matching
- * SMMSearch::reachedPoint's `current_point = point` and its
- * `point >= getPointsCount()` search-complete check. So the reached seq for
- * search point index i (= i + search_first_point_seq) maps to i + 1, i.e.
- * `seq - search_first_point_seq + 1`, equivalently `seq - 1` for the current
+ * SMMSearch::reachedPoint's `current_point = point` and its `point >=
+ * getPointsCount()` search-complete check. So the reached seq for search
+ * point index i (= i + search_first_point_seq) maps to i + 1, i.e. `seq -
+ * search_first_point_seq + 1`, equivalently `seq - 1` for the current
  * two-setup-item layout — expressed here in terms of search_first_point_seq
  * so a future change to the setup-item count only has to change one place. */
 inline auto
