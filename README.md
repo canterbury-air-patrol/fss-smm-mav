@@ -12,6 +12,37 @@ Direct dependencies are the client library from [Flight Safety System](https://g
 
 You will need to build these and install them somewhere they can be found with pkg-config.
 
+| Package | Supported versions |
+|---|---|
+| `fss-client-ssl` | `>= 1.3.0` |
+| `fss-transport` | `>= 1.3.0` |
+| `smm-asset` | `>= 1.1.0` |
+| `jsoncpp` | any |
+
+The flight-safety-system floor is a **hard requirement, not a preference**, and
+`configure` fails below it. 1.3.0 is the release that gave each FSS server its
+own outbound worker, and this source is written against the semantics that
+brought, not merely built with them:
+
+- `sendMsgAll()` is non-blocking, so one FSS peer that completes TLS and then
+  stops reading sheds only its own telemetry instead of stalling the fan-out to
+  the healthy servers.
+- `attemptReconnect()` is non-blocking, so a set of unreachable FSS servers no
+  longer delays MAV reconnection or the SMM pending-search retry that share the
+  reconnector's loop. One consequence to know: a server becomes live on the
+  *pass after* the one that dialled it, so bringing a recovered server back
+  takes up to one extra `reconnect_interval_s`.
+- Connection status counts the servers that have **admitted** this client, not
+  the ones it has merely connected to. An FSS server refuses a client while its
+  own database fail-safe is degraded, and does so after the TLS handshake — so
+  under 1.2.x the FMU could briefly leave its comms-loss failsafe, resume the
+  previous command, and re-enter the failsafe when the drop landed.
+
+Building against 1.2.x would silently reinstate the blocking fan-out and the
+premature comms-okay. This was an explicit `< 1.3` window while that ABI break
+was pending; it is a plain floor again now, and gets a ceiling again when the
+next break is announced.
+
 ### Build/Install
 You can build this package from source:
 ```
@@ -70,6 +101,16 @@ deliberately skewed idea of wall-clock time without touching the host's real
 other container sharing that kernel. Set via the Docker image's
 `CLOCK_OFFSET_MS` environment variable (see `docker/generate-config.sh`); the
 FMU's own code never touches this key, the FSS client library parses it.
+
+`learned_server_expiry_ms` (default 60000) and `max_learned_servers` (default
+16) are two more optional top-level keys the FSS client library parses itself,
+new in 1.3.0. They apply only to servers the client *learns* from a server-list
+broadcast: one that goes unmentioned for the expiry window is dropped, and the
+client refuses to learn more than the cap. Servers listed in `servers` above
+are the operator's declared intent — they are never expired and do not count
+against the cap, so an outage that empties every broadcast list cannot strand
+the FMU with nothing to connect to. Set the expiry to 0 to keep the pre-1.3.0
+behaviour of never dropping a learned server.
 
 #### Optional FMU configuration
 

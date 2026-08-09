@@ -16,15 +16,16 @@ comments point back to instead of restating (todo/62).
 | Signal waiter | `App::signal_waiter()` | Blocks in `sigwait()` for SIGINT/SIGTERM, then flips `App::running` and wakes the event loop and reconnector. |
 | FSS reconnector | `App::fss_reconnector()` | Periodically calls `fss->reconnectAll()`, `mav->attemptReconnect()`, and `smm->retryPendingSearch()`. |
 | SMM worker | `SMM` constructor / `workerLoop()` | Runs all blocking `smm_asset_*` HTTP I/O (connect, position report, search acquire/accept) off the event loop (todo/33). |
-| FSS send worker | `FSS` constructor / `workerLoop()` | Runs all blocking FSS `send()`s (position/reached/battery reports, command acks) off the event loop, so a hung FSS peer cannot stall queued commands. |
+| FSS send worker | `FSS` constructor / `workerLoop()` | Keeps FSS `send()`s off the event loop, so a hung FSS peer cannot stall queued commands. Since the `fss-client-ssl` 1.3.0 bump the fan-out sends (position/reached/battery, via `sendMsgAll`) are non-blocking in the library, so what this worker still has to absorb is the **command ack** — a per-connection `fss_connection::sendMsg()` that stays blocking, and the path that closes the loop on an operator's rtl/terminate. |
 | Log writer | `Logger` constructor / `workerLoop()` | Drains the log queue and does the disk I/O, so a slow or blocking write never stalls the thread that produced the message. Every other thread here is a producer. |
 | FSS recv (library-owned, one per connected FSS server) | `flight_safety_system::transport::fss_connection`'s `recv_thread`, not started by cap-fmu | Parses inbound FSS traffic and fires *every* inbound FSS callback — `registerCommandCB`, `registerPositionDataCB`, `registerCommsStatusCB`, `registerSMMSettingsCB`. Those callbacks enqueue events for the event loop rather than acting directly; the one exception is `known_aircraft`, which the position callback touches on this thread (see below). |
+| FSS outbound (library-owned, one per FSS server, lazily started) | `flight_safety_system::client_ssl::fss_server`'s `outbound_worker`, not started by cap-fmu | Performs the blocking socket write for that one server, and runs its reconnect dials. This is what makes `sendMsgAll()` and `attemptReconnect()` non-blocking as of 1.3.0. No cap-fmu callback runs here — the worker deliberately never reaches back through the `fss_client`, since a subclass (our `fss_client_ssl`) is destroyed derived-part-first and a virtual call arriving mid-teardown would race the vptr rewrite. Its queue is bounded and drops the oldest frame under sustained backlog; cap-fmu does not yet read `getDroppedSends()`. |
 
-That is 8 threads cap-fmu itself starts, plus the FSS library's per-connection
-recv threads. (Older references — todo/62 and elsewhere — say 7: they predate
-the log writer, which moved the Logger's disk I/O off the event loop.) The
-library threads are listed because they hold cap-fmu locks and produce cap-fmu
-events, even though their lifetime is the library's concern, not ours.
+That is 8 threads cap-fmu itself starts, plus the FSS library's per-server recv
+and outbound threads. (Older references — todo/62 and elsewhere — say 7: they
+predate the log writer, which moved the Logger's disk I/O off the event loop.)
+The library threads are listed because they hold cap-fmu locks and produce
+cap-fmu events, even though their lifetime is the library's concern, not ours.
 
 ## Data ownership and locks
 
