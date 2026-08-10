@@ -49,7 +49,10 @@ jobs:
     - name: Build and test
       run: |
         autoreconf -fi
-        ./configure
+        # --enable-tests makes Catch2 a hard requirement, so a runner that
+        # somehow ends up without it fails here, naming the missing package,
+        # instead of building a tree with no test suite in it.
+        ./configure --enable-tests
         # VERBOSE=1 makes automake's test harness print test-suite.log (the
         # failed tests' own output) into the job log on failure; otherwise the
         # detail is lost when the runner is torn down.
@@ -257,7 +260,10 @@ jobs:
       run: |
         autoreconf -fi
         ./configure
-        make distcheck
+        # The tarball's own configure is the one whose `make check' runs the
+        # suite here, so it is the one that has to demand Catch2 -- otherwise a
+        # distcheck could pass having built and run no tests at all.
+        make distcheck DISTCHECK_CONFIGURE_FLAGS=--enable-tests
 
     # distcheck proves the tarball *builds*; it says nothing about files that
     # are shipped for a human rather than for the compiler. These were all
@@ -327,7 +333,7 @@ jobs:
         TSAN_OPTIONS: halt_on_error=1
       run: |
         autoreconf -fi
-        ./configure --enable-${{ matrix.sanitizer }}
+        ./configure --enable-tests --enable-${{ matrix.sanitizer }}
         # VERBOSE=1 makes automake's test harness print test-suite.log (the
         # failed tests' own output, e.g. a TSan race report) into the job log
         # on failure; otherwise the detail is lost when the runner is torn down.

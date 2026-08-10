@@ -5,6 +5,29 @@ if HAVE_CATCH2
 SUBDIRS = src tests
 else
 SUBDIRS = src
+
+# With tests/ out of SUBDIRS there is nothing for automake's test harness to
+# run, and `make check' then exits 0 having done nothing: same silence, same
+# exit status as a suite that passed. That is how a build without Catch2 turns
+# "run the tests before you commit" into a no-op that reports success -- so say
+# what actually happened rather than exiting quietly.
+if TESTS_DISABLED
+# Deliberate: --disable-tests was passed at configure time. Report and succeed.
+check-local:
+	@echo "make check: no tests were built or run -- the test suite was"
+	@echo "            disabled at configure time with --disable-tests."
+else
+# Not deliberate: Catch2 was simply absent. Fail, so an empty run cannot be
+# mistaken for a passing one.
+check-local:
+	@echo "make check: no tests were built, so nothing has been verified." >&2
+	@echo "            The Catch2 test framework (catch2-with-main.pc) was" >&2
+	@echo "            not found when configure ran." >&2
+	@echo "            Install Catch2 (Debian: catch2) and re-run configure," >&2
+	@echo "            or configure with --disable-tests to build without the" >&2
+	@echo "            test suite deliberately." >&2
+	@exit 1
+endif
 endif
 
 # automake distributes README.md and the build machinery on its own; everything

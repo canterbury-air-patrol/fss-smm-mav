@@ -2,9 +2,15 @@ Source: cap-fmu
 Section: main
 Priority: optional
 Maintainer: Scott Parlane <sjp@canterburyairpatrol.org>
+# catch2 is not needed by the binary; it is needed by dh_auto_test, which runs
+# `make check'. Without it the package would still build -- but it would build
+# with no test suite configured, which is exactly the case debian/rules now
+# passes --enable-tests to refuse. A .deb of flight software should not be
+# produced from a tree whose tests were never compiled, let alone run.
 Build-Depends: debhelper (>= 10), autotools-dev, pkg-config,
  libfss-client-ssl (>= 1.3.0),
- libsmm-asset-dev (>= 1.1.0), libjsoncpp-dev
+ libsmm-asset-dev (>= 1.1.0), libjsoncpp-dev,
+ catch2
 Standards-Version: 4.1.3
 
 Package: cap-fmu
