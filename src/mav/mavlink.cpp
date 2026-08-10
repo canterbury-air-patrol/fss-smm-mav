@@ -1366,7 +1366,17 @@ mav_connection::start ()
 
 mav_connection::~mav_connection ()
 {
-    this->stopping = true;
+    /* Set the flag under heartbeat_mutex, not just before the notify: the
+     * heartbeat loop evaluates `stopping` as its wait predicate under that mutex,
+     * so an unlocked store here can slip into the window between its check and
+     * its block. The loop would then miss the notify and sleep out its full
+     * 1-second wait_for, delaying every destructor behind this join by that long.
+     * Matches the shutdown pattern used elsewhere (Logger::stopWorker, SMM::~SMM,
+     * FSS::stopWorker, App::signal_waiter). */
+    {
+        std::lock_guard<std::mutex> lk (this->heartbeat_mutex);
+        this->stopping = true;
+    }
     this->heartbeat_cv.notify_one ();
     if (this->heartbeat_thread.joinable ())
     {
