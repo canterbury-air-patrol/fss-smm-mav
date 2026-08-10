@@ -50,10 +50,38 @@ AC_CHECK_LIB([pthread], [pthread_create], [
     [AC_MSG_ERROR([pthread is required for this program])])
 AC_SUBST(pthread_LIBS)
 
-# Check for optional Catch2 test framework
-PKG_CHECK_MODULES([CATCH2], [catch2-with-main],
-    [have_catch2=yes], [have_catch2=no])
+# The unit test suite needs the Catch2 test framework. Catch2 is optional in
+# the sense that cap-fmu itself builds and runs without it -- but a build that
+# quietly drops the tests is a trap: with no test directory in SUBDIRS,
+# automake's `make check' exits 0 having run nothing, which is
+# indistinguishable from a suite that passed. Anyone honouring "run the tests
+# before committing" in that configuration is running a no-op and being told it
+# succeeded. So a missing Catch2 is reported loudly here (and again at the very
+# end of configure), and the top-level check-local target fails instead of
+# succeeding empty.
+#
+# --disable-tests is how to say "I know, and I do not want them": it skips the
+# probe entirely and makes `make check' report that no tests were built and
+# exit 0. --enable-tests is the opposite -- it turns Catch2 into a hard
+# requirement, for a CI or packaging build that must never silently lose its
+# test coverage.
+AC_ARG_ENABLE([tests],
+    [AS_HELP_STRING([--disable-tests],
+        [build without the Catch2 unit tests; make check then reports that no tests were built instead of failing])
+AS_HELP_STRING([--enable-tests],
+        [require Catch2: fail configure if it is missing, rather than building without the tests])],
+    [enable_tests=$enableval], [enable_tests=auto])
+
+have_catch2=no
+AS_IF([test "x$enable_tests" != "xno"],
+    [PKG_CHECK_MODULES([CATCH2], [catch2-with-main],
+        [have_catch2=yes], [have_catch2=no])])
+
+AS_IF([test "x$enable_tests" = "xyes" && test "x$have_catch2" = "xno"],
+    [AC_MSG_ERROR([--enable-tests was given, but the Catch2 test framework (catch2-with-main.pc) was not found. Install Catch2 (Debian: catch2), or configure with --disable-tests.])])
+
 AM_CONDITIONAL([HAVE_CATCH2], [test "x$have_catch2" = "xyes"])
+AM_CONDITIONAL([TESTS_DISABLED], [test "x$enable_tests" = "xno"])
 
 # Dependency headers found via pkg-config are third-party: we cannot fix the
 # warnings they emit, but our build uses -Werror. Re-emit their include paths
@@ -103,3 +131,23 @@ if test "x$have_catch2" = "xyes"; then
   AC_CONFIG_FILES([tests/Makefile])
 fi
 AC_OUTPUT
+
+# Say it again after AC_OUTPUT. This is the last thing on the terminal when
+# configure finishes, by which point the pkg-config line that reported the
+# missing Catch2 has long since scrolled past -- and a build with no tests in
+# it is not something to find out about later.
+AS_IF([test "x$have_catch2" = "xyes"], [],
+  [test "x$enable_tests" = "xno"],
+  [AC_MSG_WARN([the unit tests are disabled (--disable-tests): make check will build and run no tests.])],
+  [AC_MSG_WARN([
+    ****************************************************************
+    The Catch2 test framework (catch2-with-main.pc) was not found.
+
+    cap-fmu will build, but NO UNIT TESTS will be built or run. An
+    empty make check exits 0, so nothing would otherwise tell you the
+    suite never ran -- make check is therefore set up to FAIL in this
+    configuration.
+
+    Install Catch2 (Debian: catch2) and re-run configure, or pass
+    --disable-tests to build without the test suite deliberately.
+    ****************************************************************])])

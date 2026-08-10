@@ -18,7 +18,9 @@
 	dh $@
 
 
-# dh_make generated override targets
-# This is example for Cmake (See https://bugs.debian.org/641051 )
-#override_dh_auto_configure:
-#	dh_auto_configure -- --enable-server --enable-fake-client --enable-tests
+# dh_auto_test runs `make check'. Demand the test suite explicitly so that a
+# build environment missing Catch2 fails here, naming what is absent, instead
+# of configuring a tree with no tests in it and letting dh_auto_test "pass"
+# having run nothing. catch2 is in Build-Depends for this.
+override_dh_auto_configure:
+	dh_auto_configure -- --enable-tests
