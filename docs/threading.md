@@ -32,18 +32,18 @@ cap-fmu events, even though their lifetime is the library's concern, not ours.
 | Lock / atomic | Guards | Held by |
 |---|---|---|
 | `App::main_lock` + `main_cv` | `App::event_queue` | Event loop (consumer), every callback that calls `enqueue_event` (producers: MAV recv/heartbeat threads, FSS recv threads, SMM worker via its callbacks, FSS send worker, signal waiter, FSS reconnector). |
-| `App::reconnect_lock` + `reconnect_cv` | Only the reconnector's own wait timer | FSS reconnector thread, woken early by the signal waiter. |
+| `App::reconnect_lock` + `reconnect_cv` | Only the reconnector's own wait timer, and publication of the `running` flag its wait predicate reads | FSS reconnector thread, woken early by the signal waiter. |
 | `FMUStateMachine::lock` | `fss_command`, `smm_command`, `fss_command_target`, `low_battery`, `low_battery_count`, `terminated`, `altitude_breach`, `altitude_breach_count`, `altitude_clear_count`, `current_state`, `fss_comms_lost`, `mav_comms_lost` | Event loop only (`assert_event_loop_thread()` enforces this in debug builds) — see "Single-event-loop-thread invariant" below. |
 | `mav_connection::send_lock` | The socket fd's lifetime (open/close) and the per-channel MAVLink pack/transmit state (the generated `*_pack_chan()` calls mutate global per-channel sequence/status, so packing and sending must be serialised) | Any thread that sends: event loop (via `MAV`/`IMAV` action methods), MAV heartbeat thread, MAV recv thread (mission handshake replies, ADS-B rebroadcast). |
 | `mav_connection::state_lock` | `last_position`, `search`, `search_loaded`, `search_loading`, `goto_active`, `goto_position`, `goto_ack_pending`, `pending_mode_command`, `retry_count`, `last_tried` | MAV recv thread (parses inbound MAVLink and updates upload/search state), event loop (issues commands), FSS reconnector (`attemptReconnect`). |
-| `mav_connection::heartbeat_mutex` + `heartbeat_cv` | Only the heartbeat loop's own 1-second wait timer | MAV heartbeat thread, woken early by `stopping`. |
+| `mav_connection::heartbeat_mutex` + `heartbeat_cv` | Only the heartbeat loop's own 1-second wait timer, and publication of the `stopping` flag its wait predicate reads | MAV heartbeat thread, woken early by `stopping`. |
 | `mav_systems::lock` | `mav_systems::systems` (the per-sysid `mav_sys` list, and through it each system's component list) | MAV recv thread, which is the only one that grows the list (`findSystem`'s find-or-create, from `processMavLinkMsg`) and which also walks it to re-arm the setup latches on a detected autopilot restart (`resetAllSetup()`); FSS reconnector thread, which walks it the same way from `disconnect_from_mav()`; the event-loop command paths read it via `findExistingSystem()`, which never mutates, so dispatching a command cannot race a concurrent recv-thread insertion. Each `mav_sys`'s own published state (`autopilot_type`, `flight_mode`, `setup`, `failsafe_checked`, `failsafe_checked_type`) is atomic and read without this lock once the `shared_ptr` is in hand. |
 | `SMM::queue_lock` + `queue_cv` | `SMM::task_queue`, `SMM::worker_running` (the shutdown flag the `queue_cv` predicate reads) | SMM worker (consumer); event loop and FSS reconnector (producers, via the public methods that call `enqueue`); the destructor clears `worker_running`. |
 | `SMM::state_lock` | `current_search`, `asset` | SMM worker (publishes), event loop (`currentSearchPoints()` reads the atomic mirror instead, see below), test-only injection (`SMMTestAccess`). |
 | `FSS::queue_lock` + `queue_cv` | `FSS::task_queue`, `FSS::worker_running` (the shutdown flag the `queue_cv` predicate reads) | FSS send worker (consumer); event loop (producer, via `reportPosition`/`reachedPoint`/`reportBatteryStatus`/`postAck`); the destructor clears `worker_running`. |
 | `CommandAckGroup::mtx` (`fss_client_ssl::command_group`) | The in-flight command-dedup group: `active`, `epoch`, `command`, `payload`, `timestamp`, `pending`, `resolution`, `last_id_by_connection` | FSS recv threads (`onDelivery()`, as the same logical command arrives on each connected server) and the FSS send worker (`resolve()`, from the phase-2 ack responder). The acks themselves are sent *outside* the lock, so a recv thread adding a late duplicate never waits on the wire. |
 | `known_aircraft::lock` | `lastAllocatedICAO` and the `aircraft` map (including the stale-entry eviction sweep, `evictStaleLocked()`) | FSS recv threads only, via `App`'s `registerPositionDataCB` — the one inbound FSS callback that does work before enqueuing rather than enqueuing straight away, because the synthetic ICAO it allocates has to be stamped onto the `PositionData` the event carries. With more than one FSS server connected there is more than one such thread, which is why the map is locked rather than thread-owned. |
-| Atomics (`App::running`, `mav_connection::fd`/`mav_comms_ok`/`last_heartbeat_ts`/`broken`/`stopping`/`started`, `mav_sys::autopilot_type`/`flight_mode`/`setup`/`failsafe_checked`/`failsafe_checked_type`, `SMM::search_active`/`current_search_points`) | Single flags or counters read across threads without a critical section spanning more than the one load/store | Various — each is documented at its declaration; called out here because they are part of the concurrency picture even though they need no mutex. |
+| Atomics (`App::running`, `mav_connection::fd`/`mav_comms_ok`/`last_heartbeat_ts`/`broken`/`stopping`/`started`, `mav_sys::autopilot_type`/`flight_mode`/`setup`/`failsafe_checked`/`failsafe_checked_type`, `SMM::search_active`/`current_search_points`) | Single flags or counters read across threads without a critical section spanning more than the one load/store | Various — each is documented at its declaration; called out here because they are part of the concurrency picture even though they need no mutex. The two shutdown flags among them, `App::running` and `mav_connection::stopping`, are the exception: being atomic is enough for their reads, but the store that clears them is still made under the cv's mutex — see "Shutdown flags and their condition variables". |
 
 The "Guards" column is the inventory: a field held under one of these locks
 belongs in it, and a field named in it must still exist. Two categories are
@@ -74,6 +74,33 @@ routed through `ILogger` run on whichever thread produced them, e.g.
 MAV's heartbeat thread or SMM's worker thread. It is kept out of the table
 above because every thread in the inventory is a producer, so it carries no
 ownership information.
+
+## Shutdown flags and their condition variables
+
+Every thread that parks on a condition variable here does so with a predicate
+that reads a shutdown flag: `App::running` (event loop, FSS reconnector),
+`worker_running` (`Logger`, `SMM`, `FSS` workers), `mav_connection::stopping`
+(MAV heartbeat loop). **The thread that clears such a flag must do so while
+holding the mutex that cv waits on, then notify.** Several of these flags are
+`std::atomic`, which makes the store itself race-free but does *not* close the
+lost-wakeup window: a waiter can evaluate the predicate as false, then have both
+the store and the notify land before it blocks, and sleep through a shutdown it
+has already been told about. It then wakes only on its own timeout — a full
+`reconnect_interval_s` for the FSS reconnector (10 s by default, configurable to
+3600), one second for the heartbeat loop — or, for `App::run()`'s untimed
+`main_cv.wait`, only when the reconnector eventually posts its parting `Nudge{}`.
+That is what puts SIGTERM-to-exit at the mercy of the reconnect interval and,
+past Docker's 10 s stop grace, at risk of a SIGKILL that skips the log drain and
+the FSS ack flush.
+
+The notify itself does not need the lock and is deliberately left outside the
+critical section, so the woken thread does not immediately block on a mutex the
+notifier still holds.
+
+`App::signal_waiter()` publishes to two waiters, so it takes each mutex in turn
+rather than both at once, keeping the invariant below intact; the second region
+is empty by design, since the atomic store in the first is already visible and
+all the second needs to do is not overlap the reconnector's predicate check.
 
 ## Lock acquisition order
 

@@ -193,8 +193,36 @@ class App
         sigaddset (&mask, SIGTERM);
         int signum = 0;
         sigwait (&mask, &signum);
-        running.store (false);
+        /* Publish the flag under each waiter's own mutex before notifying it —
+         * the same shape as every other shutdown signal in the tree
+         * (Logger::stopWorker, SMM::~SMM, FSS::stopWorker). Storing outside the
+         * mutex leaves the classic lost-wakeup window: a waiter can evaluate its
+         * predicate as false, then have both the store and the notify land in the
+         * gap before it blocks, and never see either. That costs more than a
+         * missed wakeup here — run()'s main_cv.wait has no timeout, and a
+         * reconnector that missed the notify sleeps out a full
+         * reconnect_interval_s (10 s by default, up to 3600) before posting the
+         * Nudge{} that lets run() finish, so SIGTERM-to-exit would be bounded by
+         * the reconnect interval rather than by the work left to do. Docker's
+         * default 10 s stop grace sits right on that edge; being SIGKILLed
+         * instead would skip the log drain and the FSS ack flush that
+         * stopWorker()/~Logger exist to guarantee.
+         *
+         * The two regions are kept separate, not merged into one scoped_lock over
+         * both mutexes, to preserve the "no function ever holds two of these locks
+         * at once" invariant documented in docs/threading.md. */
+        {
+            std::lock_guard<std::mutex> lk (main_lock);
+            running.store (false);
+        }
         main_cv.notify_one ();
+        {
+            /* running is already false by the time this runs; taking and releasing
+             * reconnect_lock is the whole point — it cannot overlap a reconnector
+             * sitting between its predicate check and its wait, so the notify below
+             * either finds it already blocked or finds it about to re-check. */
+            std::lock_guard<std::mutex> lk (reconnect_lock);
+        }
         reconnect_cv.notify_one ();
     }
 
