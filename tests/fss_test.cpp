@@ -363,3 +363,27 @@ TEST_CASE ("~FSS drains queued tasks, and a queued ack fires without a usable cl
      * closure the worker must run regardless. */
     REQUIRE (responder_calls.load () == queued_acks);
 }
+
+/* The comms-loss failsafe has to be armed from cold start, and the client
+ * library cannot arm it: connectionStatusChange() fires only on a *change* --
+ * from serverAdmitted() (the false->true admission edge), from
+ * serverRequiresReconnect() (a live server dropping), and from
+ * attemptReconnect() only once something has connected. fss_server's
+ * constructor does not dial, so a client that has never reached a server
+ * reports nothing at all, and the FMU would sit believing FSS was healthy for
+ * as long as FSS stayed unreachable. registerCommsStatusCB() closes that by
+ * reporting the failure itself, which is also the only point at which there is
+ * a callback to report it to. */
+TEST_CASE ("registering a comms status callback reports the initial FSS comms failure", "[fss]")
+{
+    FSS fss{ no_config };
+
+    std::vector<FSSCommsStatus> reported;
+    fss.registerCommsStatusCB ([&reported] (FSSCommsStatus status) { reported.push_back (status); });
+
+    /* Synchronous, on the registering thread: in App::run() this lands in the
+     * event queue before the reconnector that opens the first connection is
+     * even started, so the FMU can never observe an unreported cold start. */
+    REQUIRE (reported.size () == 1);
+    REQUIRE (reported.at (0) == fss_comms_failure);
+}

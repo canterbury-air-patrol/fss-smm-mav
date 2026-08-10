@@ -53,6 +53,23 @@ map_fss_state (FSSCommand cmd) -> FMUState
             new_state = fmu_state_terminate;
             break;
         case fss_cmd_continue:
+        /* fss_cmd_unknown means exactly one thing here: no FSS command has ever
+         * been received. It is NOT the "garbled/unrecognised command" path —
+         * fss_client_ssl::handleCommandFrom() rejects an unrecognised wire
+         * command synchronously (command_ack_rejected) and never delivers it to
+         * the state machine — so this arm is purely the cold-start default.
+         *
+         * Deliberate decision: that default is "search", the same as continue.
+         * The alternative considered was a fail-passive default (hold, or
+         * waiting_for_tasking) so the FMU never self-tasks before being told to.
+         * Rejected because the window it covers is now very small and the cost
+         * is real: fss_comms_lost starts ENGAGED (see fmu.hpp), so this arm
+         * cannot be reached until FSS has actually reported comms okay, and the
+         * FSS server dispatches the asset's current command at identify time —
+         * within milliseconds of the admission that clears the failsafe. What
+         * remains is an asset with no command row set at all, where "resume the
+         * search you were tasked with" is the useful behaviour and holding
+         * would strand a serviceable aircraft. */
         case fss_cmd_unknown:
             new_state = fmu_state_searching;
             break;

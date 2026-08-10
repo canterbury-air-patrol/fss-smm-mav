@@ -6,6 +6,28 @@ It will obey commands set for the asset in flight safety system and when in cont
 
 There is a built-in RTL on low battery, complete loss of communication with the Flight Safety System, or a sustained breach of the regulatory altitude cap.
 
+The FSS comms-loss failsafe is **armed at startup**, not once FSS has been
+reached and then lost: an FMU that has never connected to a server is treated as
+one that has lost FSS, and flies the failsafe RTL until a server admits it. The
+client library only reports connection status *changes*, and never dials from
+its constructor, so a client that has never come up would otherwise report
+nothing at all and leave the failsafe unarmed for the whole flight. Two
+consequences worth knowing:
+
+- Booting with no reachable FSS server commands RTL. On the ground and disarmed
+  that is inert; in the air (an FMU restarted mid-flight) it is the intended
+  behaviour. The command is replayed if the MAV link was still down when it was
+  first sent.
+- Until FSS reports comms okay, every FSS command resolves as *superseded* by
+  the failsafe. Commands are still retained, and apply as soon as a server
+  admits the FMU.
+
+Once FSS comms are established, an asset with no command set in FSS searches, the
+same as one commanded `continue` — "no command received yet" and `continue` map
+to the same state. The FSS server dispatches the asset's current command at
+identify time, so a cold start with a command already set moves to that command
+within milliseconds of connecting.
+
 ## Basic Setup
 #### Dependencies
 Direct dependencies are the client library from [Flight Safety System](https://github.com/canterbury-air-patrol/flight-safety-system/) and [SMM Asset API](https://github.com/canterbury-air-patrol/smm-asset-api/)

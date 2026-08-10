@@ -246,15 +246,42 @@ class MockFSSReporter : public IFSSReporter
 
 using SM = std::tuple<std::shared_ptr<MockMAV>, std::shared_ptr<MockSMM>, std::shared_ptr<FMUStateMachine>>;
 
+/* A state machine exactly as constructed: the FSS comms-loss failsafe armed
+ * (fmu.hpp's fss_comms_lost{true}) and nothing yet reported by anyone. This is
+ * the cold-start state an FMU boots into, before its FSS client has reached a
+ * server. Only the cold-start tests want it; everything else wants make_sm(). */
 static auto
-make_sm (int low_battery_latch_count = FMUStateMachine::default_low_battery_latch_count,
-         uint16_t altitude_cap_m = FMUStateMachine::default_altitude_cap_m,
-         int altitude_breach_latch_count = FMUStateMachine::default_altitude_breach_latch_count) -> SM
+make_sm_cold (int low_battery_latch_count = FMUStateMachine::default_low_battery_latch_count,
+              uint16_t altitude_cap_m = FMUStateMachine::default_altitude_cap_m,
+              int altitude_breach_latch_count = FMUStateMachine::default_altitude_breach_latch_count) -> SM
 {
     auto mav = std::make_shared<MockMAV> ();
     auto smm = std::make_shared<MockSMM> ();
     auto sm = std::make_shared<FMUStateMachine> (*mav, *smm, low_battery_latch_count, altitude_cap_m,
                                                  altitude_breach_latch_count);
+    return { mav, smm, sm };
+}
+
+/* A state machine with FSS comms established, which is the precondition for
+ * every test that exercises command handling: the failsafe is armed from
+ * construction, so without this first fss_comms_okay report every command below
+ * would resolve superseded by fmu_state_failsafe. In production that report is
+ * the FSS client's first admission (or the initial fss_comms_failure it now
+ * emits at registration, then cleared on connect).
+ *
+ * The report leaves the machine in fmu_state_searching, NOT fmu_state_manual:
+ * fss_cmd_unknown means "no FSS command received yet" and maps to searching by
+ * deliberate decision (see map_fss_state), so an FSS-connected, never-commanded
+ * FMU searches. One MockSMM::search call and one state_change_cb fire are
+ * therefore already recorded on return — tests that count either start from
+ * that baseline rather than from zero. */
+static auto
+make_sm (int low_battery_latch_count = FMUStateMachine::default_low_battery_latch_count,
+         uint16_t altitude_cap_m = FMUStateMachine::default_altitude_cap_m,
+         int altitude_breach_latch_count = FMUStateMachine::default_altitude_breach_latch_count) -> SM
+{
+    auto [mav, smm, sm] = make_sm_cold (low_battery_latch_count, altitude_cap_m, altitude_breach_latch_count);
+    sm->setCommsFailure (false);
     return { mav, smm, sm };
 }
 
@@ -298,6 +325,71 @@ TEST_CASE ("low battery latches RTL regardless of subsequent FSS commands", "[st
 
     sm->FSSNewCommand (fss_cmd_manual);
     REQUIRE (mav->last_mode == flight_mode_rtl);
+}
+
+/* Cold start arms the FSS comms-loss failsafe rather than assuming FSS is
+ * healthy: an FMU that has never reached a server is, for failsafe purposes, an
+ * FMU that has lost FSS. Before this, fss_comms_lost started false, so a
+ * never-connected FMU resolved commands normally -- and since fss_cmd_unknown
+ * maps to searching, it self-tasked into a search having been told to by nobody
+ * (the MAV-recovery path below is how it reached one in practice). */
+TEST_CASE ("the FSS comms-loss failsafe is armed from cold start", "[state_machine][cold_start]")
+{
+    auto [mav, smm, sm] = make_sm_cold ();
+
+    /* Nothing has been commanded and nothing has reported, so the FMU is still
+     * in its constructed state and has touched neither the autopilot nor SMM. */
+    REQUIRE (mav->set_mode_calls == 0);
+    REQUIRE (smm->search_calls == 0);
+
+    /* An operator command cannot escape the failsafe: it is retained, but
+     * superseded by the comms latch, exactly as a mid-flight FSS dropout is. */
+    FSSCommandResolution res = sm->FSSNewCommand (fss_cmd_hold);
+    REQUIRE (res.outcome == fss_command_superseded);
+    REQUIRE (res.superseding_state == fmu_state_failsafe);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+    REQUIRE (smm->search_calls == 0);
+
+    /* Only a real fss_comms_okay report clears it, and then the retained
+     * command applies. */
+    sm->setCommsFailure (false);
+    REQUIRE (mav->last_mode == flight_mode_hold);
+}
+
+/* The path the armed failsafe closes. A cold-started FMU whose MAV link drops
+ * and recovers gets a setMavCommsFailure(false) edge, which re-evaluates the
+ * state. With FSS comms assumed healthy that resolved to the fss_cmd_unknown /
+ * smm_cmd_none default -- searching -- so the FMU commanded SMM to start a
+ * search without ever having received an operator command or reached an FSS
+ * server. */
+TEST_CASE ("a cold-started FMU does not self-task on MAV comms recovery", "[state_machine][cold_start]")
+{
+    auto [mav, smm, sm] = make_sm_cold ();
+
+    sm->setMavCommsFailure (true);
+    sm->setMavCommsFailure (false);
+
+    REQUIRE (smm->search_calls == 0);
+    REQUIRE (mav->last_mode == flight_mode_rtl);
+
+    /* And it stays that way for as long as FSS is unreachable, however many
+     * times the MAV link flaps. */
+    sm->setMavCommsFailure (true);
+    sm->setMavCommsFailure (false);
+    REQUIRE (smm->search_calls == 0);
+}
+
+/* The flip side of the two above, and the behaviour make_sm() bakes in: the
+ * cold-start default is only fail-passive until FSS is reachable. Once it
+ * reports okay, fss_cmd_unknown resolves to searching exactly like
+ * fss_cmd_continue -- the deliberate decision recorded in map_fss_state(). */
+TEST_CASE ("an FSS-connected FMU with no command yet searches", "[state_machine][cold_start]")
+{
+    auto [mav, smm, sm] = make_sm_cold ();
+
+    sm->setCommsFailure (false);
+
+    REQUIRE (smm->search_calls == 1);
 }
 
 TEST_CASE ("comms failure latches failsafe until comms restored", "[state_machine][TC-MAV-004][TC-MAV-005][TC-FS-005]")
@@ -421,6 +513,10 @@ TEST_CASE ("a redundant comms-okay report with no preceding loss re-sends nothin
 TEST_CASE ("fss_cmd_continue with smm_cmd_none leads to searching", "[state_machine]")
 {
     auto [mav, smm, sm] = make_sm ();
+    /* Park out of searching first: make_sm() leaves the machine already
+     * searching (fss_cmd_unknown maps there too), so a continue issued from
+     * that state is a no-op and would prove nothing about this mapping. */
+    sm->FSSNewCommand (fss_cmd_hold);
     int calls_before = smm->search_calls;
 
     sm->FSSNewCommand (fss_cmd_continue);
@@ -883,6 +979,9 @@ TEST_CASE ("a configured altitude_breach_latch_count changes the debounce", "[st
 TEST_CASE ("altitude breach self-clears once altitude drops back under the cap", "[state_machine][altitude_cap]")
 {
     auto [mav, smm, sm] = make_sm ();
+    /* Park out of searching so the continue below is a real transition the
+     * callback observes; make_sm() leaves the machine already searching. */
+    sm->FSSNewCommand (fss_cmd_hold);
 
     FMUState last_state = fmu_state_manual;
     sm->setStateChangeCB ([&] (FMUState s) { last_state = s; });
@@ -3335,6 +3434,12 @@ make_dispatcher (const std::string &asset_name = "test-asset", int lowbat_thresh
     f.logger = std::make_unique<Logger> (f.log_dir->str ());
     f.dispatcher
         = std::make_unique<EventDispatcher> (*f.sm, *f.mav, *f.smm, *f.fss, *f.logger, asset_name, lowbat_threshold);
+    /* Establish FSS comms, for the reason make_sm() does — the failsafe is armed
+     * from construction. Done after the dispatcher is built, not before, so the
+     * resulting transition is logged through the state-change callback the
+     * dispatcher's constructor registers, exactly as it is in App::run(). Leaves
+     * the machine in fmu_state_searching (see make_sm). */
+    f.sm->setCommsFailure (false);
     f.clock = std::make_shared<FakeClock> ();
     f.dispatcher->setNowMsFn ([clock = f.clock] () { return clock->t; });
     return f;
@@ -3345,8 +3450,11 @@ TEST_CASE ("EventDispatcher gates SmmLoadSearch on isSearching()", "[event_dispa
 {
     auto f = make_dispatcher ();
 
-    /* FMUStateMachine starts in fmu_state_manual, not searching: a raced
-     * SmmLoadSearch outcome must be dropped, not applied. */
+    /* Park out of searching first — make_dispatcher() leaves the machine
+     * searching, since fss_cmd_unknown maps there. A raced SmmLoadSearch
+     * outcome arriving while the FMU is not searching must be dropped, not
+     * applied. */
+    f.sm->FSSNewCommand (fss_cmd_hold);
     event not_searching = SmmLoadSearch{ nullptr };
     f.dispatcher->dispatch (not_searching);
     REQUIRE (f.mav->load_search_calls == 0);
@@ -3502,7 +3610,9 @@ TEST_CASE ("EventDispatcher routes ReachedPoint only while searching", "[event_d
     auto f = make_dispatcher ();
 
     /* Not searching (e.g. paused for a goto): a reached event must not move
-     * the held search's point nor report bogus search status to FSS. */
+     * the held search's point nor report bogus search status to FSS. Parked
+     * explicitly, since make_dispatcher() leaves the machine searching. */
+    f.sm->FSSNewCommand (fss_cmd_hold);
     event not_searching = ReachedPoint{ 3 };
     f.dispatcher->dispatch (not_searching);
     REQUIRE (f.smm->reached_point_calls == 0);
