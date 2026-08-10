@@ -92,6 +92,28 @@ class fss_client_ssl : public flight_safety_system::client_ssl::fss_client
     registerCommsStatusCB (notify_fss_comms_cb cb)
     {
         this->comms_status_cb = cb;
+        /* Arm the comms-loss failsafe from cold start. The client library only
+         * ever reports a *change*: connectionStatusChange() fires from
+         * serverAdmitted() (on the false->true admission edge), from
+         * serverRequiresReconnect() (a live server dropping), and from
+         * attemptReconnect() only once something has actually connected. A
+         * client whose servers have never come up therefore reports nothing at
+         * all — fss_server's constructor does not dial, so every configured
+         * server starts in the reconnect list. Without this report the FMU
+         * would hold fss_comms_lost == false, believing FSS healthy, for as
+         * long as FSS stayed unreachable, and the comms-loss RTL would never
+         * fire at all on an FMU that never reached a server.
+         *
+         * It has to be here rather than in the constructor: there is no
+         * callback to report to until one is registered. Stating failure
+         * unconditionally is safe for the same reason as above — nothing can
+         * have connected yet, since only attemptReconnect() (driven by
+         * FSS::reconnectAll(), started after registration) opens a connection.
+         *
+         * This mirrors the MAV side, where mav_comms_ok{true} exists precisely
+         * so that the first observation of a down link edge-triggers a failure
+         * report rather than passing silently. */
+        this->report_comms_status (fss_comms_failure);
     };
     void
     registerSMMSettingsCB (notify_smm_settings_cb cb)

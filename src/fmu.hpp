@@ -103,7 +103,22 @@ class FMUStateMachine
      * that already terminated) even though it cannot undo the airframe action.
      * Recovery requires an FMU restart, matching the low_battery latch. */
     bool terminated{ false };
-    bool fss_comms_lost{ false };
+    /* Starts ENGAGED, unlike mav_comms_lost: "we have never heard from FSS" is
+     * the same thing as "we have lost FSS", so the comms-loss failsafe is armed
+     * from construction and only a real fss_comms_okay report clears it. The
+     * optimistic init this replaces meant a cold-started FMU that had never
+     * reached a server still resolved FSS/SMM commands normally — and, with
+     * fss_cmd_unknown mapping to searching (see map_fss_state), self-tasked into
+     * a search having never been told to by anyone.
+     *
+     * The flag alone is not enough: nothing evaluates it until some event calls
+     * updateState(), so fss_client_ssl::registerCommsStatusCB() also emits an
+     * initial fss_comms_failure at startup. That report is what actually drives
+     * the failsafe RTL — it matters for an FMU restarted in flight with FSS
+     * unreachable, where the MAV link is healthy and no other event would ever
+     * evaluate the state. The two together are the FSS equivalent of the MAV
+     * side's mav_comms_ok{true} initial-report forcing. */
+    bool fss_comms_lost{ true };
     bool mav_comms_lost{ false };
     IMAV &mav;
     ISMM &smm;
