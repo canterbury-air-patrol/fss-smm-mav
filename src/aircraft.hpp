@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 
 /* Aircraft that report no ICAO address are handed a synthetic one from the
  * "Unallocated" range starting at 0x1000. */
@@ -29,6 +30,30 @@ next_synthetic_icao (uint32_t current) -> uint32_t
         return first_icao_address_for_unknown_aircraft;
     }
     return current + 1;
+}
+
+/* Map key identifying one tracked aircraft.
+ *
+ * A real ICAO address is the aircraft's own globally unique identity, so it is
+ * the key whenever one is reported; the callsign is only a fallback for a peer
+ * that reports no address (which is then handed a synthetic one). Keying purely
+ * on callsign merged every contact that shared one -- and a blank callsign is
+ * common in ADS-B feeds, so several distinct aircraft could collapse into a
+ * single aircraft_details and with it a single 1 s debounce
+ * (acceptableUpdate()): roughly one report per second survived for the whole
+ * group, and the rest never reached the autopilot's collision avoidance at all.
+ *
+ * Two aircraft that both report no address and share a callsign still collide;
+ * nothing in the report distinguishes them. The prefixes keep the two key
+ * spaces from ever meeting (a callsign of "icao:1234" is not an address). */
+inline auto
+aircraft_key (const std::string &t_call_sign, uint32_t t_icao_address) -> std::string
+{
+    if (t_icao_address != 0)
+    {
+        return "icao:" + std::to_string (t_icao_address);
+    }
+    return "cs:" + t_call_sign;
 }
 
 class aircraft_details
@@ -83,6 +108,9 @@ class known_aircraft
   private:
     std::mutex lock{};
     uint32_t lastAllocatedICAO{ first_icao_address_for_unknown_aircraft };
+    /* Keyed by aircraft_key(): the reported ICAO address where there is one,
+     * the callsign otherwise. See that function for why the callsign alone is
+     * not enough. */
     std::map<std::string, std::shared_ptr<aircraft_details>> aircraft{};
     ILogger &logger;
     /* Local "now" source (milliseconds since some fixed epoch), driving both
@@ -98,7 +126,8 @@ class known_aircraft
     auto
     findAircraft (const std::string &t_call_sign, uint32_t t_icao_address) -> std::shared_ptr<aircraft_details>
     {
-        auto result = this->aircraft.find (t_call_sign);
+        const std::string key = aircraft_key (t_call_sign, t_icao_address);
+        auto result = this->aircraft.find (key);
         if (result != this->aircraft.end ())
         {
             return result->second;
@@ -111,7 +140,7 @@ class known_aircraft
         this->logger.log (LogLevel::info, "Aircraft: Creating new aircraft with callsign " + t_call_sign
                                               + " ICAO: " + std::to_string (t_icao_address));
         auto ad = std::make_shared<aircraft_details> (t_icao_address);
-        this->aircraft.insert (std::pair<std::string, std::shared_ptr<aircraft_details>> (t_call_sign, ad));
+        this->aircraft.insert (std::pair<std::string, std::shared_ptr<aircraft_details>> (key, ad));
         return ad;
     }
 
