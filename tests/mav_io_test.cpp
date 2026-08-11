@@ -942,6 +942,80 @@ TEST_CASE ("a send to a peer that stops reading is bounded by the configured sen
     REQUIRE (elapsed < std::chrono::seconds (10));
 }
 
+TEST_CASE ("a healthy link survives the reconnector after the cold-start comms-down report", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+
+    /* The cold-start report is "link down" by design (no heartbeat has arrived
+     * on a socket that is milliseconds old), and that report used to also flag
+     * the connection broken — so the reconnector's next pass tore down a link
+     * that was about to work, dragging a stream re-request, a failsafe-param
+     * re-check and any in-flight mission upload with it, and leaving fd == -1
+     * for the redial. Establish the link, then keep it healthy. */
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+    const int accepts_before = server.acceptCount ();
+    REQUIRE (accepts_before == 1);
+
+    /* Drive the reconnector as App's thread would, well past the point where
+     * the cold-start pass and several further heartbeat_loop() passes have
+     * happened, while the autopilot keeps heartbeating. The interval stays far
+     * inside heartbeat_loop()'s 5s timeout, so nothing here is a genuine
+     * staleness retire. */
+    for (int i = 0; i < 20; i++)
+    {
+        server.sendHeartbeat ();
+        conn.attemptReconnect ();
+        std::this_thread::sleep_for (std::chrono::milliseconds (75));
+    }
+
+    /* Not one redial: the socket accepted at start() is still the live one. */
+    REQUIRE (server.acceptCount () == accepts_before);
+    /* And the link was never reported down again — a teardown/redial cycle
+     * blanks the fd for the join+connect, which the 1Hz heartbeat pass can land
+     * in and turn into a comms failure (the FMU's own comms-loss failsafe) on a
+     * link that was never broken. */
+    REQUIRE (recorder.lastStatus () == MavCommsStatus::ok);
+}
+
+TEST_CASE ("a socket that connects but never heartbeats is eventually retired", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+
+    /* The server accepts and then says nothing at all — an endpoint that
+     * carries TCP but no autopilot traffic (mavproxy up, autopilot serial
+     * dead). Deferring the retire decision until a socket has been open for a
+     * heartbeat timeout must not turn into never retiring such a socket, so
+     * this is the counterpart of the healthy-link case above. */
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, test_logger);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (
+        MavLoopbackServer::waitFor ([&] () { return recorder.lastStatus () == MavCommsStatus::failure; }, io_timeout));
+    const int accepts_before = server.acceptCount ();
+
+    /* heartbeat_loop()'s timeout is a fixed 5s, so this wait has to outlast it
+     * by a clear margin — hence a longer bound than io_timeout. It is only a
+     * bound: the reconnect is observed as soon as it happens. */
+    constexpr auto retire_timeout = std::chrono::seconds (20);
+    REQUIRE (MavLoopbackServer::waitFor (
+        [&] ()
+        {
+            conn.attemptReconnect ();
+            return server.acceptCount () > accepts_before;
+        },
+        retire_timeout));
+}
+
 TEST_CASE ("a stale heartbeat on an otherwise-open socket is retired and reconnected", "[mav_io]")
 {
     reset_mav_parser ();
@@ -953,7 +1027,20 @@ TEST_CASE ("a stale heartbeat on an otherwise-open socket is retired and reconne
     conn.start ();
 
     REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* Run the reconnector against the *healthy* link first, and only snapshot
+     * the accept count afterwards. Without this the test could not tell a
+     * reconnect caused by the heartbeats stopping from one caused by a `broken`
+     * flag latched back at cold start — which is what it was actually observing,
+     * so it passed even with half-open detection removed entirely. */
+    for (int i = 0; i < 10; i++)
+    {
+        server.sendHeartbeat ();
+        conn.attemptReconnect ();
+        std::this_thread::sleep_for (std::chrono::milliseconds (50));
+    }
     const int accepts_before = server.acceptCount ();
+    REQUIRE (accepts_before == 1);
 
     /* Stop heartbeating without dropping the socket — the fd stays open at the
      * TCP layer throughout, the "half-open" scenario this test exists for.

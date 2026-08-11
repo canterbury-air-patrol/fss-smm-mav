@@ -82,8 +82,9 @@ mav_connection::heartbeat_loop ()
          * heartbeat yet at cold start) reports a failure and corrects it. A real
          * heartbeat then reports the link back up. Keeping the report in one place
          * also means the callback is only ever invoked from this thread. */
-        bool up
-            = mav_comms_is_up (fd_open, current_timestamp_ms (), this->last_heartbeat_ts.load (), heartbeat_timeout_ms);
+        uint64_t now = current_timestamp_ms ();
+        uint64_t last_heartbeat = this->last_heartbeat_ts.load ();
+        bool up = mav_comms_is_up (fd_open, now, last_heartbeat, heartbeat_timeout_ms);
         if (up != this->mav_comms_ok.load ())
         {
             this->mav_comms_ok.store (up);
@@ -92,17 +93,10 @@ mav_connection::heartbeat_loop ()
                 this->logger.log (LogLevel::warning, std::string ("Autopilot link down (")
                                                          + (fd_open ? "no heartbeat" : "no link")
                                                          + ") — MAV comms failure");
-                if (fd_open)
-                {
-                    /* A stale heartbeat on a socket that is still locally open is a
-                     * half-open link: the network path is gone but the fd itself has
-                     * not errored, so nothing else would ever retire it. Only flag
-                     * it broken here — attemptReconnect() (the reconnector thread,
-                     * the sole owner of actual teardown; see docs/threading.md)
-                     * tears it down and dials a fresh connection on its next pass.
-                     */
-                    this->broken = true;
-                }
+                /* Deliberately no `broken = true` here. Reporting the link down
+                 * and retiring the socket are different decisions on different
+                 * evidence — see the level-triggered check below, which is where
+                 * a half-open link is flagged. */
                 /* A goto's MISSION_COUNT can reach the autopilot with the rest
                  * of the upload (request-driven) never completing if the link
                  * then drops. Unlike RTL/failsafe/low-battery/terminate this
@@ -124,6 +118,31 @@ mav_connection::heartbeat_loop ()
             if (this->mav_comms_cb)
             {
                 this->mav_comms_cb (up ? MavCommsStatus::ok : MavCommsStatus::failure);
+            }
+        }
+        /* Whether to retire the socket is checked on every pass, not on the down
+         * edge above, because the two decisions no longer coincide: the down edge
+         * fires on the loop's very first pass after a connect (nothing has been
+         * heard from a socket that is milliseconds old), which is exactly when the
+         * socket must NOT be retired, and by the time the silence has genuinely
+         * lasted a timeout the edge has long since been consumed. A level check
+         * costs one comparison per second and cannot miss the transition.
+         *
+         * Only flag it here — attemptReconnect() (the reconnector thread, the sole
+         * owner of actual teardown; see docs/threading.md) tears it down and dials
+         * a fresh connection on its next pass. */
+        if (mav_link_should_retire (fd_open, now, last_heartbeat, this->connected_since_ts.load (),
+                                    heartbeat_timeout_ms))
+        {
+            /* exchange, so the warning is emitted once per retire rather than on
+             * every pass until the reconnector gets to it — and stays silent when
+             * another path (a failed send, the recv thread's EOF) already flagged
+             * the connection and logged its own, more specific, reason. */
+            if (!this->broken.exchange (true))
+            {
+                this->logger.log (LogLevel::warning,
+                                  "Autopilot link silent for longer than the heartbeat timeout — retiring "
+                                  "the socket so the reconnector can dial a fresh connection");
             }
         }
         std::unique_lock<std::mutex> lk (this->heartbeat_mutex);
@@ -1284,6 +1303,17 @@ mav_connection::connect_to_mav ()
      * socket has not yet produced a heartbeat, so the link stays "down" until the
      * autopilot is actually heard from. heartbeat_loop() owns mav_comms_ok and
      * reports the link up only once a real heartbeat lands. */
+    /* Stamp when this socket became usable instead. That is what stops the same
+     * "no heartbeat yet" state from also retiring the socket: heartbeat_loop()
+     * measures silence from the later of this and last_heartbeat_ts, so a socket
+     * gets a full heartbeat-timeout window to produce its first heartbeat, the
+     * same window a live link gets between heartbeats. Without it, the first
+     * heartbeat_loop() pass after every connect read last_heartbeat_ts (0, or the
+     * previous socket's) as infinitely stale and flagged a healthy link broken,
+     * and the reconnector then tore it down and redialled on its next pass.
+     * Stored before the fd is published below, so the heartbeat thread can never
+     * pair the new socket with the previous connection's long-past stamp. */
+    this->connected_since_ts.store (current_timestamp_ms ());
 
     /* Publish the ready fd under send_lock so a concurrent send sees either the
      * old fd, -1, or this fully-connected one — never an intermediate state. */

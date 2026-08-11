@@ -2630,6 +2630,53 @@ TEST_CASE ("mav_comms_is_up requires an open socket and a recent heartbeat", "[m
     REQUIRE (mav_comms_is_up (true, now, now + 1000, timeout));
 }
 
+TEST_CASE ("mav_link_should_retire spares a socket that has not had its first heartbeat window yet", "[mav][comms]")
+{
+    constexpr uint64_t timeout = 5000;
+    constexpr uint64_t now = 100000;
+
+    /* No socket: nothing to retire. attemptReconnect()'s fd == -1 path dials
+     * from here, and it must not be told to tear down first — that would join
+     * and re-close a connection that does not exist. True at cold start, where
+     * both timestamps are still 0. */
+    REQUIRE_FALSE (mav_link_should_retire (false, now, 0, 0, timeout));
+    REQUIRE_FALSE (mav_link_should_retire (false, now, 0, now - 60000, timeout));
+
+    /* Freshly connected, no heartbeat yet: the link correctly reads *down*
+     * (mav_comms_is_up above) but must not be retired — the autopilot has not
+     * had a heartbeat interval to answer in, and tearing the socket down here
+     * is what redialled a healthy link on every cold start. Including at the
+     * exact boundary, where the window has not yet been exceeded. */
+    REQUIRE_FALSE (mav_link_should_retire (true, now, 0, now, timeout));
+    REQUIRE_FALSE (mav_link_should_retire (true, now, 0, now - 2000, timeout));
+    REQUIRE_FALSE (mav_link_should_retire (true, now, 0, now - timeout, timeout));
+
+    /* Connected long enough, still never heard from: an endpoint that accepts
+     * TCP but never forwards autopilot traffic (mavproxy up, autopilot serial
+     * dead). It must still be retired — the connect stamp only defers the
+     * decision by one window, it does not exempt a heartbeat-less socket. */
+    REQUIRE (mav_link_should_retire (true, now, 0, now - (timeout + 1), timeout));
+
+    /* Heartbeats arrived and then stopped: the half-open case, where the fd
+     * never errors so nothing else would ever retire it. The connect stamp is
+     * older than the last heartbeat here, so it must not drag the age back and
+     * keep a dead link alive. */
+    REQUIRE (mav_link_should_retire (true, now, now - (timeout + 1), now - 60000, timeout));
+    REQUIRE_FALSE (mav_link_should_retire (true, now, now - timeout, now - 60000, timeout));
+    REQUIRE_FALSE (mav_link_should_retire (true, now, now, now - 60000, timeout));
+
+    /* Reconnected, and the *previous* socket's heartbeat is still the newest
+     * one recorded: the stamp of the new socket is what counts, so the stale
+     * inherited timestamp cannot retire a connection that is seconds old. */
+    REQUIRE_FALSE (mav_link_should_retire (true, now, now - 60000, now - 1000, timeout));
+
+    /* A clock anomaly (a stamp after now) must not wrap the unsigned
+     * subtraction into a huge age and retire a working link, same guard as
+     * mav_comms_is_up(). */
+    REQUIRE_FALSE (mav_link_should_retire (true, now, now + 1000, 0, timeout));
+    REQUIRE_FALSE (mav_link_should_retire (true, now, 0, now + 1000, timeout));
+}
+
 TEST_CASE ("autopilot_restarted trips only on a real backwards jump in autopilot uptime", "[mav][comms]")
 {
     constexpr uint32_t margin = autopilot_restart_margin_ms;
