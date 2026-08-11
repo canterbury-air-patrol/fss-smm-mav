@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -145,14 +146,21 @@ template <typename Target> class CommandAckGroup
      * `t_server_command_id`/`t_connection_key` are the retry-vs-redundant signal:
      * the dispatching server's per-connection command identifier (0 = not
      * reported, e.g. a legacy peer or the capability was not negotiated) and an
-     * opaque identifier for the connection it arrived on (e.g. the originating
-     * fss_server, stable across reconnects). Per the upstream contract, ids are
-     * comparable only within one connection, never across connections — so this
-     * only ever compares a delivery's id against what THAT SAME connection last
-     * reported for the active group, never against another connection's id. */
+     * opaque identifier for the server it arrived from (the caller supplies its
+     * endpoint). Per the upstream contract, ids are comparable only within one
+     * connection, never across connections — so this only ever compares a
+     * delivery's id against what THAT SAME key last reported for the active
+     * group, never against another server's id.
+     *
+     * The key must name the server itself and must not be recycled between two
+     * different servers — an id compared against a stale entry left behind by
+     * some other server is exactly the cross-server comparison the contract
+     * forbids, and would read either as a retry that never happened (the group
+     * re-actuates) or as a redelivery of an action already handled (a genuine
+     * operator retry is swallowed). */
     auto
     onDelivery (int t_command, uint64_t t_timestamp, Target copy, const CommandPayload &t_payload = {},
-                uint64_t t_server_command_id = 0, uint64_t t_connection_key = 0) -> DeliveryResult
+                uint64_t t_server_command_id = 0, const std::string &t_connection_key = {}) -> DeliveryResult
     {
         const std::scoped_lock lock (this->mtx);
         DeliveryResult result;
@@ -277,5 +285,5 @@ template <typename Target> class CommandAckGroup
      * a new logical command opens, since ids from a superseded group are no
      * longer meaningful. Only ever compared within the same key — never across
      * keys — because ids are not comparable across connections. */
-    std::unordered_map<uint64_t, uint64_t> last_id_by_connection{};
+    std::unordered_map<std::string, uint64_t> last_id_by_connection{};
 };
