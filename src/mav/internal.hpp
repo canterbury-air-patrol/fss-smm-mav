@@ -174,6 +174,21 @@ class mav_connection
     std::mutex heartbeat_mutex{};
     std::condition_variable heartbeat_cv{};
     std::atomic<uint64_t> last_heartbeat_ts{ 0 };
+    /* When the current socket was published by connect_to_mav()
+     * (current_timestamp_ms() milliseconds); 0 while no socket has ever been
+     * opened. Written on whichever thread dials — the main thread via start(),
+     * the FSS reconnector via attemptReconnect() — and read on the heartbeat
+     * thread, so it is atomic for the same reason last_heartbeat_ts above is.
+     *
+     * It is the other half of heartbeat_loop()'s retire decision
+     * (mav_link_should_retire(), mav-comms.hpp): silence is measured from the
+     * later of this and last_heartbeat_ts, which is what tells "connected a
+     * moment ago and not heard from yet" (cold start — must not be retired)
+     * apart from "produced heartbeats and then went quiet" (half-open — must
+     * be). Deliberately not cleared by disconnect_from_mav(): with fd == -1
+     * there is no socket to retire, so the stamp is never consulted again until
+     * the next connect has overwritten it. */
+    std::atomic<uint64_t> connected_since_ts{ 0 };
     /* Last *reported* MAV comms status, owned solely by heartbeat_loop(). Starts
      * "up" to match the state machine's optimistic default, so the first observed
      * down state (no link/heartbeat at cold start) edge-triggers a failure report

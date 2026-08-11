@@ -52,6 +52,62 @@ mav_comms_is_up (bool fd_open, uint64_t now, uint64_t last_heartbeat_ts, uint64_
     return (now - last_heartbeat_ts) <= timeout_ms;
 }
 
+/* Pure decision for whether an open MAVLink socket should be retired — flagged
+ * `broken` so the reconnector tears it down and dials a fresh one — factored out
+ * of mav_connection::heartbeat_loop() for the same reason as mav_comms_is_up()
+ * above.
+ *
+ * This is deliberately NOT the negation of mav_comms_is_up(). Reporting the link
+ * down is cheap and correct the instant a socket has produced no heartbeat (it
+ * arms the comms-loss failsafe); retiring the socket costs a teardown, a redial,
+ * a stream re-request and a failsafe-param re-check, and drops any mission upload
+ * in flight — so it needs the stronger evidence that the socket has genuinely
+ * had its chance and stayed silent.
+ *
+ * Silence is therefore measured from the later of the last heartbeat and the
+ * moment the socket was connected. That is what separates the two cases the
+ * `broken` flag has to tell apart, which a bare last_heartbeat_ts test cannot:
+ *
+ *   - Cold start / just reconnected: last_heartbeat_ts is 0 (or belongs to the
+ *     previous socket), so the age of the last heartbeat is unbounded even though
+ *     this socket has existed for milliseconds. Retiring here tears down a
+ *     perfectly healthy link before the autopilot's first heartbeat could
+ *     possibly have arrived, and — because the redial leaves fd == -1 for the
+ *     join+connect — can itself manufacture the comms failure it was reacting to.
+ *   - Half-open: heartbeats arrived and then stopped. The network path is gone
+ *     but the fd has not errored, so nothing else would ever retire it. It must
+ *     be retired, including the case where the peer accepts TCP but never
+ *     forwards autopilot traffic at all (mavproxy up, autopilot serial dead) —
+ *     which is why the connect timestamp only defers the decision by one timeout
+ *     window rather than exempting a heartbeat-less socket from it.
+ *
+ * A closed socket (fd == -1) is never "to be retired": there is nothing to tear
+ * down, and dialling from that state is attemptReconnect()'s own fd == -1 path.
+ *
+ * connected_since_ts is expected to be stamped before the fd is published, so an
+ * open socket always has one. If that ever stops holding, a zero stamp reads as
+ * the distant past and the socket is retired a timeout after its first silent
+ * check — noisy, but the safe direction: never retiring a genuinely dead link
+ * would leave the FMU talking to a socket the autopilot is not on. */
+inline auto
+mav_link_should_retire (bool fd_open, uint64_t now, uint64_t last_heartbeat_ts, uint64_t connected_since_ts,
+                        uint64_t timeout_ms) -> bool
+{
+    if (!fd_open)
+    {
+        return false;
+    }
+    uint64_t last_contact = std::max (last_heartbeat_ts, connected_since_ts);
+    /* Same guard as mav_comms_is_up(): a stamp in the future (clock anomaly)
+     * must not wrap the unsigned difference into a huge age and retire a
+     * working link. */
+    if (now < last_contact)
+    {
+        return false;
+    }
+    return (now - last_contact) > timeout_ms;
+}
+
 /* How far HEARTBEAT-independent autopilot uptime (time_boot_ms) must go
  * backwards before it counts as a restart rather than stream skew. The two
  * sources feeding it (GLOBAL_POSITION_INT and SYSTEM_TIME) are stamped
