@@ -1408,10 +1408,18 @@ mav_connection::sendMavLinkMsgLocked (mavlink_message_t *msg) -> bool
     while (sent < to_send)
     {
         ssize_t transfered = send (cur_fd, buf + sent, to_send - sent, 0);
-        if (transfered < 0)
+        if (transfered <= 0)
         {
-            /* Preserve the failure detail before tearing anything down. */
-            this->logger.log (LogLevel::warning, std::string ("MAV send() failed: ") + std::strerror (errno));
+            /* 0 is not reachable here: the socket is blocking, the loop
+             * condition guarantees a non-zero length, and SO_SNDTIMEO reports a
+             * stalled peer as -1/EAGAIN rather than a short-of-everything 0. It
+             * is still handled as a failure rather than looped over, because
+             * `sent` would not advance on it and the loop would then spin
+             * forever holding send_lock. */
+            /* Preserve the failure detail before tearing anything down. errno is
+             * only meaningful for the -1 case. */
+            this->logger.log (LogLevel::warning, std::string ("MAV send() failed: ")
+                                                     + (transfered < 0 ? std::strerror (errno) : "sent 0 bytes"));
             /* Only flag the connection broken and let the reconnector tear it
              * down. We must not call disconnect_from_mav() here: sendMavLinkMsg
              * can run on the recv thread (via processMessages), and that path
