@@ -2726,6 +2726,55 @@ TEST_CASE ("known_aircraft assigns and retrieves consistent ICAO address", "[air
     REQUIRE (icao1 == icao3);
 }
 
+TEST_CASE ("known_aircraft tracks aircraft with their own ICAO address separately, whatever the callsign", "[aircraft]")
+{
+    NullLogger null_logger;
+    known_aircraft ka (null_logger);
+    uint64_t now = 1000;
+    ka.setNowMsFn ([&now] { return now; });
+    constexpr uint32_t icao_a = 0xABC123;
+    constexpr uint32_t icao_b = 0xDEF456;
+
+    /* Two real contacts reporting a blank callsign — routine in an ADS-B feed —
+     * within the same second. Keyed on the callsign alone they shared a single
+     * aircraft_details, so the second aircraft's report was swallowed by the
+     * first one's 1 s debounce and never reached collision avoidance at all. */
+    REQUIRE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "", 0, icao_a, 0, 0, 0, 0)));
+    REQUIRE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "", 0, icao_b, 0, 0, 0, 0)));
+
+    /* The debounce still applies per aircraft: a second report from the same
+     * address inside the same second is dropped, as before. */
+    REQUIRE_FALSE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "", 0, icao_a, 0, 0, 0, 0)));
+
+    /* Two contacts sharing a real callsign are likewise still distinct. */
+    REQUIRE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "SHARED", 0, 0x111111, 0, 0, 0, 0)));
+    REQUIRE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "SHARED", 0, 0x222222, 0, 0, 0, 0)));
+}
+
+TEST_CASE ("known_aircraft keeps a reported ICAO address and a synthetic one apart", "[aircraft]")
+{
+    NullLogger null_logger;
+    known_aircraft ka (null_logger);
+    uint64_t now = 1000;
+    ka.setNowMsFn ([&now] { return now; });
+    constexpr uint32_t icao_real = 0xABC123;
+
+    /* A peer reporting no address is tracked under its callsign and handed a
+     * synthetic address. */
+    REQUIRE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "PEER", 0, 0, 0, 0, 0, 0)));
+    const uint32_t synthetic = ka.getAircraftICAOAddress ("PEER");
+    REQUIRE (synthetic >= first_icao_address_for_unknown_aircraft);
+
+    /* If that same callsign later turns up carrying a real address it is a
+     * separate entry, not the synthetic one renamed: the two identities cannot
+     * be merged after the fact, so the report is accepted immediately rather
+     * than being debounced against the synthetic entry. The stale synthetic
+     * entry simply ages out. This is deliberate — the alternative is guessing
+     * that a callsign match means the same airframe. */
+    REQUIRE (ka.newPositionReport (PositionData (0, 0, 0, 0, 0, 0, "PEER", 0, icao_real, 0, 0, 0, 0)));
+    REQUIRE (ka.getAircraftICAOAddress ("PEER") == synthetic);
+}
+
 TEST_CASE ("known_aircraft evicts aircraft that go quiet past the eviction window", "[aircraft]")
 {
     NullLogger null_logger;
