@@ -1778,7 +1778,7 @@ TEST_CASE ("a same-command retry with a fresh server command id re-actuates a re
 {
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_goto = 3;
-    constexpr uint64_t connection_a = 1;
+    const std::string connection_a{ "server-a.example:8081" };
     const auto target = CommandPayload::forPosition (-43.5, 172.6);
 
     auto first = group.onDelivery (cmd_goto, 1000, 1, target, /*server_command_id=*/100, connection_a);
@@ -1797,7 +1797,7 @@ TEST_CASE ("a same-command redelivery with the same server command id still dedu
 {
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_hold = 5;
-    constexpr uint64_t connection_a = 1;
+    const std::string connection_a{ "server-a.example:8081" };
 
     auto first = group.onDelivery (cmd_hold, 1000, 1, {}, /*server_command_id=*/100, connection_a);
     REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
@@ -1821,14 +1821,43 @@ TEST_CASE ("a second connection's first copy is still a duplicate, not a retry, 
      * for a retry just because it has never been seen before. */
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_hold = 5;
-    constexpr uint64_t connection_a = 1;
-    constexpr uint64_t connection_b = 2;
+    const std::string connection_a{ "server-a.example:8081" };
+    const std::string connection_b{ "server-b.example:8081" };
 
     auto first = group.onDelivery (cmd_hold, 1000, 1, {}, /*server_command_id=*/100, connection_a);
     REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
 
     auto second = group.onDelivery (cmd_hold, 1000, 2, {}, /*server_command_id=*/555, connection_b);
     REQUIRE (second.disposition == CommandAckGroup<int>::Disposition::pending);
+}
+
+TEST_CASE ("two servers that happen to issue the same command id stay independent", "[command_ack][group][TC-MAV-006]")
+{
+    /* Each server assigns ids out of its own database, so one id names two
+     * unrelated rows on two servers. This is why a key must identify the server
+     * and must never be recycled from one server to another: compared against a
+     * stale entry left by a different server, an equal id reads as a redelivery
+     * of an action already handled and a genuine operator retry is swallowed —
+     * the hole server_command_id exists to close. */
+    CommandAckGroup<int> group{ group_tolerance_ms };
+    constexpr int cmd_hold = 5;
+    const std::string connection_a{ "server-a.example:8081" };
+    const std::string connection_b{ "server-b.example:8081" };
+
+    auto first = group.onDelivery (cmd_hold, 1000, 1, {}, /*server_command_id=*/100, connection_a);
+    REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);
+    group.resolve (first.epoch, actioned ());
+
+    /* The second server delivers the same operator action under its own row id,
+     * which happens to be 100 as well: still a duplicate of the same command. */
+    auto second = group.onDelivery (cmd_hold, 1000, 2, {}, /*server_command_id=*/100, connection_b);
+    REQUIRE (second.disposition == CommandAckGroup<int>::Disposition::already_resolved);
+
+    /* The operator now presses the button again. The first server's retry
+     * carries a fresh row id and must re-actuate — the other server having most
+     * recently reported 100 as well is not evidence about this one. */
+    auto retry = group.onDelivery (cmd_hold, 1000, 3, {}, /*server_command_id=*/101, connection_a);
+    REQUIRE (retry.disposition == CommandAckGroup<int>::Disposition::actuate);
 }
 
 TEST_CASE ("a server command id of zero never overrides the timestamp-window heuristic",
@@ -1839,7 +1868,7 @@ TEST_CASE ("a server command id of zero never overrides the timestamp-window heu
      * timestamp-window dedup. */
     CommandAckGroup<int> group{ group_tolerance_ms };
     constexpr int cmd_hold = 5;
-    constexpr uint64_t connection_a = 1;
+    const std::string connection_a{ "server-a.example:8081" };
 
     auto first = group.onDelivery (cmd_hold, 1000, 1, {}, /*server_command_id=*/0, connection_a);
     REQUIRE (first.disposition == CommandAckGroup<int>::Disposition::actuate);

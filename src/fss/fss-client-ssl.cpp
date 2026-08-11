@@ -3,6 +3,7 @@
 #include "fmu-fss-types.hpp"
 #include "internal.hpp"
 #include <chrono>
+#include <string>
 
 void
 fss_client_ssl::sendCommandAck (const std::shared_ptr<flight_safety_system::transport::fss_connection> &conn,
@@ -149,14 +150,31 @@ fss_client_ssl::handleCommandFrom (
      * group decides whether to action it (new command), queue/replay its ack
      * (redundant delivery), or reject it as stale.
      *
-     * `origin` identifies the connection this copy arrived on: fss_server objects
-     * are one-per-configured-server and persist across reconnects (only the
-     * underlying socket is replaced), so it is a stable per-connection key for the
-     * lifetime of this client. server_command_id is 0 when the peer did not
-     * negotiate FSS_FEATURE_SERVER_COMMAND_ID; the group treats that as "no
-     * evidence" and falls back to the plain timestamp-window dedup. */
+     * The group is keyed on the originating server's endpoint rather than on the
+     * fss_server object itself. server_command_id is the server's own command DB
+     * row id, so it is meaningful for as long as that server is that server:
+     * address:port is precisely that identity, it is what the client library
+     * itself dedups its server list on, and it survives both a reconnect and a
+     * learned server being expired and re-learned — after which the ids from that
+     * database are still the same ids.
+     *
+     * The object's address is NOT that identity, which is what this used to use.
+     * The library expires a learned server absent from the broadcast list for
+     * 60 s, destroys it, and constructs a fresh fss_server when the server comes
+     * back; the allocator readily hands back the block it just freed. The new
+     * server's first delivery is a redelivery of the currently-active command
+     * (the server dispatches the latest row per asset on connect) under its own
+     * row id, which the recycled address would have compared against the dead
+     * server's last id: a different id reads as an operator retry and re-actuates
+     * a command nobody re-issued, and an equal one reads as a redelivery, which
+     * swallows a genuine retry — the very hole server_command_id exists to close.
+     *
+     * server_command_id is 0 when the peer did not negotiate
+     * FSS_FEATURE_SERVER_COMMAND_ID; the group treats that as "no evidence" and
+     * falls back to the plain timestamp-window dedup. */
+    std::string origin_key = origin->getAddress () + ":" + std::to_string (origin->getPort ());
     auto delivery = this->command_group.onDelivery (static_cast<int> (raw_command), ts, this_copy, payload,
-                                                    msg->getServerCommandId (), reinterpret_cast<uintptr_t> (origin));
+                                                    msg->getServerCommandId (), origin_key);
 
     switch (delivery.disposition)
     {
