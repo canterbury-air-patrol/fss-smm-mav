@@ -212,6 +212,15 @@ absent entirely):
 | `log_level` | `info` | Logging verbosity: `error`, `warning`, `info`, or `debug`. Each level adds to the one before it, so `error` shows only failures and `warning` adds degraded-but-handled conditions (a link drop, an ignored mission ack, a misconfigured autopilot param). Every log line names its own level between the timestamp and the message. |
 | `log_dir` | `/var/log/cap-fmu` | Directory the rotating `fmu.log` is written to. The FMU normally runs as a non-root user, so set this to a path that user can write; the directory is created if missing, and logging is skipped with a warning if it cannot be. |
 
+One interval is deliberately absent from that table: the rate the FMU reports
+its own position to the **FSS** servers is fixed at 1 Hz and is not
+configurable. Those reports feed the operator display on FSS-Web, and
+server-side liveness is judged from RTT responses rather than from them, so
+there is nothing per-airframe to tune — unlike the SMM upload
+(`smm_position_report_interval_ms`) and the MAVLink stream
+(`position_stream_interval_ms`), which are. Running the MAVLink stream faster
+does not change it; the surplus is dropped at the FSS throttle.
+
 Then start this client with:
 ```
 cap-fmu --terminate-action=<action> client.json

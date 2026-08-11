@@ -290,6 +290,12 @@ void
 fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t heading, uint16_t hor_vel, int16_t ver_vel,
                               bool fix_valid)
 {
+    /* The rate the FMU reports its own position to FSS is fixed at 1 Hz, and is
+     * deliberately not configurable the way smm_position_report_interval_ms is:
+     * these reports feed the operator display on FSS-Web, while server-side
+     * liveness is judged from RTT responses rather than from them, so there is
+     * nothing per-airframe to tune here. Recorded as fixed in README.md's
+     * configuration section, next to the intervals that are configurable. */
     static constexpr std::chrono::milliseconds ts_1sec_interval{ 1000 };
     static constexpr uint16_t squawk_vfr = 1200;
     static constexpr uint32_t valid_fields_all = 1 | 2 | 4 | 8 | 16 | 32;
