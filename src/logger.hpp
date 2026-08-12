@@ -152,7 +152,9 @@ class Logger : public ILogger
 
     /* Format the line (timestamp + message; no I/O) and enqueue it for the
      * worker thread. Emitted only if msg_level passes the configured
-     * verbosity. Never blocks on disk I/O. */
+     * verbosity. Never blocks on disk I/O. Returns without even formatting
+     * the line if logging could not be set up at construction (see
+     * logging_enabled), so an unusable log_dir costs the callers nothing. */
     void log (LogLevel msg_level, std::string_view msg) override;
 
     /* Test-only synchronization point: block until every line enqueued so far
@@ -215,6 +217,35 @@ class Logger : public ILogger
     /* Whether the last write attempt failed, so the stderr complaint is
      * edge-triggered rather than repeated for every line. Worker-thread-only. */
     bool write_failed{ false };
+    /* False until the constructor has both created the log directory and
+     * opened the file in it; false forever after if either step failed, which
+     * is the "logging is skipped with a warning if [the directory] cannot be"
+     * that README documents. log() returns on it before doing anything else.
+     *
+     * Without the flag, a Logger that could not be set up still formatted and
+     * enqueued every line, with no worker thread in existence to take them off
+     * again: line_queue climbed to max_queued_lines and stayed pinned there
+     * for the life of the process (~1MB of text on a companion computer that
+     * needs the memory for flight software --- the exact cost the bound was
+     * added to avoid), every call paid for a timestamp() and an ostringstream
+     * to produce a line that could not be written, and flush()'s "queue empty
+     * and worker idle" predicate could never become true, so a caller reaching
+     * it would block forever.
+     *
+     * Set once by the constructor, before the worker thread is created and
+     * therefore before any other thread can hold a reference to this Logger;
+     * read by every producer thread that calls log() and never written again.
+     * That makes it the "immutable after construction" case in
+     * docs/threading.md, which needs no lock and is deliberately absent from
+     * that document's ownership table (as is the rest of Logger, since every
+     * thread in the inventory is a producer).
+     *
+     * Nothing sets it true later, by design: retrying the directory would mean
+     * an unbounded series of filesystem calls on the producers' threads, and
+     * the operator has already been told once on stderr. A log directory that
+     * cannot be created at startup is a deployment fault to fix on the ground,
+     * not a condition to poll from a flight-critical thread. */
+    bool logging_enabled{ false };
 
     /* Guards line_queue and busy (see below); queue_cv wakes the worker on a
      * new line or shutdown, idle_cv wakes flush() once the worker has fully
