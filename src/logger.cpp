@@ -22,6 +22,9 @@ Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes, s
     std::filesystem::create_directories (log_dir, ec);
     if (ec)
     {
+        /* Leaves logging_enabled false: no worker thread is started, and log()
+         * returns at its first line rather than formatting and queueing output
+         * that provably cannot be written. See the flag's declaration. */
         std::cerr << "logger: cannot create " << log_dir << ": " << ec.message () << '\n';
         return;
     }
@@ -29,6 +32,25 @@ Logger::Logger (std::string_view dir, LogLevel t_level, std::size_t max_bytes, s
     /* Single-threaded so far (the worker below does not exist yet): safe to
      * open/rotate directly here. */
     openFresh ();
+    if (!file.is_open ())
+    {
+        /* The directory exists but the file underneath it does not open (a
+         * read-only mount, a full filesystem, fmu.log occupied by a directory
+         * that rotation could not move aside). openFresh() has already
+         * complained on stderr, so nothing more is said here.
+         *
+         * Disposition is deliberately identical to the create_directories()
+         * failure above: both mean "logging could not be set up at startup",
+         * and it would be arbitrary for one to skip cheaply while the other
+         * formatted and queued every line for a worker whose writeLine()
+         * discards it (!file.is_open() is that function's first test). Nothing
+         * reopens the file later either --- writeLine() returns before
+         * bytes_written can advance, so the rotation that calls openFresh()
+         * again is unreachable --- so this is as permanent as the directory
+         * failure, not a transient the worker might ride out. */
+        return;
+    }
+    this->logging_enabled = true;
     this->worker_thread = std::thread (&Logger::workerLoop, this);
 }
 
@@ -38,7 +60,9 @@ void
 Logger::stopWorker ()
 {
     /* Idempotent: a subclass destructor may have already called this (see
-     * the doc on the declaration) before this runs again from ~Logger(). */
+     * the doc on the declaration) before this runs again from ~Logger().
+     * Also safe when logging is disabled and no worker was ever started: the
+     * flag work below is harmless and worker_thread is not joinable. */
     {
         std::lock_guard<std::mutex> lk (this->queue_lock);
         if (this->worker_stopped)
@@ -112,6 +136,14 @@ Logger::timestamp ()
 void
 Logger::log (LogLevel msg_level, std::string_view msg)
 {
+    /* Logging could not be set up at all, so there is no worker and no file:
+     * return before the formatting work below, which would otherwise be spent
+     * on a line with nowhere to go. Checked ahead of the level test because it
+     * is the more absolute of the two. */
+    if (!this->logging_enabled)
+    {
+        return;
+    }
     /* Higher enum value == more verbose; drop anything above the configured
      * level. */
     if (msg_level > level)
@@ -241,6 +273,12 @@ Logger::workerLoop ()
 void
 Logger::flush ()
 {
+    /* Returns immediately when logging is disabled rather than waiting on a
+     * worker that does not exist: log() enqueues nothing in that
+     * configuration, so the predicate is already true on the first
+     * evaluation. That is the whole reason log() returns early instead of
+     * queueing lines nobody drains --- a single queued line with no worker
+     * would park this wait forever. */
     std::unique_lock<std::mutex> lk (this->queue_lock);
     this->idle_cv.wait (lk, [this] { return this->line_queue.empty () && !this->busy; });
 }

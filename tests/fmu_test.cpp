@@ -3443,6 +3443,90 @@ TEST_CASE ("Logger bounds its write queue and records what it dropped", "[logger
     REQUIRE (content.find ("ERROR LOG dropped") != std::string::npos);
 }
 
+/* README promises that an unusable log_dir means "logging is skipped with a
+ * warning", and skipped has to mean skipped: with no worker thread in
+ * existence, a log() that still enqueued would pin line_queue at its bound for
+ * the life of the process with nothing to drain it, burn a timestamp() and an
+ * ostringstream per call on lines that cannot be written, and leave flush()
+ * parked on a "queue empty and worker idle" predicate that could never come
+ * true.
+ *
+ * flush() is what makes the queue observable from outside: it waits for
+ * line_queue.empty() && !busy, and nothing exists to empty the queue here, so
+ * it can only return if log() never enqueued anything in the first place.
+ * A regression would hang this test rather than fail it --- the same trade the
+ * stalled-write test above makes, and the only one available for proving a
+ * wait does not happen. */
+TEST_CASE ("Logger skips logging when its directory cannot be created", "[logger]")
+{
+    TempLogDir dir;
+    /* A path *under a regular file* cannot be created: create_directories()
+     * fails with a real ENOTDIR rather than needing root or a permission
+     * game, and it fails the same way for every user running the suite. */
+    std::string occupied = dir.str () + "/not-a-directory";
+    {
+        std::ofstream blocker (occupied);
+        REQUIRE (blocker.is_open ());
+    }
+    std::string log_dir = occupied + "/logs";
+    std::error_code ec;
+    std::filesystem::create_directories (log_dir, ec);
+    REQUIRE (ec);
+    REQUIRE_FALSE (std::filesystem::exists (log_dir));
+
+    /* Bound of 4, so a regression would reach the bound (and start dropping)
+     * within the loop below instead of needing 10000 iterations. */
+    Logger logger (log_dir, LogLevel::info, Logger::default_max_log_bytes, 4);
+    for (int i = 0; i < 100; i++)
+    {
+        logger.log ("line " + std::to_string (i));
+    }
+
+    /* Nothing queued and nothing to wait for. */
+    logger.flush ();
+    /* Still nothing on disk: the failing directory was not created behind our
+     * back by a retry, and no stray fmu.log was left beside it. */
+    REQUIRE_FALSE (std::filesystem::exists (log_dir));
+    REQUIRE_FALSE (std::filesystem::exists (log_dir + "/fmu.log"));
+    /* Destruction here must not try to join a worker that was never started. */
+}
+
+/* The other way logging can fail to start: the directory is fine but the file
+ * in it will not open. Both are "logging could not be set up", so both take
+ * the same disposition --- skip, having warned once --- rather than one of
+ * them queueing lines for a worker whose writeLine() drops them on
+ * !file.is_open(). */
+TEST_CASE ("Logger skips logging when its file cannot be opened", "[logger]")
+{
+    TempLogDir dir;
+    /* Occupy fmu.log with a directory so the ofstream cannot open it, and
+     * occupy every rotation slot with a *non-empty* directory so the startup
+     * rotation cannot move any of them aside: renaming onto a non-empty
+     * directory fails with ENOTEMPTY, for root as much as anyone else, which
+     * keeps this deterministic without permission games. */
+    for (const auto *name : { "fmu.log", "fmu.log.1", "fmu.log.2", "fmu.log.3", "fmu.log.4", "fmu.log.5" })
+    {
+        std::string occupant = dir.str () + "/" + name;
+        REQUIRE (std::filesystem::create_directory (occupant));
+        std::ofstream filler (occupant + "/occupant");
+        REQUIRE (filler.is_open ());
+        filler << "x";
+    }
+
+    Logger logger (dir.str (), LogLevel::info, Logger::default_max_log_bytes, 4);
+    for (int i = 0; i < 100; i++)
+    {
+        logger.log ("line " + std::to_string (i));
+    }
+
+    /* As above: returning at all proves the queue is empty, and it can only be
+     * empty because log() declined to fill it. */
+    logger.flush ();
+    /* The occupying directory is untouched --- fmu.log was never opened, and
+     * rotation never got to shift it. */
+    REQUIRE (std::filesystem::is_directory (dir.logFile ()));
+}
+
 /* log() pops before it pushes, so a bound of zero would pop an empty deque.
  * The constructor floors it at 1 rather than leaving that to the caller. */
 TEST_CASE ("Logger tolerates a zero queue bound", "[logger]")
