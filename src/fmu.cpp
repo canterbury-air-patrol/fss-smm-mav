@@ -207,8 +207,11 @@ FMUStateMachine::actionState (FMUState state) -> bool
              * failsafe fired precisely because telemetry was lost), the send is
              * skipped (sendMavLinkMsg short-circuits with the link down), so the
              * RTL does not reach the autopilot now. ArduPilot's own comms/GCS
-             * failsafe is the immediate backstop; in addition, a failed send here
-             * is recorded below and replayed once the MAV link recovers.
+             * failsafe is the immediate backstop; in addition, setMavCommsFailure
+             * re-commands whatever state is current on the link's down->up edge,
+             * so the autopilot is re-driven when the link returns --
+             * unconditionally, and without anything here having to record that
+             * this send failed.
              * waiting_for_tasking commands the identical RTL flight mode as a real
              * RTL -- only the cancelSearch() exemption above and the FMUState
              * label itself differ. */
@@ -220,13 +223,22 @@ FMUStateMachine::actionState (FMUState state) -> bool
              * target (it transmits nothing), so the goto's transmission result is
              * entirely the following setMode(); that is what `sent` tracks.
              * IMPORTANT: `sent` here only reflects the opening MISSION_COUNT
-             * packet, not the whole (request-driven) mission upload — unlike
-             * RTL/failsafe/low-battery/terminate, goto is deliberately absent
-             * from requires_replay_on_failure() below, so a link drop after this
-             * returns true but before the upload's MISSION_ACK is NOT replayed on
-             * MAV recovery. mav_connection surfaces that case as a logged warning
-             * instead (see goto_ack_pending in mavlink.cpp), since there is no
-             * cheap way to re-drive a mid-upload handshake from here. */
+             * packet, not the whole (request-driven) mission upload, so a true
+             * return is not evidence the goto took effect — unlike
+             * RTL/failsafe/low-battery/terminate, where the single packet IS the
+             * whole command. What that costs is narrower than it once was: a link
+             * drop mid-upload IS re-driven, because the down edge takes the FMU
+             * to failsafe and the up edge re-enters fmu_state_goto, arriving back
+             * here to re-send commandGoto()'s MISSION_COUNT from the start (as
+             * does reassertState() after a detected autopilot restart). What
+             * nothing re-drives is an upload that dies with the link still up —
+             * a MISSION_ACK that is rejected, or that never arrives — because the
+             * re-apply is keyed on a comms edge or a restart, not on upload
+             * completion, and there is no cheap way to re-drive a mid-upload
+             * handshake from here. Nor are the two equally visible:
+             * mav_connection warns about the link-drop case as it happens
+             * (goto_ack_pending, mavlink.cpp), while a goto killed by a rejected
+             * or never-delivered MISSION_ACK on a live link goes unlogged. */
             this->mav.gotoPosition (this->fss_command_target.position);
             sent = this->mav.setMode (flight_mode_goto);
             break;

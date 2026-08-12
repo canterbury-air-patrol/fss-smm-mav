@@ -34,10 +34,14 @@ class IMAV
 
     /* The action methods that transmit a command to the autopilot return whether
      * it was actually sent (false when the MAV link is down, or for a mode
-     * command, when it was deferred until the autopilot type is known). The state
-     * machine uses this to replay a safety-critical action once the link recovers.
-     * gotoPosition only stashes the target — the goto is transmitted by the
-     * following setMode(flight_mode_goto) — so it has nothing to report. */
+     * command, when it was deferred until the autopilot type is known). No caller
+     * acts on that result any more — FMUStateMachine::actionState() is the only
+     * one, and it discards what it collects, because every MAV-link recovery
+     * re-applies the current state whether or not the earlier send got through.
+     * The implementation side still reads its own copy of the same result:
+     * mav_connection::commandGoto() warns when the opening MISSION_COUNT never
+     * went out. gotoPosition only stashes the target — the goto is transmitted by
+     * the following setMode(flight_mode_goto) — so it has nothing to report. */
     virtual auto setMode (flight_mode fm) -> bool = 0;
     virtual auto disarm () -> bool = 0;
     virtual auto terminate () -> bool = 0;
