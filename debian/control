@@ -7,6 +7,12 @@ Maintainer: Scott Parlane <sjp@canterburyairpatrol.org>
 # with no test suite configured, which is exactly the case debian/rules now
 # passes --enable-tests to refuse. A .deb of flight software should not be
 # produced from a tree whose tests were never compiled, let alone run.
+#
+# Unversioned, and deliberately so: the suite builds against either Catch2
+# generation (see tests/catch2-compat.hpp), so this is satisfied by trixie's
+# 3.x and by bookworm's 2.13 alike. Requiring 3 would mean no bookworm package
+# could be built without bookworm-backports enabled and pinned -- and the
+# fallback that avoids that is the whole reason the compat header exists.
 Build-Depends: debhelper (>= 10), autotools-dev, pkg-config,
  libfss-client-ssl (>= 1.3.0),
  libsmm-asset-dev (>= 1.1.0), libjsoncpp-dev,

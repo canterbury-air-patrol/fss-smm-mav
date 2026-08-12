@@ -21,11 +21,13 @@ else
 # mistaken for a passing one.
 check-local:
 	@echo "make check: no tests were built, so nothing has been verified." >&2
-	@echo "            The Catch2 test framework (catch2-with-main.pc) was" >&2
-	@echo "            not found when configure ran." >&2
-	@echo "            Install Catch2 (Debian: catch2) and re-run configure," >&2
-	@echo "            or configure with --disable-tests to build without the" >&2
-	@echo "            test suite deliberately." >&2
+	@echo "            The Catch2 test framework was not found when" >&2
+	@echo "            configure ran: neither catch2-with-main.pc (Catch2 3)" >&2
+	@echo "            nor catch2.pc (Catch2 2.13 or newer)." >&2
+	@echo "            Install Catch2 (Debian: catch2 -- either generation" >&2
+	@echo "            builds the tests) and re-run configure, or configure" >&2
+	@echo "            with --disable-tests to build without the test suite" >&2
+	@echo "            deliberately." >&2
 	@exit 1
 endif
 endif

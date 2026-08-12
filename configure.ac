@@ -72,15 +72,45 @@ AS_HELP_STRING([--enable-tests],
         [require Catch2: fail configure if it is missing, rather than building without the tests])],
     [enable_tests=$enableval], [enable_tests=auto])
 
+# Either Catch2 generation will do, because the distributions this is built on
+# do not agree on one. Catch2 3 is preferred and is what the suite is written
+# against: it advertises catch2-with-main.pc and supplies its own main.
+# Catch2 2.x advertises catch2.pc alone and is header-only, so the main has to
+# be compiled in (tests/catch2-main.cpp) and the handful of spellings that
+# changed between the two are bridged in tests/catch2-compat.hpp.
+#
+# Supporting 2.x is not nostalgia: Debian bookworm has only 2.13 in main, and
+# bookworm is what the aircraft image is built from. The alternative was a
+# bookworm package built with no test suite compiled at all, which is precisely
+# what the rest of this block exists to prevent.
+#
+# Order matters. Catch2 3 also installs a catch2.pc (the library without the
+# main), so the 2.x probe is constrained to < 3 and only runs once
+# catch2-with-main.pc has been ruled out; otherwise a 3.x install with an
+# unusual split could be driven down the header-only path and fail to link.
 have_catch2=no
+catch2_v2=no
 AS_IF([test "x$enable_tests" != "xno"],
-    [PKG_CHECK_MODULES([CATCH2], [catch2-with-main],
-        [have_catch2=yes], [have_catch2=no])])
+    [PKG_CHECK_MODULES([CATCH2], [catch2-with-main >= 3],
+        [have_catch2=yes],
+        [PKG_CHECK_MODULES([CATCH2], [catch2 >= 2.13 catch2 < 3],
+            [have_catch2=yes
+             catch2_v2=yes],
+            [have_catch2=no])])])
 
 AS_IF([test "x$enable_tests" = "xyes" && test "x$have_catch2" = "xno"],
-    [AC_MSG_ERROR([--enable-tests was given, but the Catch2 test framework (catch2-with-main.pc) was not found. Install Catch2 (Debian: catch2), or configure with --disable-tests.])])
+    [AC_MSG_ERROR([--enable-tests was given, but the Catch2 test framework was not found.
+    Install Catch2 (Debian: catch2 -- 3.x from trixie onwards, 2.13 on
+    bookworm; either builds the tests), or configure with --disable-tests.])])
 
 AM_CONDITIONAL([HAVE_CATCH2], [test "x$have_catch2" = "xyes"])
+AM_CONDITIONAL([CATCH2_V2], [test "x$catch2_v2" = "xyes"])
+
+# Which generation was picked is worth stating: the fallback is a fallback, and
+# a tree quietly built against 2.x is a tree where a test using anything newer
+# will fail to compile for the next person rather than for whoever wrote it.
+AS_IF([test "x$catch2_v2" = "xyes"],
+    [AC_MSG_NOTICE([using Catch2 2.x (catch2.pc, header-only) -- Catch2 3 is preferred where the distribution has it.])])
 AM_CONDITIONAL([TESTS_DISABLED], [test "x$enable_tests" = "xno"])
 
 # Dependency headers found via pkg-config are third-party: we cannot fix the
@@ -141,13 +171,17 @@ AS_IF([test "x$have_catch2" = "xyes"], [],
   [AC_MSG_WARN([the unit tests are disabled (--disable-tests): make check will build and run no tests.])],
   [AC_MSG_WARN([
     ****************************************************************
-    The Catch2 test framework (catch2-with-main.pc) was not found.
+    The Catch2 test framework was not found: neither
+    catch2-with-main.pc (Catch2 3) nor catch2.pc (Catch2 2.13 or
+    newer) is visible to pkg-config.
 
     cap-fmu will build, but NO UNIT TESTS will be built or run. An
     empty make check exits 0, so nothing would otherwise tell you the
     suite never ran -- make check is therefore set up to FAIL in this
     configuration.
 
-    Install Catch2 (Debian: catch2) and re-run configure, or pass
-    --disable-tests to build without the test suite deliberately.
+    Install Catch2 (Debian: catch2 -- 3.x from trixie onwards, 2.13 on
+    bookworm; the suite builds against either) and re-run configure,
+    or pass --disable-tests to build without the test suite
+    deliberately.
     ****************************************************************])])
