@@ -1,5 +1,4 @@
-#include <catch2/catch_approx.hpp>
-#include <catch2/catch_test_macros.hpp>
+#include "catch2-compat.hpp"
 
 #include "aircraft.hpp"
 #include "altitude-cap.hpp"

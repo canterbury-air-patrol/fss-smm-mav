@@ -40,7 +40,7 @@ You will need to build these and install them somewhere they can be found with p
 | `fss-transport` | `>= 1.3.0` |
 | `smm-asset` | `>= 1.1.0` |
 | `jsoncpp` | any |
-| `catch2-with-main` | any (unit tests only) |
+| `catch2-with-main` (or `catch2`) | `>= 3.0`, or `catch2` `>= 2.13` (unit tests only) |
 
 The flight-safety-system floor is a **hard requirement, not a preference**, and
 `configure` fails below it. 1.3.0 is the release that gave each FSS server its
@@ -79,10 +79,18 @@ make install
 
 #### Tests
 `make check` builds and runs the Catch2 unit and integration suites in
-`tests/`. Catch2 (Debian: `catch2`) is the one dependency the FMU binary
-itself does not need, so a machine can be missing it and still build — but
-without it there is no suite to run, and an automake `make check` with no tests
-in it exits 0 in silence, which looks exactly like a run that passed. So:
+`tests/`. **Either Catch2 generation works**: 3.x (`catch2-with-main.pc`) is
+preferred and is what the suite is written against, and 2.13 or newer
+(`catch2.pc`, header-only) is supported as a fallback so that Debian bookworm
+— which has only 2.13 in main, and is what the aircraft image is built from —
+can still build and run the tests. `configure` picks whichever is installed,
+`tests/catch2-compat.hpp` bridges the differences, and Debian's `catch2`
+package is the right one on every suite.
+
+Catch2 is the one dependency the FMU binary itself does not need, so a machine
+can be missing it — or have only 2.x — and still build the binary. But then
+there is no suite to run, and an automake `make check` with no tests in it
+exits 0 in silence, which looks exactly like a run that passed. So:
 
 - `configure` warns loudly when Catch2 is missing, as the last thing it prints.
 - `make check` in that configuration **fails**, reporting that no tests were
