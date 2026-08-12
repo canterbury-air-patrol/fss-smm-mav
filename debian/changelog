@@ -1,3 +1,100 @@
+cap-fmu (1.3.0) unstable; urgency=medium
+
+  * Requires libfss-client-ssl and libfss-transport >= 1.3.0. This is a hard
+    requirement, not a preference, and configure fails below it: 1.3.0 gave
+    each FSS server its own outbound worker, so sendMsgAll() and
+    attemptReconnect() are non-blocking and connection status counts the
+    servers that have admitted this client rather than those it has merely
+    connected to. Building against 1.2.x reinstates a blocking fan-out and a
+    premature comms-okay that this release no longer expects.
+  * Arm the FSS comms-loss failsafe at startup instead of once FSS has been
+    reached and then lost. An FMU that has never reached a server is now
+    treated as one that has lost FSS and flies the failsafe RTL until a
+    server admits it. Previously a cold-started FMU behaved as though FSS
+    were healthy and could self-task into a search having been told to by
+    nobody. Booting with no reachable FSS server therefore commands RTL --
+    inert on the ground and disarmed, and the intended behaviour for an FMU
+    restarted in flight.
+  * Enforce the regulatory altitude cap continuously in the flight state
+    machine, not just when deriving a search altitude: a sustained breach
+    (altitude_breach_latch_count consecutive over-cap AGL readings) forces
+    RTL, and -- unlike the low-battery latch -- clears itself once the
+    aircraft has been back under the cap for the same number of readings.
+  * Sanity-check the autopilot's own AFS/GCS-failsafe configuration on the
+    first heartbeat and warn about anything that would stop the aircraft
+    returning home if the FMU stopped talking to it (SYSID_MYGCS,
+    FS_GCS_ENABL/FS_LONG_ACTN/FS_LONG_TIMEOUT and the Copter/Rover
+    equivalents), judging each parameter on its own value rather than merely
+    on being nonzero. tools/apconfig_check.py performs the same verification
+    on the ground, before flight, and now ships in the release tarball.
+  * Re-apply the commanded state after a detected autopilot restart. An
+    ArduPilot reboot is typically a ~3s heartbeat gap -- under the link
+    timeout, so it produced no comms edge and the autopilot came back with
+    no memory of its mode or its mission while the FMU still believed both
+    were set.
+  * Poll and deliver operator abandon-search / mission-complete commands
+    from SMM through the flight state machine, so they are arbitrated
+    against FSS commands and the safety latches like any other input.
+  * Stop retiring a healthy MAVLink link. A freshly connected socket that
+    had not yet produced its first heartbeat was flagged broken on the
+    heartbeat loop's first pass, and the flag was never cleared when
+    heartbeats began, so the reconnector tore down and re-dialled a working
+    connection -- losing any mission upload in flight and, if the redial
+    window caught a heartbeat check, commanding an RTL on a link that was
+    never broken.
+  * Key tracked aircraft on their reported ICAO address rather than their
+    callsign. A blank callsign is routine in an ADS-B feed, and every
+    blank-callsign contact previously collapsed into one entry sharing one
+    1s report debounce, so with N such aircraft in range roughly one report
+    per second survived for the whole group and the rest never reached the
+    autopilot's collision avoidance.
+  * Key the FSS command-dedup group on the originating server's address:port
+    rather than on the fss_server object's address. A learned server absent
+    for 60s is destroyed and reconstructed, and a recycled heap address
+    inherited the dead server's last command id -- which could re-actuate a
+    command nobody re-issued, or swallow a genuine operator retry.
+  * Bound the log write queue and drop the oldest lines at the bound,
+    recording the gap in the log itself; never rotate on a failed write,
+    which previously let a disk-full event shift the retained history along
+    and discard the oldest file while writing nothing in its place; and skip
+    logging entirely, cheaply, when the log directory cannot be created or
+    the file cannot be opened.
+  * Add a warning log level between error and info, so a degraded but
+    handled condition (a link drop, an ignored mission ack, a misconfigured
+    autopilot parameter) can be surfaced without running at info verbosity.
+    Every line now names its own level between the timestamp and the
+    message.
+  * Shut down promptly on SIGTERM. The two shutdown flags were published
+    outside the mutex their condition variables wait on, so a missed wakeup
+    could leave the FSS reconnector asleep for a full reconnect_interval_s
+    (up to an hour) before the process could exit -- sitting right on
+    Docker's 10s stop grace, past which a SIGKILL skips the log drain and
+    the FSS acknowledgement flush.
+  * Bound the ADS-B rebroadcast throttle map so it is sized by current
+    traffic rather than by every address seen during the flight.
+  * Fix a potential unbounded loop in the MAVLink send path if send() ever
+    returned 0, which would have spun holding the lock every other outbound
+    path waits on, and remove an unreachable null-dereference path in the
+    search-mode handling.
+  * make check no longer exits 0 having built and run nothing when Catch2 is
+    absent: configure warns loudly, make check fails, and --enable-tests
+    (used by CI, distcheck and the Debian build) makes Catch2 a hard
+    configure-time requirement. --disable-tests is the deliberate opt-out.
+  * The release tarball now carries LICENSE.md, the ground tools and the
+    static-analysis gate, so a build from a make dist artifact is not
+    missing the licence text or the documented pre-flight verification tool.
+  * Docker: expose the FMU safety tunables (altitude cap/floor, battery
+    thresholds, stream intervals, timeouts, log level) as environment
+    variables, so an aircraft is no longer stuck with the compiled-in
+    defaults; expose clock_offset_ms; and fix the RUN_IN_VALGRIND launch,
+    which aborted the entrypoint so cap-fmu never started.
+  * Remove 396 source comments citing internal todo/N documents that do not
+    ship with this source and could not be resolved by anyone reading it.
+    The rationale they carried is kept; only the unresolvable citation is
+    dropped.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Wed, 12 Aug 2026 14:26:14 +1200
+
 cap-fmu (1.2.0) unstable; urgency=medium
 
   * Route SMM-triggered RTL and load-search outcomes through the flight
