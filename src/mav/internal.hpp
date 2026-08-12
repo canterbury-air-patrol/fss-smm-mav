@@ -222,10 +222,12 @@ class mav_connection
     /* True from a successfully-sent goto MISSION_COUNT until its MISSION_ACK
      * is processed (or it is superseded by a new goto/search). setMode()'s
      * "sent" for a goto only reflects that opening packet — the rest of the
-     * upload is request-driven and the FMU has no replay-on- recovery
-     * guarantee for it (unlike RTL/failsafe/low-battery/terminate). This
-     * flag lets a link drop mid-upload be reported instead of silently
-     * treated as a successful goto. */
+     * upload is request-driven, so a goto can still come to nothing after a
+     * successful send, which no single-packet mode command can do. This flag
+     * lets a link drop mid-upload be reported instead of silently treated
+     * as a successful goto; the state machine re-drives the goto itself once
+     * the link is back, so what the flag buys is visibility of the gap, not
+     * the recovery. */
     bool goto_ack_pending{ false };
     /* The autopilot's own GPS health indicator (GPS_RAW_INT.fix_type), tracked
      * so a position report can carry whether its coordinates are backed by a
@@ -391,8 +393,11 @@ class mav_connection
     /* The command methods used by the state machine's action step return whether
      * the command was transmitted to the autopilot (false when the link is down,
      * or for a mode command, when it was deferred because the autopilot type is
-     * not yet known). The state machine uses this to replay a safety-critical
-     * action once the MAV link recovers. */
+     * not yet known). Nothing outside this class acts on that any more — the
+     * state machine collects the result and drops it, since every MAV-link
+     * recovery re-applies the current state whether or not the earlier send got
+     * through — but commandGoto() still keys its own "the goto never went out"
+     * warning off the equivalent result one level down. */
     auto commandRTL () -> bool;
     auto commandGoto (Point p) -> bool;
     auto commandHold () -> bool;

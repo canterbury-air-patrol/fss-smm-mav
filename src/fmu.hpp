@@ -20,11 +20,21 @@
  * state_change_cb) run on the ONE event-loop thread. All external inputs —
  * FSS/SMM/MAV callbacks — are funnelled through the App event queue and applied
  * here on that thread, which is what makes the priority arbitration and the
- * state fields safe to reason about without locking beyond the small guarded
- * region that publishes to worker threads (pending_replay_state). Calling any of
- * these methods from another thread (e.g. directly from a MAV/SMM/FSS callback
- * instead of enqueuing an event) would introduce a silent data race on the state
- * fields. assert_event_loop_thread() defends this in debug builds. */
+ * state fields safe to reason about without a lock held across the whole
+ * update. this->lock still guards those fields (docs/threading.md's "Data
+ * ownership and locks" table is the inventory), but nothing below publishes
+ * them to a worker thread, and nothing ever did: the replay bookkeeping this
+ * paragraph used to cite as the one such region was itself only ever touched
+ * from the event loop. Every acquisition of the lock is therefore made from
+ * that one thread, so what it buys is not exclusion against a concurrent
+ * reader but a scope short enough to close before actionState() runs — which
+ * is what keeps the MAV/SMM calls actionState() makes out of a critical
+ * section (docs/threading.md, "Lock acquisition order"). Its own unlocked
+ * reads of fss_command_target and state_change_cb rest on the same invariant:
+ * the thread that wrote them is the thread reading them. Calling any of these
+ * methods from another thread (e.g. directly from a MAV/SMM/FSS callback
+ * instead of enqueuing an event) would introduce a silent data race on the
+ * state fields. assert_event_loop_thread() defends this in debug builds. */
 class FMUStateMachine
 {
   private:
@@ -48,7 +58,13 @@ class FMUStateMachine
      * rule no longer depends on it — every MAV-link recovery re-applies the
      * current state whether or not the earlier send got through, generalising an
      * earlier, narrower replay-on-failure rule. Must be called WITHOUT this->lock
-     * held (it locks internally). */
+     * held — it no longer takes the lock itself (it did, to record the replay
+     * bookkeeping that has since gone), so the requirement is not deadlock
+     * avoidance: it is that the IMAV/ISMM calls below must not be made from
+     * inside a critical section (docs/threading.md, "Lock acquisition order"),
+     * and that the fields it reads unlocked (fss_command_target,
+     * state_change_cb) are only safe to read that way on the event-loop
+     * thread. */
     auto actionState (FMUState state) -> bool;
     /* Debug-only guard for the single-event-loop-thread invariant documented
      * above the class: assert this call runs on the event-loop thread that owns

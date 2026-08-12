@@ -73,11 +73,17 @@ EventDispatcher::dispatch (const event &e)
             [&] (MavCommsStatus status)
             {
                 logger.log (std::string ("COMMS mav ") + (status == MavCommsStatus::failure ? "failure" : "okay"));
-                /* A failed SMM-driven RTL (waiting_for_tasking) send is
-                 * replayed here too: it is now tracked in the state
-                 * machine's own pending_replay_state like every other
-                 * safety-critical state, so no separate handling is needed
-                 * in this handler. */
+                /* An SMM-driven RTL (waiting_for_tasking) needs no handling
+                 * of its own here, and no "did the earlier send fail?"
+                 * bookkeeping either: setMavCommsFailure() re-commands
+                 * current_state on every genuine down->up edge whatever that
+                 * state is -- waiting_for_tasking included, since
+                 * actionState() drives it through the same
+                 * setMode(flight_mode_rtl) as a real RTL -- and it does so
+                 * whether or not the send that first entered the state got
+                 * through. This handler used to keep its own replay flag for
+                 * exactly that case, which is why the absence is worth
+                 * stating. */
                 state_machine.setMavCommsFailure (status == MavCommsStatus::failure);
             },
             [&] (const MavAutopilotRestart &)

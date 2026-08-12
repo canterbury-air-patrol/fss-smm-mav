@@ -99,9 +99,12 @@ mav_connection::heartbeat_loop ()
                  * a half-open link is flagged. */
                 /* A goto's MISSION_COUNT can reach the autopilot with the rest
                  * of the upload (request-driven) never completing if the link
-                 * then drops. Unlike RTL/failsafe/low-battery/terminate this
-                 * is not replayed on recovery, so make the silent no-op
-                 * visible instead. */
+                 * then drops. The state machine does re-drive the goto once
+                 * the link is back — the up edge re-enters fmu_state_goto and
+                 * commandGoto() starts a fresh upload — but nothing between
+                 * here and there would report that the goto was doing nothing
+                 * in the meantime, so make that gap visible rather than
+                 * silent. */
                 bool goto_upload_lost;
                 {
                     std::lock_guard<std::mutex> state_lk{ this->state_lock };
@@ -242,8 +245,11 @@ mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loade
             this->logUploadInvalidated (mav_mode_command_name (command));
         }
         /* Deferred, not transmitted: replayPendingMode() re-sends it once the
-         * autopilot type is known. Report not-sent so a safety-critical caller
-         * also tracks it for replay on link recovery. */
+         * autopilot type is known, so the deferral recovers itself without
+         * the caller's help — which is just as well, since nothing upstream
+         * acts on the result any more. Still report not-sent: it is the truth
+         * about what reached the wire, and claiming a send that did not happen
+         * would mislead any future caller that starts reading it. */
         return false;
     }
     bool sent = this->setFlightMode (*fmode);
@@ -342,11 +348,12 @@ mav_connection::commandGoto (Point p) -> bool
                                              TARGET_COMP_ID, mission_count_for (0, MissionPlanMode::go_to),
                                              MAV_MISSION_TYPE_MISSION, 0);
         /* The goto is a mission upload: report whether its opening MISSION_COUNT
-         * reached the autopilot (the rest is request-driven). Unlike RTL/
-         * failsafe/low-battery/terminate, a goto is not replayed on link
-         * recovery if the upload never completes — so a send failure here is
-         * surfaced immediately rather than silently treated as a successful goto
-         * by the caller. */
+         * reached the autopilot (the rest is request-driven). A true return is
+         * weaker here than for the single-packet mode commands — it says the
+         * upload started, not that the goto took effect — and the state machine
+         * discards the result either way (FMUStateMachine::actionState()), so
+         * the warning logged below is the only place a failed goto becomes
+         * visible. */
         sent = this->sendMavLinkMsgLocked (&msg);
     }
     if (sent)

@@ -59,13 +59,18 @@ deliberately *not* listed, so their absence is not read as drift:
   `mav_connection::gps_fix_type` and `mav_connection::last_time_boot_ms`
   (both recv thread only).
 
-One genuine asymmetry is worth naming rather than hiding:
-`FMUStateMachine::state_change_cb` is *written* under `FMUStateMachine::lock`
-(`setStateChangeCB`) but *read* without it (`actionState`). That is safe only
-because `EventDispatcher`'s constructor installs it on the event-loop thread
-before any other thread can reach the state machine — it is a set-once field,
-not a genuinely concurrent one. If it ever becomes settable at runtime, the
-read side needs the lock too.
+Two genuine asymmetries are worth naming rather than hiding, both of them in
+`FMUStateMachine::actionState()`, which by design runs with
+`FMUStateMachine::lock` released. `FMUStateMachine::state_change_cb` is
+*written* under the lock (`setStateChangeCB`) but *read* without it. That is
+safe only because `EventDispatcher`'s constructor installs it on the event-loop
+thread before any other thread can reach the state machine — it is a set-once
+field, not a genuinely concurrent one. If it ever becomes settable at runtime,
+the read side needs the lock too. `fss_command_target` is the second: written
+under the lock (`FSSNewCommand`) and read back without it whenever the
+goto/altitude state is entered. Unlike the callback it is *not* set-once —
+every FSS command rewrites it — so nothing but the single-event-loop-thread
+invariant below makes that read safe.
 
 `Logger` has its own internal mutex (`queue_lock`, with `queue_cv` and
 `idle_cv`, guarding the message queue between every producer thread and the log
