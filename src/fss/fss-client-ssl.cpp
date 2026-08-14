@@ -28,8 +28,12 @@ fss_client_ssl::sendCommandAck (const std::shared_ptr<flight_safety_system::tran
          * legacy behaviour. */
         return;
     }
+    /* Stamped from this client's own idea of wall-clock time (the clock the RTT
+     * response reports), not the raw system clock, so the ack time the server
+     * records and shows an operator agrees with the clock it believes we keep.
+     * Identical to fss_current_timestamp() unless clock_offset_ms is set. */
     auto ack = std::make_shared<flight_safety_system::transport::fss_message_command_ack> (
-        acked_id, raw_command, outcome, reason, flight_safety_system::fss_current_timestamp ());
+        acked_id, raw_command, outcome, reason, this->getSkewedTimestamp ());
     conn->sendMsg (ack);
 }
 
@@ -307,12 +311,17 @@ fss_client_ssl::sendPosition (double lat, double lng, int16_t alt, uint16_t head
 
     /* steady_clock is used only for local rate limiting (it is monotonic and
      * immune to wall-clock jumps). The on-the-wire timestamp below deliberately
-     * uses fss_current_timestamp() (wall clock) so it is comparable across
-     * hosts; do not collapse these two into a single clock. */
+     * uses getSkewedTimestamp() (wall clock) so it is comparable across hosts;
+     * do not collapse these two into a single clock. That accessor, rather than
+     * fss_current_timestamp(), is what this client thinks the time is: it is
+     * the clock the RTT response reports, and the server's staleness gate
+     * measures this timestamp against the offset it learned from that report,
+     * so the two have to come from the same clock. Identical to
+     * fss_current_timestamp() unless clock_offset_ms is set. */
     auto now = std::chrono::steady_clock::now ();
     if ((now - this->position_last_sent) >= ts_1sec_interval)
     {
-        uint64_t curr_ts = flight_safety_system::fss_current_timestamp ();
+        uint64_t curr_ts = this->getSkewedTimestamp ();
         auto msg_pos = std::make_shared<flight_safety_system::transport::fss_message_position_report> (
             lat, lng, alt, heading, hor_vel, ver_vel,
             /* No ICAO Code assigned */

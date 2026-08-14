@@ -140,14 +140,21 @@ a dead-peer send sooner.
 
 `clock_offset_ms` is likewise optional and top-level, also read directly by
 the FSS client library: a signed millisecond offset applied to every
-wall-clock-stamped outbound FSS message (RTT response, position report).
-Defaults to 0 (no skew) if omitted. Intended for testing an FMU against a
+wall-clock-stamped outbound FSS message (RTT response, position report,
+command acknowledgement). Defaults to 0 (no skew) if omitted. The three are
+stamped from one clock deliberately — the server learns this aircraft's
+clock from the RTT response and measures the position report's timestamp
+against what it learned, so an offset applied to only some of them would
+describe an aircraft whose own messages disagree, which is neither a healthy
+clock nor an honestly skewed one. Intended for testing an FMU against a
 deliberately skewed idea of wall-clock time without touching the host's real
 `CLOCK_REALTIME`, which is a single non-namespaced kernel-global value that
 `--cap-add=SYS_TIME` + `date -s` inside a container would skew for every
 other container sharing that kernel. Set via the Docker image's
-`CLOCK_OFFSET_MS` environment variable (see `docker/generate-config.sh`); the
-FMU's own code never touches this key, the FSS client library parses it.
+`CLOCK_OFFSET_MS` environment variable (see `docker/generate-config.sh`). The
+FMU's own code never reads this key: the client library parses it and owns
+the resulting skewed clock, and the FMU asks the library what time it is when
+stamping a message rather than reading the system clock itself.
 
 `learned_server_expiry_ms` (default 60000) and `max_learned_servers` (default
 16) are two more optional top-level keys the FSS client library parses itself,

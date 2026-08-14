@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -385,4 +386,76 @@ TEST_CASE ("registering a comms status callback reports the initial FSS comms fa
      * even started, so the FMU can never observe an unreported cold start. */
     REQUIRE (reported.size () == 1);
     REQUIRE (reported.at (0) == fss_comms_failure);
+}
+
+namespace
+{
+/* Captures the fanned-out message rather than sending it: sendMsgAll is virtual
+ * on the client library's fss_client, so this needs no peer, no socket and no
+ * TLS -- the same nonexistent config as every other case here. The offset is
+ * set through the same setter the config file's clock_offset_ms drives. */
+class SkewedClient : public fss_client_ssl
+{
+  public:
+    SkewedClient (const char *t_config_file, int64_t t_offset_ms) : fss_client_ssl (t_config_file)
+    {
+        this->setClockOffsetMs (t_offset_ms);
+    }
+    void
+    sendMsgAll (const std::shared_ptr<flight_safety_system::transport::fss_message> &msg) override
+    {
+        this->last_sent = msg;
+    }
+    std::shared_ptr<flight_safety_system::transport::fss_message> last_sent{};
+};
+
+/* The timestamp on the single position report `client` sends. sendPosition()
+ * rate-limits to 1 Hz from a default-constructed steady_clock time point, so
+ * the first call on a fresh client always sends. */
+auto
+stampedPositionTimestamp (SkewedClient &client) -> uint64_t
+{
+    client.sendPosition (-43.5, 172.6, 100, 0, 0, 0, true);
+    auto report
+        = std::dynamic_pointer_cast<flight_safety_system::transport::fss_message_position_report> (client.last_sent);
+    REQUIRE (report != nullptr);
+    return report->getTimeStamp ();
+}
+} // namespace
+
+/* clock_offset_ms is this client's whole idea of what time it is, not a knob on
+ * one message type. The server learns that clock from the RTT response the
+ * library stamps, then measures the timestamp on every position report against
+ * what it learned -- so a report stamped from the raw system clock while the
+ * RTT response is skewed describes an aircraft whose own messages disagree, and
+ * the server (working exactly as designed) reads every one of those reports as
+ * stale by exactly the configured offset and discards it. Stamping from the
+ * accessor the library reports over RTT is what keeps the two consistent. */
+TEST_CASE ("a configured clock offset skews the position report the FMU stamps", "[fss][TC-MAV-017]")
+{
+    constexpr int64_t offset_ms = 300000;
+    SkewedClient client{ no_config, offset_ms };
+
+    uint64_t before = flight_safety_system::fss_current_timestamp ();
+    uint64_t stamped = stampedPositionTimestamp (client);
+    uint64_t after = flight_safety_system::fss_current_timestamp ();
+
+    REQUIRE (stamped >= before + static_cast<uint64_t> (offset_ms));
+    REQUIRE (stamped <= after + static_cast<uint64_t> (offset_ms));
+}
+
+/* The half that guards the flight path. No deployed aircraft configures an
+ * offset, so on every real FMU getSkewedTimestamp() must be indistinguishable
+ * from the wall clock it replaced -- this is not a test hook wired into a
+ * safety path, it is the same stamp unless someone deliberately skews it. */
+TEST_CASE ("with no clock offset configured the position report carries the real wall clock", "[fss][TC-MAV-017]")
+{
+    SkewedClient client{ no_config, 0 };
+
+    uint64_t before = flight_safety_system::fss_current_timestamp ();
+    uint64_t stamped = stampedPositionTimestamp (client);
+    uint64_t after = flight_safety_system::fss_current_timestamp ();
+
+    REQUIRE (stamped >= before);
+    REQUIRE (stamped <= after);
 }
