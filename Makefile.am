@@ -47,3 +47,14 @@ endif
 #   be reproduced from a tarball rather than only from a clone.
 EXTRA_DIST = mavlink debian docs tools LICENSE.md \
 	check-code.sh .clang-format .clang-tidy
+
+# tools/ is named above as a directory so a tool added there reaches the tarball
+# without a Makefile.am change. automake copies such a directory wholesale,
+# though, and does not consult .gitignore -- so running the tools' unit tests
+# before rolling a release left __pycache__/ in the working tree and it rode
+# along into the artifact, shipping stale bytecode built for whatever Python
+# happened to be installed on the release machine. 1.3.0 went out with three
+# such .pyc files in it. Prune them from the distdir instead of enumerating
+# tools/ file by file, which would lose the property the comment above wants.
+dist-hook:
+	find "$(distdir)" -name __pycache__ -type d -prune -exec rm -rf {} +
