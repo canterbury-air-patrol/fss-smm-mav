@@ -1427,6 +1427,52 @@ TEST_CASE ("a newer RTL invalidates an in-flight search upload; its late ACCEPTE
                                          io_timeout));
 }
 
+/* Re-driving fmu_state_searching before the first search upload's MISSION_ACK
+ * arrives used to segfault the process in flight. loadSearch()'s preamble RTL
+ * invalidates whatever upload is still open, which drops a loading search's
+ * `search` reference with it — and the count was then computed from that
+ * now-null pointer. search_loaded stays false for the whole upload, so the
+ * public overload re-enters on exactly this state and no timing window is
+ * needed to reproduce it.
+ *
+ * The second load must supersede the first and complete, and must say so as a
+ * supersede: the RTL here is the upload's own scaffolding, not an operator or
+ * failsafe taking control. */
+TEST_CASE ("a second search load while the first upload is unacked supersedes it", "[mav_io]")
+{
+    reset_mav_parser ();
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    mav_connection conn ("127.0.0.1", server.port (), test_mav_params, capture);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    auto search = std::make_shared<SMMSearch> ();
+    conn.loadSearch (search);
+
+    /* Take the opening MISSION_COUNT but withhold the MISSION_ACK: the first
+     * upload is still open when the second load begins. */
+    mavlink_message_t msg;
+    REQUIRE (server.recvMessage (MAVLINK_MSG_ID_MISSION_COUNT, msg, io_timeout));
+
+    conn.loadSearch (search);
+
+    /* The superseding upload runs to completion, resuming at the same mission
+     * sequence a first-time load would. */
+    const MissionUploadResult result = run_mission_upload (server, 3);
+    REQUIRE (result.item_seqs == std::vector<uint16_t>{ 0, 1, 2 });
+    REQUIRE (result.set_current == search_point_mission_seq (0));
+    expect_auto_mode (server);
+
+    REQUIRE (MavLoopbackServer::waitFor ([&] () { return capture.containsSubstring ("superseded an in-flight"); },
+                                         io_timeout));
+    REQUIRE_FALSE (capture.containsSubstring ("invalidated an in-flight"));
+}
+
 /* A duplicate/retransmitted accepted MISSION_ACK arriving after a goto
  * upload already completed must not repeat the MISSION_SET_CURRENT/AUTO
  * transition. goto_active alone used to be a long-lived signal — it never

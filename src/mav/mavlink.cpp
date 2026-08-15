@@ -207,6 +207,24 @@ mav_connection::logUploadInvalidated (const std::string &action_name)
                                                "MISSION_ACK, if it arrives, will be ignored");
 }
 
+void
+mav_connection::logUploadSuperseded ()
+{
+    this->logger.log (LogLevel::info, "a replacement mission upload superseded an in-flight goto/search mission "
+                                      "upload; its MISSION_ACK, if it arrives, will be ignored");
+}
+
+void
+mav_connection::logUploadDropped (MavModeCommand command, UploadDropCause cause)
+{
+    if (cause == UploadDropCause::supersede)
+    {
+        this->logUploadSuperseded ();
+        return;
+    }
+    this->logUploadInvalidated (mav_mode_command_name (command));
+}
+
 auto
 mav_connection::setFlightMode (uint8_t fmode) -> bool
 {
@@ -221,7 +239,7 @@ mav_connection::setFlightMode (uint8_t fmode) -> bool
 }
 
 auto
-mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loaded) -> bool
+mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loaded, UploadDropCause cause) -> bool
 {
     auto sys = this->systems.findExistingSystem (TARGET_SYS_ID);
     std::optional<uint8_t> fmode = resolve_mav_mode (sys != nullptr ? sys->getAutoPilotType () : 0, command);
@@ -242,7 +260,7 @@ mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loade
         warnUnresolvedMode (command);
         if (upload_invalidated)
         {
-            this->logUploadInvalidated (mav_mode_command_name (command));
+            this->logUploadDropped (command, cause);
         }
         /* Deferred, not transmitted: replayPendingMode() re-sends it once the
          * autopilot type is known, so the deferral recovers itself without
@@ -264,7 +282,7 @@ mav_connection::setResolvedMode (MavModeCommand command, bool clear_search_loade
     }
     if (upload_invalidated)
     {
-        this->logUploadInvalidated (mav_mode_command_name (command));
+        this->logUploadDropped (command, cause);
     }
     return sent;
 }
@@ -307,6 +325,12 @@ mav_connection::commandRTL () -> bool
 }
 
 auto
+mav_connection::commandRTLForUpload () -> bool
+{
+    return this->setResolvedMode (MavModeCommand::rtl, true, UploadDropCause::supersede);
+}
+
+auto
 mav_connection::commandDisARM () -> bool
 {
     mavlink_message_t msg;
@@ -334,7 +358,7 @@ mav_connection::commandGoto (Point p) -> bool
 {
     mavlink_message_t msg;
     // RTL the aircraft so we can load a mission
-    this->commandRTL ();
+    this->commandRTLForUpload ();
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->goto_position = p;
@@ -657,10 +681,10 @@ mav_connection::mission_ack (bool accepted)
 }
 
 auto
-mav_connection::loadSearch () -> bool
+mav_connection::uploadSearch (const std::shared_ptr<SMMSearch> &t_search) -> bool
 {
     /* Enter RTL while loading the search */
-    this->commandRTL ();
+    this->commandRTLForUpload ();
     /* Load the existing search into the FC, and jump to the current target point */
     /* Tell the FC how many items there are: 2 setup slots, the N search points,
      * and one RTL terminator (mission_count_for). The count must include the RTL
@@ -668,6 +692,7 @@ mav_connection::loadSearch () -> bool
      * item at the end. */
     mavlink_message_t msg;
     std::size_t count;
+    const std::size_t num_points = static_cast<std::size_t> (t_search->getPointsCount ());
     {
         std::lock_guard<std::mutex> lk{ this->state_lock };
         this->goto_active = false;
@@ -675,18 +700,29 @@ mav_connection::loadSearch () -> bool
          * to a link drop; nothing to warn about. */
         this->goto_ack_pending = false;
         this->search_loaded = false;
+        /* The RTL above displaced whatever upload was still open, and a search
+         * upload takes its `search` down with it — including, when this call
+         * is itself the second load of a search whose first upload is still
+         * unacked, the very one being uploaded here. Re-establish it from the
+         * caller's own reference rather than trusting the member to have
+         * survived: this upload is for t_search by definition, and
+         * send_waypoint() dereferences `search` unguarded for every item of a
+         * loading search, so search_loading must never be set while `search` is
+         * null. */
+        this->search = t_search;
         this->search_loading = true;
-        count = mission_count_for (this->search->getPoints ().size (), MissionPlanMode::search);
+        count = mission_count_for (num_points, MissionPlanMode::search);
         /* MISSION_COUNT is a 16-bit field. A real search has a handful of
          * waypoints so this never trips, but log if it ever does rather than
          * silently uploading a truncated mission with no idea why. */
         if (count > UINT16_MAX)
         {
-            this->logger.log (LogLevel::warning, "search has " + std::to_string (this->search->getPoints ().size ())
+            this->logger.log (LogLevel::warning, "search has " + std::to_string (num_points)
                                                      + " waypoints; mission count " + std::to_string (count)
                                                      + " exceeds the 16-bit MAVLink field and will be truncated");
         }
     }
+    bool sent;
     {
         std::lock_guard<std::mutex> lk (this->send_lock);
         mavlink_msg_mission_count_pack_chan (SYS_ID, COMP_ID, MAV_SEND_CHANNEL, &msg, MISSION_TARGET_SYS_ID,
@@ -694,8 +730,17 @@ mav_connection::loadSearch () -> bool
                                              0);
         /* Report whether the opening MISSION_COUNT reached the autopilot; the
          * remaining items are request-driven. */
-        return this->sendMavLinkMsgLocked (&msg);
+        sent = this->sendMavLinkMsgLocked (&msg);
     }
+    if (!sent)
+    {
+        /* Nothing upstream reads the result — the state machine re-drives a
+         * search once the link is back — so, as for the equivalent goto
+         * failure, this line is the only place the gap becomes visible. */
+        this->logger.log (LogLevel::warning,
+                          "search MISSION_COUNT failed to send (MAV link down); the search was not loaded");
+    }
+    return sent;
 }
 
 void
@@ -712,7 +757,7 @@ mav_connection::loadSearch (const std::shared_ptr<SMMSearch> &t_search)
     }
     if (need_reload)
     {
-        this->loadSearch ();
+        this->uploadSearch (t_search);
     }
 }
 

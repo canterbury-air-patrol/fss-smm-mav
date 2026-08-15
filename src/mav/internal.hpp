@@ -150,6 +150,20 @@ class mav_systems
     void resetAllSetup ();
 };
 
+/* Why an in-flight goto/search mission upload was dropped. A takeover is a
+ * newer safety-critical mode (RTL, hold, manual, disarm, force-disarm,
+ * terminate) or an autopilot restart seizing control mid-upload. A supersede is
+ * the RTL preamble a replacement mission upload issues as its own scaffolding,
+ * which displaces the open upload on its way to starting another. The state
+ * cleared is identical either way; only how it is reported differs, because the
+ * takeover wording in a flight log reads as an operator or failsafe action and
+ * a supersede is neither. */
+enum class UploadDropCause : uint8_t
+{
+    takeover,
+    supersede,
+};
+
 class mav_connection
 {
   private:
@@ -291,10 +305,14 @@ class mav_connection
      * warnUnresolvedMode) and do nothing rather than silently dropping the
      * command. The mode is carried as an optional, not a 0 sentinel, because 0
      * is itself a valid mode (e.g. COPTER_MODE_STABILIZE, ROVER_MODE_MANUAL).
-     * `command` names the command for the log. Returns whether the mode was
-     * actually transmitted now: false when it was deferred (autopilot type not
-     * yet known) or the link was down, true once the SET_MODE went out. */
-    auto setResolvedMode (MavModeCommand command, bool clear_search_loaded) -> bool;
+     * `command` names the command for the log. `cause` says how to report an
+     * upload this mode change drops; it only reaches the log, never the state
+     * clearing, and defaults to the takeover every caller but the mission-upload
+     * preamble is. Returns whether the mode was actually transmitted now: false
+     * when it was deferred (autopilot type not yet known) or the link was down,
+     * true once the SET_MODE went out. */
+    auto setResolvedMode (MavModeCommand command, bool clear_search_loaded,
+                          UploadDropCause cause = UploadDropCause::takeover) -> bool;
     void replayPendingMode (uint8_t autopilot_type);
     /* Log that `command` arrived before the autopilot type was known, so the
      * airframe-specific flight mode could not be resolved. Shared by every
@@ -303,18 +321,31 @@ class mav_connection
     /* Clear goto/search upload state so a MISSION_ACK for an upload that is
      * no longer allowed to complete — because a newer safety-critical mode
      * (RTL, hold, manual, disarm, force-disarm, terminate) just took control
-     * mid-upload — cannot select a mission item or command AUTO. Also drops
-     * a search that never reached search_loaded, so a lingering
-     * MISSION_REQUEST for the abandoned upload's sequence numbers cannot be
-     * served from it. Must be called with state_lock already held. Returns
-     * whether an upload was genuinely in flight (its ack still pending), so
-     * the caller can log it once state_lock is released. */
+     * mid-upload, or because a replacement upload is starting — cannot select
+     * a mission item or command AUTO. Also drops a search that never reached
+     * search_loaded, so a lingering MISSION_REQUEST for the abandoned upload's
+     * sequence numbers cannot be served from it. A caller that goes on to
+     * upload must therefore re-establish `search` itself before setting
+     * search_loading, or leave mission_request() dereferencing a null one.
+     * Must be called with state_lock already held. Returns whether an upload
+     * was genuinely in flight (its ack still pending), so the caller can log
+     * it once state_lock is released. */
     auto invalidateInFlightUploadLocked () -> bool;
-    /* Log that `action_name` invalidated an in-flight goto/search mission
-     * upload. Shared by every command that can take control mid-upload so
-     * the wording stays identical. Must be called without state_lock
-     * held. */
+    /* Log that `action_name` took control of the autopilot while a goto/search
+     * mission upload was still in flight, invalidating it. Shared by every
+     * command that can take control mid-upload so the wording stays identical.
+     * Must be called without state_lock held. */
     void logUploadInvalidated (const std::string &action_name);
+    /* The same event for a mission upload's own RTL preamble, which displaces
+     * whatever upload was open on its way to starting a replacement. Logged at
+     * info, and worded as the supersede it is: the takeover wording and its
+     * warning level describe an operator or failsafe action, which this is not.
+     * Same no-state_lock contract as logUploadInvalidated. */
+    void logUploadSuperseded ();
+    /* Pick between the two for a mode change that dropped an upload, so
+     * setResolvedMode's deferred and resolved branches make the same choice
+     * from the same input. Same no-state_lock contract. */
+    void logUploadDropped (MavModeCommand command, UploadDropCause cause);
     /* Whether `msg` originates from the configured autopilot system
      * (TARGET_SYS_ID). Flight-critical message handling — heartbeat,
      * position, GPS fix, battery, mission progress/requests/acks — must gate
@@ -365,16 +396,25 @@ class mav_connection
     void setCurrentWP (uint16_t seq);
     void sendHeartBeat ();
     void heartbeat_loop ();
-    /* Upload the currently-held `search` and report whether the opening
-     * MISSION_COUNT reached the autopilot. Private, and reachable only through
-     * the public loadSearch(shared_ptr) overload below, which is what
-     * establishes the precondition this relies on: `search` is non-null. It was
-     * public, with MAV::setMode(flight_mode_search) as its only outside caller,
-     * and that caller dereferenced a null `search` on any path that had not
-     * already acquired one. Nothing issued flight_mode_search --- a search is
-     * driven through ISMM::search(), not as a mode --- so the enum member went
-     * with it. */
-    auto loadSearch () -> bool;
+    /* Upload `t_search` and report whether the opening MISSION_COUNT reached
+     * the autopilot. Private, and reachable only through the public
+     * loadSearch(shared_ptr) overload below, which is what establishes the
+     * precondition this relies on: t_search is non-null. It was public, with
+     * MAV::setMode(flight_mode_search) as its only outside caller, and that
+     * caller dereferenced a null `search` on any path that had not already
+     * acquired one. Nothing issued flight_mode_search --- a search is driven
+     * through ISMM::search(), not as a mode --- so the enum member went with it.
+     *
+     * The search arrives as an argument rather than being read back out of
+     * `search`, which the RTL preamble below can null between the caller
+     * setting it and this reading it. That is not a precondition a caller can
+     * establish, since the invalidation happens inside this call. */
+    auto uploadSearch (const std::shared_ptr<SMMSearch> &t_search) -> bool;
+    /* The RTL a mission upload issues as its own preamble, to take the
+     * autopilot out of AUTO before its mission is replaced. Identical to
+     * commandRTL() on the wire; it differs only in reporting an upload it
+     * displaces as a supersede rather than a safety takeover. */
+    auto commandRTLForUpload () -> bool;
 
   public:
     mav_connection (std::string t_addr, uint16_t t_port, const MavParams &t_params, ILogger &t_logger,
