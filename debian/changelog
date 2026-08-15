@@ -1,3 +1,52 @@
+cap-fmu (1.3.1) unstable; urgency=high
+
+  * Fix a mid-flight SIGSEGV on the search-upload path. loadSearch() commanded
+    RTL as its own preamble and then dereferenced the search pointer that RTL
+    can have just cleared, so a second search load beginning before the first
+    one's MISSION_ACK arrived killed the FMU. After that crash nothing relayed
+    FSS commands to the autopilot at all -- an operator's subsequent commands
+    never arrived, leaving only the autopilot's own GCS failsafe as a backstop.
+    The upload now takes the search as an argument and re-establishes it inside
+    the same critical section that marks the upload in flight, superseding the
+    displaced upload rather than leaving the aircraft in RTL with no mission
+    loaded.
+  * Report a mission upload's own RTL preamble at info, as the supersede it
+    is, rather than as a warning about an invalidated in-flight upload. That
+    warning exists for genuine safety takeovers -- RTL/hold/manual from the
+    state machine, disarm, force-disarm, terminate, an autopilot restart --
+    which keep it and its wording unchanged, and upload scaffolding emitting
+    it read in a flight log as an operator or failsafe action. A failed
+    opening MISSION_COUNT is also logged now, where it was previously silent,
+    matching what the goto path has reported since it grew goto_ack_pending.
+  * Stamp the position report and the command acknowledgement from the FSS
+    client's skewed clock, so clock_offset_ms reaches every wall-clock-stamped
+    outbound message as README and docker/generate-config.sh both describe,
+    rather than the RTT response alone. A configured aircraft previously told
+    the server its clock was offset over RTT and then stamped its position
+    reports with the correct time, so the server's staleness gate -- which
+    applies the offset it learned from that RTT exchange, exactly as designed
+    -- discarded every report by precisely the configured offset. The offset
+    defaults to 0 and the skewed accessor is the system clock plus that
+    offset, so no deployed aircraft changes behaviour.
+  * Build the test suite against Catch2 2.13 as well as 3.x, so the Debian
+    bookworm package -- which is what the aircraft image is built from, and
+    which carries only 2.13 in main -- builds with its tests enabled instead
+    of failing in configure. Requiring Catch2 3 would have meant no bookworm
+    package without backports enabled and pinned, and building flight software
+    with the tests switched off is the worse trade. configure prefers
+    catch2-with-main (3.x), falls back to catch2 >= 2.13 and < 3, and says
+    which it picked; tests/catch2-compat.hpp is the suite's single Catch2
+    include and bridges the two generations; and debian/control returns to an
+    unversioned catch2 build-dependency, which both satisfy.
+  * Keep local Python bytecode out of the release tarball. EXTRA_DIST names
+    tools/ as a directory so a tool added there is distributed without a
+    Makefile.am change, but automake copies such a directory wholesale and
+    does not consult .gitignore, so running the tools' unit tests before
+    rolling a release put tools/__pycache__/ into the artifact. 1.3.0 shipped
+    three .pyc files that way.
+
+ -- Scott Parlane <sjp@canterburyairpatrol.org>  Sat, 15 Aug 2026 15:22:36 +1200
+
 cap-fmu (1.3.0) unstable; urgency=medium
 
   * Requires libfss-client-ssl and libfss-transport >= 1.3.0. This is a hard
