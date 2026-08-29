@@ -45,7 +45,12 @@ endif
 #   tests come along, since CI runs them from the same directory.
 # check-code.sh/.clang-format/.clang-tidy: the static-analysis gate, so it can
 #   be reproduced from a tarball rather than only from a clone.
-EXTRA_DIST = mavlink debian docs tools LICENSE.md \
+# docker: the Dockerfile and its scripts are what actually builds and launches
+#   cap-fmu on an aircraft, and the Dockerfile now carries the base image digest
+#   the image is pinned to -- configuration-management evidence, not a
+#   convenience. It was also the one thing check-code.sh reads that the tarball
+#   did not carry, so the line above was not true until this was added.
+EXTRA_DIST = mavlink debian docs tools docker LICENSE.md \
 	check-code.sh .clang-format .clang-tidy
 
 # tools/ is named above as a directory so a tool added there reaches the tarball

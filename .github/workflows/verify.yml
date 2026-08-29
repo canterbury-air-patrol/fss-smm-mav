@@ -10,13 +10,24 @@ name: Verify
 # ties a DockerHub push to a tested SHA rather than to timing luck. Keeping the
 # jobs here rather than duplicating them means the publish gate cannot quietly
 # drift into testing less than development does.
+#
+# Every job runs on the same digest-pinned base as docker/Dockerfile, and
+# tools/check-image-pins.sh fails the static gate if the two stop agreeing. Both
+# halves of that matter. The bases drifted once already --- the Dockerfile sat on
+# bookworm while these jobs ran trixie, so the gates were green for a toolchain
+# and library set the shipped binary had never been compiled with. And a
+# floating `debian:trixie' on both sides would still be two different images
+# whenever Debian pushed a point release between the CI run and the image build.
+# Bump the digest here and in docker/Dockerfile in one commit; that bump is how
+# base security updates arrive, since neither side runs `apt upgrade' any more.
 on:
   workflow_call:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: debian:trixie
+    # Pinned; see the note at the top of this file.
+    container: debian:trixie@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
 
     steps:
     - name: Install git
@@ -223,7 +234,8 @@ jobs:
 
   distcheck:
     runs-on: ubuntu-latest
-    container: debian:trixie
+    # Pinned; see the note at the top of this file.
+    container: debian:trixie@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
 
     steps:
     - name: Install git
@@ -277,11 +289,16 @@ jobs:
     # missing from EXTRA_DIST at one point: the licence (a GPLv2 compliance
     # problem), and tools/apconfig_check.py, which README documents as the way
     # to verify the autopilot configuration every failsafe latch depends on.
+    # docker/Dockerfile carries the base image digest the aircraft image is
+    # pinned to, and tools/check-image-pins.sh is what keeps that digest and
+    # these jobs' `container:' in step --- a tarball without them cannot
+    # reproduce the image or the check that guards it.
     - name: Release tarball carries the licence and the ground tools
       run: |
         make dist
         tarball=$(ls -1 cap-fmu-*.tar.gz | head -1)
-        for want in LICENSE.md tools/apconfig_check.py check-code.sh; do
+        for want in LICENSE.md tools/apconfig_check.py check-code.sh \
+                    docker/Dockerfile tools/check-image-pins.sh; do
           if ! tar tzf "${tarball}" | grep -qx "cap-fmu-[^/]*/${want}"; then
             echo "::error::${want} is missing from ${tarball} (check EXTRA_DIST)"
             exit 1
@@ -290,7 +307,8 @@ jobs:
 
   sanitizers:
     runs-on: ubuntu-latest
-    container: debian:trixie
+    # Pinned; see the note at the top of this file.
+    container: debian:trixie@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
 
     strategy:
       fail-fast: false
@@ -348,7 +366,8 @@ jobs:
 
   static-analysis:
     runs-on: ubuntu-latest
-    container: debian:trixie
+    # Pinned; see the note at the top of this file.
+    container: debian:trixie@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
 
     steps:
     - name: Install git

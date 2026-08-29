@@ -39,6 +39,15 @@ PKG_INSTALLDIR
 # sendMsgAll()/attemptReconnect() call site before moving the floor over it,
 # since those are the semantics that changed last time.
 # Keep README's build requirements in step with these bounds.
+#
+# These lines are also the *only* copy of the bounds: docker/dep-constraints.sh
+# parses them and hands the result to `apt-get satisfy' in the image build, so a
+# window added here is enforced when the aircraft image installs the library,
+# not merely when this source is compiled against it. Before that, apt took
+# whatever the rolling repository had and configure checked a floor the install
+# had already sailed past. Changing the shape of these calls (not the versions
+# -- the shape) means checking that script still parses them; it fails the build
+# loudly rather than silently constraining nothing.
 PKG_CHECK_MODULES([FSS_CLIENT_SSL], [fss-client-ssl >= 1.3.0])
 PKG_CHECK_MODULES([FSS_TRANSPORT], [fss-transport >= 1.3.0])
 PKG_CHECK_MODULES([SMM_ASSET], [smm-asset >= 1.1.0])
