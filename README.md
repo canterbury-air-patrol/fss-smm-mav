@@ -209,9 +209,9 @@ absent entirely):
 
 | Key | Default | Description |
 |---|---|---|
-| `mav_address` | `127.0.0.1` | Host/IP of the MAVLink autopilot endpoint the FMU connects to (e.g. a mavproxy/SITL TCP endpoint). Unlike the other keys (which warn and fall back to their default), a present-but-invalid value here is **fatal**: an empty/whitespace-only or non-string `mav_address` aborts startup, since silently using the default could connect to the wrong autopilot. Omit the key to use the default. |
+| `mav_address` | `127.0.0.1` | Host/IP of the MAVLink autopilot endpoint the FMU connects to (e.g. a mavproxy/SITL TCP endpoint). A host name that resolves to several addresses (both IPv4 and IPv6 are accepted) is dialled address by address until one connects, so a stale or unroutable record ahead of a working one is not a permanent failure; each attempt is bounded by `mav_connect_timeout_s`. Unlike the other keys (which warn and fall back to their default), a present-but-invalid value here is **fatal**: an empty/whitespace-only or non-string `mav_address` aborts startup, since silently using the default could connect to the wrong autopilot. Omit the key to use the default. |
 | `mav_port` | `5760` | TCP port of the MAVLink autopilot endpoint. Range 1–65535; a present-but-invalid value is **fatal** (see `mav_address`). |
-| `mav_connect_timeout_s` | `5` | Upper bound (seconds) on a MAV TCP connect attempt. A black-holed or unreachable autopilot endpoint cannot stall startup or a reconnect attempt beyond this. Range 1–30. |
+| `mav_connect_timeout_s` | `5` | Upper bound (seconds) on **each** MAV TCP connect attempt. A black-holed or unreachable autopilot endpoint cannot stall startup or a reconnect attempt beyond this. Where `mav_address` resolves to several addresses they are tried in turn, each with this bound of its own rather than sharing one — otherwise a working-but-slow endpoint would be abandoned sooner the more addresses the name happens to answer with. The reconnect interval bounds the total. Range 1–30. |
 | `mav_send_timeout_s` | `2` | Upper bound (seconds) on a blocking MAV send (`SO_SNDTIMEO` and, where available, `TCP_USER_TIMEOUT`). A peer that stops reading, or a network path that silently disappears, cannot pin a sender — including the event-loop thread issuing a safety command — beyond this. Kept tighter than `mav_connect_timeout_s`: unlike a slow connect, a blocked send runs on/behind the live event loop and directly extends comms-failure detection latency. Range 1–10. |
 | `altitude_cap_m` | `122` | Regulatory ceiling for the derived search altitude, in metres AGL. |
 | `altitude_cap_ft` | – | The same ceiling expressed in feet; converted to metres internally. If both `_m` and `_ft` are given, `_ft` wins. |
@@ -247,7 +247,9 @@ cap-fmu --terminate-action=<action> client.json
 ```
 
 The MAVLink endpoint is taken from the `mav_address` / `mav_port` keys in the
-`fmu` block above (defaulting to `127.0.0.1` / `5760`).
+`fmu` block above (defaulting to `127.0.0.1` / `5760`). If `mav_address` is a
+name with more than one address, each is tried in turn until one connects, and
+an address that fails while others remain is logged by name.
 
 `--terminate-action` is required. There is no default — the correct action is airframe-dependent and must be chosen explicitly:
 
