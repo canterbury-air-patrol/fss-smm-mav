@@ -647,6 +647,15 @@ class CapturingLogger : public ILogger
         return std::any_of (this->messages.begin (), this->messages.end (),
                             [&] (const std::string &m) { return m.find (needle) != std::string::npos; });
     }
+    /* Counting, not just presence: a test that asserts a *second* attempt did or
+     * did not happen cannot distinguish the two from containsSubstring alone. */
+    auto
+    countSubstring (const std::string &needle) -> long
+    {
+        const std::lock_guard<std::mutex> lk (this->mtx);
+        return std::count_if (this->messages.begin (), this->messages.end (),
+                              [&] (const std::string &m) { return m.find (needle) != std::string::npos; });
+    }
 
   private:
     std::mutex mtx{};
@@ -894,6 +903,40 @@ TEST_CASE ("start() does not block beyond the configured connect deadline agains
      * (multi-second-to-minutes) OS-level connect timeout. */
     REQUIRE (elapsed < std::chrono::seconds (2));
     REQUIRE (capture.containsSubstring ("timed out"));
+}
+
+TEST_CASE ("the reconnector's immediate first pass does not redial a just-failed start()", "[mav_io]")
+{
+    reset_mav_parser ();
+    BlackholeListener blackhole;
+    CapturingLogger capture;
+
+    /* Short enough that a failed dial costs far less than the backoff's first
+     * step (1s), so "start() plus an immediate reconnector pass" is unambiguously
+     * inside that step. */
+    MavParams short_connect_params = test_mav_params;
+    short_connect_params.mav_connect_timeout_ms = 150;
+
+    mav_connection conn ("127.0.0.1", blackhole.port (), short_connect_params, capture);
+
+    /* A start() that fails leaves fd == -1 — the one state in which
+     * attemptReconnect() dials. */
+    conn.start ();
+    REQUIRE (capture.countSubstring ("timed out") == 1);
+
+    /* App::fss_reconnector() works before it waits, so its first pass lands
+     * microseconds after start()'s dial rather than a reconnect_interval_s
+     * later. connect_to_mav()'s last_tried stamp is what makes that pass a
+     * no-op; without it last_tried == 0 makes the backoff comparison trivially
+     * true and this immediately spends a second connect timeout. */
+    conn.attemptReconnect ();
+    REQUIRE (capture.countSubstring ("timed out") == 1);
+
+    /* And the backoff is only holding it off, not wedged: once the first step
+     * expires the redial goes ahead. */
+    std::this_thread::sleep_for (std::chrono::milliseconds (1100));
+    conn.attemptReconnect ();
+    REQUIRE (capture.countSubstring ("timed out") == 2);
 }
 
 TEST_CASE ("a send to a peer that stops reading is bounded by the configured send timeout", "[mav_io]")

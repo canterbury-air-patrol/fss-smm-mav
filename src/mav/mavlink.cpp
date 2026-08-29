@@ -1301,6 +1301,18 @@ mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, soc
 void
 mav_connection::connect_to_mav ()
 {
+    /* Stamp the attempt here, in the dial itself, rather than in
+     * attemptReconnect()'s backoff arithmetic: start() dials too, and it is the
+     * only dial that can leave fd == -1 with an unstamped last_tried. The
+     * reconnector's first pass runs immediately after start() (see
+     * App::fss_reconnector), so without this a failed start() would be redialled
+     * microseconds later — last_tried == 0 makes every elapsed_time comparison
+     * true — burning a second connect timeout before the loop ever slept. */
+    {
+        std::lock_guard<std::mutex> lk{ this->state_lock };
+        this->last_tried = current_timestamp_ms ();
+    }
+
     struct sockaddr_storage remote = {};
     if (!convert_str_to_sa (this->addr, this->port, &remote))
     {
@@ -1561,11 +1573,12 @@ mav_connection::attemptReconnect ()
             if (try_now)
             {
                 this->retry_count++;
-                this->last_tried = ts;
             }
         }
         if (try_now)
         {
+            /* connect_to_mav() stamps last_tried itself, so the backoff advances
+             * whether the dial came from here or from start(). */
             this->connect_to_mav ();
         }
     }
