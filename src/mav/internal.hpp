@@ -174,6 +174,10 @@ class mav_connection
      * retire (disconnect_from_mav) against in-flight sends, so the descriptor's
      * lifetime — not just its value — is safe across threads. */
     std::atomic<int> fd{ -1 };
+    /* When the last dial was *attempted* (0 = never), stamped by connect_to_mav()
+     * on whichever thread dials, so start()'s dial counts towards the backoff
+     * exactly as the reconnector's do. attemptReconnect() reads it to decide
+     * whether the retry_count'th backoff step has expired. */
     uint64_t last_tried{ 0 };
     uint16_t retry_count{ 0 };
     /* Guards both the socket write and MAVLink's per-channel transmit state.

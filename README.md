@@ -17,7 +17,10 @@ consequences worth knowing:
 - Booting with no reachable FSS server commands RTL. On the ground and disarmed
   that is inert; in the air (an FMU restarted mid-flight) it is the intended
   behaviour. The command is replayed if the MAV link was still down when it was
-  first sent.
+  first sent. The reconnector dials on its first pass rather than after a
+  `reconnect_interval_s` sleep, so leaving the failsafe again is bounded by the
+  network and by the promote-on-the-next-pass behaviour below, not by the
+  configured interval.
 - Until FSS reports comms okay, every FSS command resolves as *superseded* by
   the failsafe. Commands are still retained, and apply as soon as a server
   admits the FMU.

@@ -229,17 +229,25 @@ class App
     void
     fss_reconnector ()
     {
+        /* Work, then wait — deliberately in that order. FSS::reconnectAll() is the
+         * only thing in the process that opens an FSS connection (fss_server's
+         * constructor does not dial; see src/fss/internal.hpp), so waiting first
+         * put the very first dial at T + reconnect_interval_s, and first
+         * admission — a recovered server is promoted on the pass *after* the one
+         * that dialled it — at T + 2x that. The FMU boots into the comms-loss
+         * failsafe by design, so on an FMU restarted mid-flight that was 10-20s
+         * of failsafe RTL on defaults with a healthy network and a reachable
+         * server: an artifact of loop ordering, not a protective delay. All three
+         * calls below carry their own backoff, so the outer sleep is not what
+         * rate-limits them either.
+         *
+         * mav->attemptReconnect() therefore now runs a moment after
+         * mav->start()'s own dial. That is a no-op after a *successful* start
+         * (it only dials when fd == -1); after a failed one it is
+         * connect_to_mav()'s last_tried stamp that holds it off, which is why
+         * that stamp lives in the dial rather than in attemptReconnect(). */
         while (running.load ())
         {
-            {
-                std::unique_lock<std::mutex> lk (reconnect_lock);
-                reconnect_cv.wait_for (lk, std::chrono::seconds (reconnect_interval_s),
-                                       [this] { return !running.load (); });
-            }
-            if (!running.load ())
-            {
-                break;
-            }
             fss->reconnectAll ();
             mav->attemptReconnect ();
             /* Drive a timer-based retry of a pending search acquisition so it is
@@ -248,6 +256,13 @@ class App
              * the search_retry_ts backoff makes this a cheap no-op when a retry is
              * not yet due. */
             smm->retryPendingSearch ();
+            /* wait_for() evaluates the predicate before it blocks, so a shutdown
+             * that landed during the work above is seen here and the loop
+             * condition then ends it — no pass is spent asleep after the flag is
+             * set, and the parting Nudge{} below still reaches run(). */
+            std::unique_lock<std::mutex> lk (reconnect_lock);
+            reconnect_cv.wait_for (lk, std::chrono::seconds (reconnect_interval_s),
+                                   [this] { return !running.load (); });
         }
         enqueue_event (std::make_shared<event> (Nudge{}));
     }
