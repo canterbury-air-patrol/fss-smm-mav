@@ -17,7 +17,7 @@ AM_LDFLAGS+= $(SANITIZER_FLAGS)
 
 cap_fmu_SOURCES = main.cpp fmu.cpp fmu.hpp fmu-types.hpp fmu-core-types.hpp fmu-state-types.hpp ilogger.hpp event.hpp event-dispatcher.cpp event-dispatcher.hpp aircraft.hpp altitude-units.hpp altitude-cap.hpp util.hpp logger.cpp logger.hpp log-rotation.hpp fmu-config.cpp fmu-config.hpp
 cap_fmu_SOURCES += fss/fss.cpp fss/fmu-fss.hpp fss/fmu-fss-types.hpp fss/ifss.hpp fss/fss-client-ssl.cpp fss/internal.hpp fss/command-ack.hpp fss/command-ack-group.hpp
-cap_fmu_SOURCES += mav/internal.hpp mav/mav.cpp mav/mav.hpp mav/mav-sys.cpp mav/mavlink.cpp mav/imav.hpp mav/mav-comms.hpp mav/mav-params.hpp mav/mission-plan.hpp mav/mode-resolve.hpp mav/failsafe-params.hpp mav/battery-voltage.hpp mav/velocity.hpp mav/latlon-encoding.hpp
+cap_fmu_SOURCES += mav/internal.hpp mav/addr-resolve.hpp mav/mav.cpp mav/mav.hpp mav/mav-sys.cpp mav/mavlink.cpp mav/imav.hpp mav/mav-comms.hpp mav/mav-params.hpp mav/mission-plan.hpp mav/mode-resolve.hpp mav/failsafe-params.hpp mav/battery-voltage.hpp mav/velocity.hpp mav/latlon-encoding.hpp
 cap_fmu_SOURCES += smm/smm.cpp smm/smm.hpp smm/smm-types.hpp smm/ismm.hpp smm/smm-command.hpp smm/search-acquire.hpp smm/search-altitude.hpp smm/connection-state.hpp
 
 cap_fmu_CXXFLAGS = $(AM_CXXFLAGS) $(SMM_ASSET_CFLAGS) $(FSS_CLIENT_SSL_CFLAGS) $(JSONCPP_CFLAGS)

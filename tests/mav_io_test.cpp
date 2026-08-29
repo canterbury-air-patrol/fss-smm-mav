@@ -1,6 +1,7 @@
 #include "catch2-compat.hpp"
 
 #include "ilogger.hpp"
+#include "mav/addr-resolve.hpp"
 #include "mav/internal.hpp"
 #include "mav/mav-comms.hpp"
 #include "mav/mav.hpp"
@@ -2999,4 +3000,205 @@ TEST_CASE ("a fleet-configured airframe stays silent", "[mav_io]")
     REQUIRE_FALSE (capture.containsSubstring ("FS_GCS_ENABLE="));
     REQUIRE_FALSE (capture.containsSubstring ("FS_OPTIONS="));
     REQUIRE_FALSE (capture.containsSubstring ("SYSID_MYGCS="));
+}
+
+/* Resolving the MAV endpoint to a list of addresses, and dialling all of them.
+ *
+ * The list-building is exercised over a hand-built addrinfo chain rather than a
+ * real resolver: what matters is that every dialable result survives in the
+ * resolver's own order with the configured port written in, and that the ones
+ * that cannot be dialled are dropped rather than being handed to connect(). No
+ * name that a test could rely on answers with a mixture of families, a
+ * non-IP family and an over-long address on demand. */
+namespace
+{
+
+auto
+make_v4_sockaddr (const char *ip) -> struct sockaddr_in
+{
+    struct sockaddr_in sa = {};
+    sa.sin_family = AF_INET;
+    REQUIRE (inet_pton (AF_INET, ip, &sa.sin_addr) == 1);
+    return sa;
+}
+
+auto
+make_v6_sockaddr (const char *ip) -> struct sockaddr_in6
+{
+    struct sockaddr_in6 sa = {};
+    sa.sin6_family = AF_INET6;
+    REQUIRE (inet_pton (AF_INET6, ip, &sa.sin6_addr) == 1);
+    return sa;
+}
+
+/* One getaddrinfo()-style result node over `sa`. Chained by the caller through
+ * ai_next, exactly as the resolver returns them. */
+auto
+make_addrinfo (void *sa, socklen_t len, int family) -> struct addrinfo
+{
+    struct addrinfo ai = {};
+    ai.ai_family = family;
+    ai.ai_socktype = SOCK_STREAM;
+    ai.ai_addr = reinterpret_cast<struct sockaddr *> (sa);
+    ai.ai_addrlen = len;
+    ai.ai_next = nullptr;
+    return ai;
+}
+
+} // namespace
+
+TEST_CASE ("every dialable resolved address is kept, in resolver order, with the configured port", "[mav_io]")
+{
+    /* The shape that motivates the whole change: an AAAA sorted ahead of the A
+     * records, which is what glibc's RFC 6724 ordering produces on a host with a
+     * global v6 address. The v6 result must not displace the v4 ones. */
+    auto v6 = make_v6_sockaddr ("2001:db8::1");
+    auto v4_a = make_v4_sockaddr ("192.0.2.1");
+    auto v4_b = make_v4_sockaddr ("198.51.100.7");
+
+    struct addrinfo ai_v6 = make_addrinfo (&v6, sizeof (v6), AF_INET6);
+    struct addrinfo ai_v4_a = make_addrinfo (&v4_a, sizeof (v4_a), AF_INET);
+    struct addrinfo ai_v4_b = make_addrinfo (&v4_b, sizeof (v4_b), AF_INET);
+    ai_v6.ai_next = &ai_v4_a;
+    ai_v4_a.ai_next = &ai_v4_b;
+
+    auto endpoints = sockaddr_endpoints (&ai_v6, 5760);
+
+    REQUIRE (endpoints.size () == 3);
+    /* The resolver's order is already sorted by destination preference, so it is
+     * preserved rather than re-ordered by family here. */
+    REQUIRE (describe_sockaddr (endpoints[0]) == "[2001:db8::1]:5760");
+    REQUIRE (describe_sockaddr (endpoints[1]) == "192.0.2.1:5760");
+    REQUIRE (describe_sockaddr (endpoints[2]) == "198.51.100.7:5760");
+
+    /* getaddrinfo() is called with a null service, so every result arrives with
+     * port 0: the port has to be written into each one, not just the first. */
+    REQUIRE (reinterpret_cast<const struct sockaddr_in6 *> (&endpoints[0])->sin6_port == htons (5760));
+    REQUIRE (reinterpret_cast<const struct sockaddr_in *> (&endpoints[1])->sin_port == htons (5760));
+    REQUIRE (reinterpret_cast<const struct sockaddr_in *> (&endpoints[2])->sin_port == htons (5760));
+}
+
+TEST_CASE ("a resolved address that cannot be dialled is dropped rather than attempted", "[mav_io]")
+{
+    auto v4 = make_v4_sockaddr ("192.0.2.1");
+
+    /* A family that is neither AF_INET nor AF_INET6 has no port field to write
+     * and no socket() call this code would make. */
+    struct sockaddr_storage other_family = {};
+    other_family.ss_family = AF_UNIX;
+
+    /* An ai_addrlen larger than a sockaddr_storage cannot be copied into one:
+     * dropping it is what stops the copy, not a bounds check at the memcpy. */
+    struct sockaddr_storage oversized = {};
+    oversized.ss_family = AF_INET;
+
+    struct addrinfo ai_null = make_addrinfo (nullptr, sizeof (struct sockaddr_in), AF_INET);
+    struct addrinfo ai_other = make_addrinfo (&other_family, sizeof (other_family), AF_UNIX);
+    struct addrinfo ai_oversized = make_addrinfo (&oversized, sizeof (oversized) + 1, AF_INET);
+    struct addrinfo ai_empty = make_addrinfo (&v4, 0, AF_INET);
+    struct addrinfo ai_v4 = make_addrinfo (&v4, sizeof (v4), AF_INET);
+    ai_null.ai_next = &ai_other;
+    ai_other.ai_next = &ai_oversized;
+    ai_oversized.ai_next = &ai_empty;
+    ai_empty.ai_next = &ai_v4;
+
+    /* The one usable result survives, and survives being last. */
+    auto endpoints = sockaddr_endpoints (&ai_null, 5760);
+    REQUIRE (endpoints.size () == 1);
+    REQUIRE (describe_sockaddr (endpoints[0]) == "192.0.2.1:5760");
+
+    /* Nothing usable at all is reported as an empty list, which connect_to_mav()
+     * treats exactly as it treats a resolver failure. */
+    ai_empty.ai_next = nullptr;
+    REQUIRE (sockaddr_endpoints (&ai_null, 5760).empty ());
+    REQUIRE (sockaddr_endpoints (nullptr, 5760).empty ());
+}
+
+TEST_CASE ("an address is described for the log with its port, brackets for v6", "[mav_io]")
+{
+    auto v4 = make_v4_sockaddr ("127.0.0.1");
+    auto v6 = make_v6_sockaddr ("::1");
+    struct addrinfo ai_v4 = make_addrinfo (&v4, sizeof (v4), AF_INET);
+    struct addrinfo ai_v6 = make_addrinfo (&v6, sizeof (v6), AF_INET6);
+    ai_v4.ai_next = &ai_v6;
+
+    auto endpoints = sockaddr_endpoints (&ai_v4, 14550);
+    REQUIRE (endpoints.size () == 2);
+    REQUIRE (describe_sockaddr (endpoints[0]) == "127.0.0.1:14550");
+    /* Brackets, or the port reads as another group of the v6 address. */
+    REQUIRE (describe_sockaddr (endpoints[1]) == "[::1]:14550");
+
+    /* Only ever feeds a log message, so an address it cannot format still has to
+     * produce something rather than throw or come back empty. */
+    struct sockaddr_storage unknown = {};
+    unknown.ss_family = AF_UNIX;
+    REQUIRE (describe_sockaddr (unknown) == "<unknown>");
+}
+
+TEST_CASE ("only the two dialable families have a sockaddr length", "[mav_io]")
+{
+    REQUIRE (sockaddr_len_for_family (AF_INET) == sizeof (struct sockaddr_in));
+    REQUIRE (sockaddr_len_for_family (AF_INET6) == sizeof (struct sockaddr_in6));
+    /* 0 is the "not dialable" answer, and is what keeps such a family out of the
+     * endpoint list rather than reaching connect() with a bogus length. */
+    REQUIRE (sockaddr_len_for_family (AF_UNIX) == 0);
+    REQUIRE (sockaddr_len_for_family (AF_UNSPEC) == 0);
+}
+
+TEST_CASE ("a multi-address host connects through to a reachable address", "[mav_io]")
+{
+    reset_mav_parser ();
+    /* MavLoopbackServer listens on 127.0.0.1 only, so on a host whose
+     * `localhost` also has a ::1 record the v6 address is a dead end at this
+     * port — usually the *first* dead end, since RFC 6724 sorting puts it
+     * ahead of the v4 record. Dialling only the first result is a permanent
+     * failure here; dialling the list connects. */
+    MavLoopbackServer server;
+    CommsRecorder recorder;
+    CapturingLogger capture;
+
+    struct addrinfo hints = {};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *resolved = nullptr;
+    REQUIRE (getaddrinfo ("localhost", nullptr, &hints, &resolved) == 0);
+    auto endpoints = sockaddr_endpoints (resolved, server.port ());
+    freeaddrinfo (resolved);
+    REQUIRE_FALSE (endpoints.empty ());
+
+    mav_connection conn ("localhost", server.port (), test_mav_params, capture);
+    conn.registerMavCommsStatusCB ([&recorder] (MavCommsStatus status) { recorder.record (status); });
+    conn.start ();
+
+    REQUIRE (server.waitForClient (io_timeout));
+    REQUIRE (waitForColdStartThenUp (server, recorder));
+
+    /* How `localhost` resolves is the host's business, not this test's, so the
+     * multi-address assertion is only made when the host actually presented one:
+     * a first address that is not the listening one had to be tried and failed
+     * for the connection above to exist, and that attempt must be in the log by
+     * name. A `localhost` that is 127.0.0.1 alone still proves the
+     * single-address path is unchanged. */
+    if (describe_sockaddr (endpoints[0]) != "127.0.0.1:" + std::to_string (server.port ()))
+    {
+        REQUIRE (capture.containsSubstring ("MAV connect to localhost (" + describe_sockaddr (endpoints[0]) + ")"));
+        REQUIRE (capture.containsSubstring ("resolved addresses"));
+    }
+}
+
+TEST_CASE ("a MAV address that does not resolve is reported, not silently retried", "[mav_io]")
+{
+    reset_mav_parser ();
+    CapturingLogger capture;
+
+    /* `.invalid` is reserved by RFC 2606 precisely so it can never resolve, so
+     * this exercises the resolver-failure path without depending on a network or
+     * on what a wildcard DNS provider does with a made-up name. */
+    mav_connection conn ("cap-fmu-nonexistent.invalid", 5760, test_mav_params, capture);
+    conn.start ();
+
+    /* The pre-existing behaviour was to return from connect_to_mav() without a
+     * word, leaving a misconfigured mav_address indistinguishable in the log
+     * from an autopilot that is simply not up yet. */
+    REQUIRE (capture.containsSubstring ("Failed to resolve MAV address cap-fmu-nonexistent.invalid"));
 }

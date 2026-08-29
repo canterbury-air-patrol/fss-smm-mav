@@ -1,3 +1,4 @@
+#include "addr-resolve.hpp"
 #include "altitude-units.hpp"
 #include "battery-voltage.hpp"
 #include "failsafe-params.hpp"
@@ -19,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <cerrno>
 #include <fcntl.h>
@@ -1148,46 +1150,42 @@ mav_connection::processMavLinkMsg (mavlink_message_t *msg, mavlink_status_t *sta
     }
 }
 
-auto
-convert_str_to_sa (const std::string &addr, uint16_t port, struct sockaddr_storage *sa) -> bool
+/* Resolve the MAV endpoint to every address worth dialling, best first.
+ *
+ * AF_UNSPEC deliberately: which family reaches the autopilot is a property of
+ * the deployment, not something this end should decide. What that costs is that
+ * a name can answer with several addresses, so the result is a list and
+ * connect_to_mav() tries them in turn -- see addr-resolve.hpp for why using only
+ * the first is a permanent failure rather than a slow one.
+ *
+ * An empty return means "nothing to dial", from either a resolver failure or a
+ * result with no usable IPv4/IPv6 address in it; both are logged here, since the
+ * caller cannot tell them apart and a silent return is exactly the failure this
+ * change is about. */
+static auto
+resolve_mav_endpoints (const std::string &addr, uint16_t port, ILogger &logger) -> std::vector<sockaddr_storage>
 {
     struct addrinfo hints = {};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
+    /* Null service: the port is configuration (mav_port), not part of the name
+     * being resolved, so it is written into each result by sockaddr_endpoints(). */
     struct addrinfo *ai = nullptr;
-    if (getaddrinfo (addr.c_str (), nullptr, &hints, &ai) != 0)
-        return false;
-
-    if (ai->ai_addrlen > sizeof (struct sockaddr_storage))
+    int rc = getaddrinfo (addr.c_str (), nullptr, &hints, &ai);
+    if (rc != 0)
     {
-        freeaddrinfo (ai);
-        return false;
+        logger.log (LogLevel::warning, "Failed to resolve MAV address " + addr + ": " + gai_strerror (rc));
+        return {};
     }
 
-    memcpy (sa, ai->ai_addr, ai->ai_addrlen);
-    int family = ai->ai_family;
+    auto endpoints = sockaddr_endpoints (ai, port);
     freeaddrinfo (ai);
-
-    switch (family)
+    if (endpoints.empty ())
     {
-        case AF_INET:
-        {
-            auto *sa_in = reinterpret_cast<struct sockaddr_in *> (sa);
-            sa_in->sin_port = htons (port);
-        }
-        break;
-        case AF_INET6:
-        {
-            auto *sa_in = reinterpret_cast<struct sockaddr_in6 *> (sa);
-            sa_in->sin6_port = htons (port);
-        }
-        break;
-        default:
-            return false;
+        logger.log (LogLevel::warning, "MAV address " + addr + " resolved to no usable IPv4 or IPv6 address");
     }
-
-    return true;
+    return endpoints;
 }
 
 void
@@ -1228,7 +1226,8 @@ recv_mav_thread (mav_connection *conn)
 }
 
 auto
-mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, socklen_t remote_len) -> bool
+mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, socklen_t remote_len,
+                                    const std::string &target) -> bool
 {
     int flags = fcntl (sock, F_GETFL, 0);
     if (flags == -1 || fcntl (sock, F_SETFL, flags | O_NONBLOCK) == -1)
@@ -1239,7 +1238,7 @@ mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, soc
 
     if (connect (sock, remote, remote_len) < 0 && errno != EINPROGRESS)
     {
-        perror (("Failed to connect to " + this->addr).c_str ());
+        perror (("Failed to connect to " + target).c_str ());
         return false;
     }
 
@@ -1255,9 +1254,8 @@ mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, soc
             = std::chrono::duration_cast<std::chrono::milliseconds> (deadline - std::chrono::steady_clock::now ());
         if (remaining.count () <= 0)
         {
-            this->logger.log (LogLevel::warning, "Connect to " + this->addr + ":" + std::to_string (this->port)
-                                                     + " timed out after " + std::to_string (this->connect_timeout_ms)
-                                                     + "ms");
+            this->logger.log (LogLevel::warning, "Connect to " + target + " timed out after "
+                                                     + std::to_string (this->connect_timeout_ms) + "ms");
             return false;
         }
         struct pollfd pfd = { .fd = sock, .events = POLLOUT, .revents = 0 };
@@ -1273,9 +1271,8 @@ mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, soc
         }
         if (poll_rc == 0)
         {
-            this->logger.log (LogLevel::warning, "Connect to " + this->addr + ":" + std::to_string (this->port)
-                                                     + " timed out after " + std::to_string (this->connect_timeout_ms)
-                                                     + "ms");
+            this->logger.log (LogLevel::warning, "Connect to " + target + " timed out after "
+                                                     + std::to_string (this->connect_timeout_ms) + "ms");
             return false;
         }
         break;
@@ -1286,7 +1283,7 @@ mav_connection::connectWithTimeout (int sock, const struct sockaddr *remote, soc
     if (getsockopt (sock, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) < 0 || so_error != 0)
     {
         errno = so_error != 0 ? so_error : errno;
-        perror (("Failed to connect to " + this->addr).c_str ());
+        perror (("Failed to connect to " + target).c_str ());
         return false;
     }
 
@@ -1313,28 +1310,64 @@ mav_connection::connect_to_mav ()
         this->last_tried = current_timestamp_ms ();
     }
 
-    struct sockaddr_storage remote = {};
-    if (!convert_str_to_sa (this->addr, this->port, &remote))
+    auto endpoints = resolve_mav_endpoints (this->addr, this->port, this->logger);
+    if (endpoints.empty ())
     {
         return;
     }
 
-    /* Build the socket in a local descriptor and only publish it once it is fully
+    /* Dial each resolved address in turn until one connects. The socket has to
+     * be created inside the loop because its family comes from the address, and
+     * a failed attempt's descriptor is closed before the next one is opened.
+     *
+     * connect_timeout_ms bounds each attempt individually rather than the set of
+     * them (README says so too). Dividing one budget across N addresses would
+     * make every attempt shorter the more addresses a name happens to answer
+     * with, so a working-but-slow endpoint would be abandoned for no reason
+     * relating to it; the reconnector's own interval is what bounds the total
+     * time this call can take.
+     *
+     * Build the socket in a local descriptor and only publish it once it is fully
      * connected and configured. A send must never observe a half-open fd (one
      * returned by socket() but not yet connected), and the fd must not become
      * visible — or its number reused — until the previous connection has been
      * fully retired by disconnect_from_mav(). */
-    int new_fd = socket (remote.ss_family == AF_INET ? PF_INET : PF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    int new_fd = -1;
+    for (size_t i = 0; i < endpoints.size (); i++)
+    {
+        const struct sockaddr_storage &remote = endpoints[i];
+        /* Both the configured name and the address it resolved to: the name
+         * alone cannot say which of several addresses an attempt was against,
+         * and that is the whole point of logging the failed ones. */
+        const std::string target = this->addr + " (" + describe_sockaddr (remote) + ")";
+        int sock = socket (remote.ss_family, SOCK_STREAM, IPPROTO_TCP);
+        if (sock < 0)
+        {
+            perror (("Failed to create MAV socket for " + target).c_str ());
+        }
+        else if (this->connectWithTimeout (sock, reinterpret_cast<const struct sockaddr *> (&remote),
+                                           sockaddr_len_for_family (remote.ss_family), target))
+        {
+            new_fd = sock;
+            break;
+        }
+        else
+        {
+            close (sock);
+        }
+        /* Say so when an address failed and others remain, so "it never tried
+         * the working one" cannot be the silent reading of the log. The last
+         * address needs no such line: connectWithTimeout has already reported
+         * why it failed, and there is nothing further to try. */
+        if (i + 1 < endpoints.size ())
+        {
+            this->logger.log (LogLevel::warning, "MAV connect to " + target + " failed; trying "
+                                                     + std::to_string (endpoints.size () - i - 1) + " more of "
+                                                     + std::to_string (endpoints.size ()) + " resolved addresses");
+        }
+    }
     if (new_fd < 0)
     {
-        perror ("Failed to create MAV socket");
-        return;
-    }
-
-    socklen_t remote_len = remote.ss_family == AF_INET ? sizeof (struct sockaddr_in) : sizeof (struct sockaddr_in6);
-    if (!this->connectWithTimeout (new_fd, reinterpret_cast<struct sockaddr *> (&remote), remote_len))
-    {
-        close (new_fd);
         return;
     }
 

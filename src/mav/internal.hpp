@@ -387,8 +387,13 @@ class mav_connection
      * Restores `sock` to blocking mode before returning true, since the rest
      * of the connection relies on blocking I/O bounded by
      * SO_RCVTIMEO/SO_SNDTIMEO, not O_NONBLOCK semantics; on false, `sock` is
-     * left as-is — the caller always closes it immediately. */
-    auto connectWithTimeout (int sock, const struct sockaddr *remote, socklen_t remote_len) -> bool;
+     * left as-is — the caller always closes it immediately.
+     *
+     * `target` names the endpoint for the log — the configured address plus the
+     * resolved address this attempt is against, which is what makes one failed
+     * attempt in a multi-address dial distinguishable from another. */
+    auto connectWithTimeout (int sock, const struct sockaddr *remote, socklen_t remote_len, const std::string &target)
+        -> bool;
     void connect_to_mav ();
     void disconnect_from_mav ();
     void report_position (double t_lat, double t_lng, double alt, uint16_t t_hdg, uint16_t t_vel_hor, int16_t t_vel_ver,
