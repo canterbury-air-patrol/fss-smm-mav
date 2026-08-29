@@ -14,12 +14,12 @@ comments point back to instead of restating.
 | MAV recv | `mav_connection::connect_to_mav()` | Performs blocking reads and parses inbound MAVLink; invokes the position/battery/reached/autopilot-restart callbacks that enqueue events for the event loop. |
 | MAV heartbeat | `mav_connection` constructor path / `start()` | Sends periodic `HEARTBEAT`s and is the single authority for edge-triggering the MAV comms-up/down callback (`heartbeat_loop()`). |
 | Signal waiter | `App::signal_waiter()` | Blocks in `sigwait()` for SIGINT/SIGTERM, then flips `App::running` and wakes the event loop and reconnector. |
-| FSS reconnector | `App::fss_reconnector()` | Periodically calls `fss->reconnectAll()`, `mav->attemptReconnect()`, and `smm->retryPendingSearch()`. |
+| FSS reconnector | `App::fss_reconnector()` | Periodically calls `fss->reconnectAll()`, `mav->attemptReconnect()`, and `smm->retryPendingSearch()`. Works *then* waits, so the first pass runs immediately: `reconnectAll()` is the only thing in the process that opens an FSS connection, and waiting first held the cold-start dial — and with it the exit from the boot-time comms-loss failsafe — for a full `reconnect_interval_s`. |
 | SMM worker | `SMM` constructor / `workerLoop()` | Runs all blocking `smm_asset_*` HTTP I/O (connect, position report, search acquire/accept) off the event loop. |
-| FSS send worker | `FSS` constructor / `workerLoop()` | Keeps FSS `send()`s off the event loop, so a hung FSS peer cannot stall queued commands. Since the `fss-client-ssl` 1.3.0 bump the fan-out sends (position/reached/battery, via `sendMsgAll`) are non-blocking in the library, so what this worker still has to absorb is the **command ack** — a per-connection `fss_connection::sendMsg()` that stays blocking, and the path that closes the loop on an operator's rtl/terminate. |
+| FSS send worker | `FSS` constructor / `workerLoop()` | Keeps FSS `send()`s off the event loop, so a hung FSS peer cannot stall queued commands. Since the `fss-client-ssl` 1.3.0 bump the fan-out sends (position/reached/battery, via `sendMsgAll`) are non-blocking in the library, so what this worker still has to absorb is the **command ack** — a per-connection `fss_connection::sendMsg()` that stays blocking, and the path that closes the loop on an operator's rtl/terminate. Dispatch goes through the `sendPosition`/`sendReached`/`sendBattery`/`sendAck` seams, which a test overrides to wedge the worker without a peer (todo/98) — the same shape as SMM's `fetchSearch`/`reportPositionToSmm`. |
 | Log writer | `Logger` constructor / `workerLoop()` | Drains the log queue and does the disk I/O, so a slow or blocking write never stalls the thread that produced the message. Every other thread here is a producer. |
 | FSS recv (library-owned, one per connected FSS server) | `flight_safety_system::transport::fss_connection`'s `recv_thread`, not started by cap-fmu | Parses inbound FSS traffic and fires *every* inbound FSS callback — `registerCommandCB`, `registerPositionDataCB`, `registerCommsStatusCB`, `registerSMMSettingsCB`. Those callbacks enqueue events for the event loop rather than acting directly; the one exception is `known_aircraft`, which the position callback touches on this thread (see below). One inbound callback also fires off this thread: `registerCommsStatusCB` reports an initial `fss_comms_failure` synchronously to the registering thread (the event loop, during `App::run()` setup) to arm the comms-loss failsafe before any connection exists — see the comment on `fss_client_ssl::registerCommsStatusCB`. It enqueues an event like the rest, so the event loop is still the only thread that touches the state machine. |
-| FSS outbound (library-owned, one per FSS server, lazily started) | `flight_safety_system::client_ssl::fss_server`'s `outbound_worker`, not started by cap-fmu | Performs the blocking socket write for that one server, and runs its reconnect dials. This is what makes `sendMsgAll()` and `attemptReconnect()` non-blocking as of 1.3.0. No cap-fmu callback runs here — the worker deliberately never reaches back through the `fss_client`, since a subclass (our `fss_client_ssl`) is destroyed derived-part-first and a virtual call arriving mid-teardown would race the vptr rewrite. Its queue is bounded and drops the oldest frame under sustained backlog; cap-fmu does not yet read `getDroppedSends()`. |
+| FSS outbound (library-owned, one per FSS server, lazily started) | `flight_safety_system::client_ssl::fss_server`'s `outbound_worker`, not started by cap-fmu | Performs the blocking socket write for that one server, and runs its reconnect dials. This is what makes `sendMsgAll()` and `attemptReconnect()` non-blocking as of 1.3.0. No cap-fmu callback runs here — the worker deliberately never reaches back through the `fss_client`, since a subclass (our `fss_client_ssl`) is destroyed derived-part-first and a virtual call arriving mid-teardown would race the vptr rewrite. Its queue is bounded and drops the oldest frame under sustained backlog; cap-fmu does not yet read `getDroppedSends()` (todo/102). |
 
 That is 8 threads cap-fmu itself starts, plus the FSS library's per-server recv
 and outbound threads. (Older references say 7: they predate the log writer,
@@ -35,12 +35,12 @@ cap-fmu events, even though their lifetime is the library's concern, not ours.
 | `App::reconnect_lock` + `reconnect_cv` | Only the reconnector's own wait timer, and publication of the `running` flag its wait predicate reads | FSS reconnector thread, woken early by the signal waiter. |
 | `FMUStateMachine::lock` | `fss_command`, `smm_command`, `fss_command_target`, `low_battery`, `low_battery_count`, `terminated`, `altitude_breach`, `altitude_breach_count`, `altitude_clear_count`, `current_state`, `fss_comms_lost`, `mav_comms_lost` | Event loop only (`assert_event_loop_thread()` enforces this in debug builds) — see "Single-event-loop-thread invariant" below. |
 | `mav_connection::send_lock` | The socket fd's lifetime (open/close) and the per-channel MAVLink pack/transmit state (the generated `*_pack_chan()` calls mutate global per-channel sequence/status, so packing and sending must be serialised) | Any thread that sends: event loop (via `MAV`/`IMAV` action methods), MAV heartbeat thread, MAV recv thread (mission handshake replies, ADS-B rebroadcast). |
-| `mav_connection::state_lock` | `last_position`, `search`, `search_loaded`, `search_loading`, `goto_active`, `goto_position`, `goto_ack_pending`, `pending_mode_command`, `retry_count`, `last_tried` | MAV recv thread (parses inbound MAVLink and updates upload/search state), event loop (issues commands), FSS reconnector (`attemptReconnect`). |
+| `mav_connection::state_lock` | `last_position`, `search`, `search_loaded`, `search_loading`, `goto_active`, `goto_position`, `goto_ack_pending`, `pending_mode_command`, `retry_count`, `last_tried` | MAV recv thread (parses inbound MAVLink and updates upload/search state), event loop (issues commands, and dials once via `start()` → `connect_to_mav()`, which resets `retry_count` and stamps `last_tried`), FSS reconnector (`attemptReconnect`, and the dials it drives). |
 | `mav_connection::heartbeat_mutex` + `heartbeat_cv` | Only the heartbeat loop's own 1-second wait timer, and publication of the `stopping` flag its wait predicate reads | MAV heartbeat thread, woken early by `stopping`. |
 | `mav_systems::lock` | `mav_systems::systems` (the per-sysid `mav_sys` list, and through it each system's component list) | MAV recv thread, which is the only one that grows the list (`findSystem`'s find-or-create, from `processMavLinkMsg`) and which also walks it to re-arm the setup latches on a detected autopilot restart (`resetAllSetup()`); FSS reconnector thread, which walks it the same way from `disconnect_from_mav()`; the event-loop command paths read it via `findExistingSystem()`, which never mutates, so dispatching a command cannot race a concurrent recv-thread insertion. Each `mav_sys`'s own published state (`autopilot_type`, `flight_mode`, `setup`, `failsafe_checked`, `failsafe_checked_type`) is atomic and read without this lock once the `shared_ptr` is in hand. |
 | `SMM::queue_lock` + `queue_cv` | `SMM::task_queue`, `SMM::worker_running` (the shutdown flag the `queue_cv` predicate reads) | SMM worker (consumer); event loop and FSS reconnector (producers, via the public methods that call `enqueue`); the destructor clears `worker_running`. |
 | `SMM::state_lock` | `current_search`, `asset` | SMM worker (publishes), event loop (`currentSearchPoints()` reads the atomic mirror instead, see below), test-only injection (`SMMTestAccess`). |
-| `FSS::queue_lock` + `queue_cv` | `FSS::task_queue`, `FSS::worker_running` (the shutdown flag the `queue_cv` predicate reads) | FSS send worker (consumer); event loop (producer, via `reportPosition`/`reachedPoint`/`reportBatteryStatus`/`postAck`); the destructor clears `worker_running`. |
+| `FSS::queue_lock` + `queue_cv` | `FSS::task_queue`, `FSS::worker_running` (the shutdown flag the `queue_cv` predicate reads) | FSS send worker (consumer); event loop (producer, via `reportPosition`/`reachedPoint`/`reportBatteryStatus`/`postAck`); `stopWorker()` clears `worker_running`; test-only inspection (`FSSTestAccess`). |
 | `CommandAckGroup::mtx` (`fss_client_ssl::command_group`) | The in-flight command-dedup group: `active`, `epoch`, `command`, `payload`, `timestamp`, `pending`, `resolution`, `last_id_by_connection` | FSS recv threads (`onDelivery()`, as the same logical command arrives on each connected server) and the FSS send worker (`resolve()`, from the phase-2 ack responder). The acks themselves are sent *outside* the lock, so a recv thread adding a late duplicate never waits on the wire. |
 | `known_aircraft::lock` | `lastAllocatedICAO` and the `aircraft` map (including the stale-entry eviction sweep, `evictStaleLocked()`) | FSS recv threads only, via `App`'s `registerPositionDataCB` — the one inbound FSS callback that does work before enqueuing rather than enqueuing straight away, because the synthetic ICAO it allocates has to be stamped onto the `PositionData` the event carries. With more than one FSS server connected there is more than one such thread, which is why the map is locked rather than thread-owned. |
 | Atomics (`App::running`, `mav_connection::fd`/`mav_comms_ok`/`last_heartbeat_ts`/`connected_since_ts`/`broken`/`stopping`/`started`, `mav_sys::autopilot_type`/`flight_mode`/`setup`/`failsafe_checked`/`failsafe_checked_type`, `SMM::search_active`/`current_search_points`) | Single flags or counters read across threads without a critical section spanning more than the one load/store | Various — each is documented at its declaration; called out here because they are part of the concurrency picture even though they need no mutex. The two shutdown flags among them, `App::running` and `mav_connection::stopping`, are the exception: being atomic is enough for their reads, but the store that clears them is still made under the cv's mutex — see "Shutdown flags and their condition variables". |
@@ -137,6 +137,34 @@ while holding it (`setMavCommsFailure()` and `reassertState()` both read
 reads `MAV::getCurrentPosition()` (which takes `mav_connection::state_lock`
 internally) before calling `SMM::enqueue()` (which takes `SMM::queue_lock`),
 never both at once.
+
+## Worker shutdown and object lifetime
+
+Both worker-owning classes (`SMM`, `FSS`) start their thread in the
+constructor and join it in the destructor, and in both the worker calls back
+into the object it belongs to. That is safe for the class itself — the join
+happens before any member the worker touches is destroyed — but it is *not*
+automatically safe for a subclass, and both classes have one in the tests.
+
+A derived object is destroyed derived-part-first, so by the time the base
+destructor runs (and joins) the derived part is already gone: a worker still
+running in that window would be calling into a destroyed subclass, whichever
+vtable it lands in. The base class cannot fix this by ordering, because it
+does not get control until the derived destructor has finished.
+
+`FSS` therefore exposes a protected, idempotent `stopWorker()`, and a subclass
+that overrides the `send*` seams must call it from its own destructor
+(`TestFSS` in `tests/fss_test.cpp` does). `~FSS` still calls it, so a
+non-subclassed `FSS` is unaffected. `SMM` has the same shape without the
+explicit entry point: its test subclass instead has to unblock the worker and
+observe it drained before the object goes out of scope
+(`tests/mav_io_test.cpp`, the worker-responsiveness case).
+
+Note this is about *cap-fmu's* subclasses. The FSS client library hit the same
+hazard from the other direction — a worker reading its owning `fss_client`
+raced the vptr rewrite in `~fss_client` — and resolved it by giving the worker
+its own snapshot rather than by timing the teardown (see that repo's
+`docs/decisions/66-67-client-outbound-fanout.md`).
 
 ## Single-event-loop-thread invariant
 
