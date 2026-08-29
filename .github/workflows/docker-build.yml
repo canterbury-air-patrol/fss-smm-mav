@@ -76,6 +76,12 @@ jobs:
           file: docker/Dockerfile
           load: true
           tags: cap-fmu:ci-smoke
+          # The SHA the image was built from, baked into
+          # /etc/cap-fmu-manifest. The build context has no .git, so the image
+          # cannot work this out for itself --- unpassed it records "unknown",
+          # which is honest but useless on a published tag.
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -108,6 +114,36 @@ jobs:
           docker run --rm --entrypoint sh cap-fmu:ci-smoke \
             -c 'test -w /var/log/cap-fmu'
 
+      # The image records its own dependency set (docker/manifest.sh). Extract
+      # it here so the versions that went into a published tag are recoverable
+      # from the CI run as well as from the image --- and check it is actually
+      # populated, since an empty or unrecorded manifest fails silently in
+      # exactly the situation it exists for.
+      - name: Extract the dependency manifest
+        run: |
+          docker run --rm --entrypoint cat cap-fmu:ci-smoke \
+            /etc/cap-fmu-manifest > cap-fmu-manifest.txt
+          cat cap-fmu-manifest.txt
+          for pkg in libfss-client-ssl libfss-transport libsmm-asset-dev; do
+            if ! grep -q "^${pkg}\s" cap-fmu-manifest.txt; then
+              echo "::error::manifest does not record ${pkg}"
+              exit 1
+            fi
+          done
+          # An "unknown" revision here means the build-arg above stopped being
+          # passed, which would publish an image that cannot be traced to a
+          # commit.
+          if grep -q '^source-revision: unknown$' cap-fmu-manifest.txt; then
+            echo "::error::manifest has no source revision"
+            exit 1
+          fi
+
+      - name: Upload the dependency manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: cap-fmu-manifest
+          path: cap-fmu-manifest.txt
+
       - name: Log in to DockerHub
         uses: docker/login-action@v4
         with:
@@ -121,5 +157,10 @@ jobs:
           file: docker/Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          # Must match the build above exactly, or the cache misses and the
+          # pushed image carries a different manifest from the one CI just
+          # checked and uploaded.
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

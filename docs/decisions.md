@@ -87,3 +87,58 @@ This is a single-binary project with no public API and no third-party consumers
 linking against it, so the collision risk the suggestion guards against does not
 arise. If the convention is ever revisited it should be revisited for all ten
 headers in one change, not one at a time as each new one is reviewed.
+
+## Docker: a rebuild of one SHA may still differ; the manifest says how
+
+**Do not pin `libfss-client-ssl` or `libsmm-asset-dev` to exact versions, and do
+not treat two builds of one SHA as interchangeable without comparing their
+manifests.**
+
+The question todo/113 required an answer to: *is a rebuild from an unchanged git
+SHA permitted to produce a different artifact?* The answer is **yes, within a
+bounded window, and the image records which one it is.**
+
+What is now fixed by the source:
+
+- The base is a digest, not a tag (`ARG BASE_IMAGE` in `docker/Dockerfile`), and
+  `.github/workflows/verify.yml` runs every job on that same digest.
+  `tools/check-image-pins.sh` fails `check-code.sh` if the two stop agreeing.
+- Neither the Dockerfile nor `docker/setup.sh` runs `apt upgrade -y` any more.
+  It was what made a base pin ineffective — pin the base, then upgrade every
+  package in it, and the pin describes nothing. Base security updates now arrive
+  by bumping the digest, which is a reviewable commit.
+- The Canterbury Air Patrol libraries are installed with `apt-get satisfy` under
+  the bounds `configure.ac` states, derived from it by
+  `docker/dep-constraints.sh` rather than copied. A release outside the window
+  fails the build instead of being installed.
+
+What is *not* fixed, and deliberately:
+
+`apt.canterburyairpatrol.org` is a rolling repository that publishes exactly one
+version of each package. Pinning `libfss-client-ssl=1.3.0` would make every
+image build fail the day 1.3.1 is published, because 1.3.0 is no longer *in* the
+repository to install — an exact pin against a rolling repository is not a pin,
+it is an expiry date. So the install is bounded, not pinned, and a rebuild after
+an upstream release resolves to the new version if it is inside the window.
+
+That is why `/etc/cap-fmu-manifest` exists (`docker/manifest.sh`). It records
+the base digest, the source revision, and every installed package with its
+version, inside the image, so:
+
+```
+docker run --rm --entrypoint cat canterburyairpatrol/cap-fmu:<tag> \
+  /etc/cap-fmu-manifest
+```
+
+answers "what was flying" with no rebuild and no access to the repository's
+history — which a rebuild could not answer anyway, since it would resolve to
+whatever is current now. CI extracts the same file as a build artifact next to
+the traceability report. Everything under the manifest's `# packages` heading is
+the comparable part; the header above it carries a build timestamp that differs
+on every build by construction.
+
+The stronger option — building a `.deb` and installing that, so dependency
+solving is recorded in package metadata — was not taken. It moves the same
+unpinned resolution into `debian/control`'s `Depends` and adds a packaging step
+to the image build, for a record the manifest already provides. Revisit it if
+the image ever needs to be installable rather than merely reproducible.

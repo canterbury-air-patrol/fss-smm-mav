@@ -85,10 +85,12 @@ make install
 `tests/`. **Either Catch2 generation works**: 3.x (`catch2-with-main.pc`) is
 preferred and is what the suite is written against, and 2.13 or newer
 (`catch2.pc`, header-only) is supported as a fallback so that Debian bookworm
-— which has only 2.13 in main, and is what the aircraft image is built from —
-can still build and run the tests. `configure` picks whichever is installed,
-`tests/catch2-compat.hpp` bridges the differences, and Debian's `catch2`
-package is the right one on every suite.
+— which has only 2.13 in main — can still build and run the tests. (The
+aircraft image is built on trixie, which has 3.x; the bookworm fallback is what
+lets `debian/control` keep an unversioned `catch2` build-dependency, so a
+bookworm package can be built without backports.) `configure` picks whichever
+is installed, `tests/catch2-compat.hpp` bridges the differences, and Debian's
+`catch2` package is the right one on every suite.
 
 Catch2 is the one dependency the FMU binary itself does not need, so a machine
 can be missing it — or have only 2.x — and still build the binary. But then
@@ -330,6 +332,35 @@ docker run \
   -v /path/to/certs:/certs \
   canterburyairpatrol/cap-fmu
 ```
+
+#### What is in a given image
+
+The image tag says which source flew. `/etc/cap-fmu-manifest`, written into the
+image at build time, says which *libraries* flew — which for this program is the
+sharper question, since the comms-loss failsafe's connection semantics live in
+`libfss-client-ssl` rather than in this source:
+
+```
+docker run --rm --entrypoint cat canterburyairpatrol/cap-fmu:<tag> \
+  /etc/cap-fmu-manifest
+```
+
+It records the base image digest, the git SHA, `cap-fmu --version`, the
+Canterbury Air Patrol libraries the version bounds guard, and then every
+installed package with its version and architecture. CI uploads the same file as
+a `cap-fmu-manifest` build artifact.
+
+Rebuilding is not a substitute for reading it. The base is digest-pinned and
+neither the Dockerfile nor `docker/setup.sh` runs `apt upgrade`, but
+`apt.canterburyairpatrol.org` is a rolling repository holding one version of
+each package, so a rebuild resolves the FSS libraries to whatever is current
+*now* — not to what was current on build day. Those installs are bounded rather
+than pinned: `docker/dep-constraints.sh` derives the terms from
+`configure.ac`'s `PKG_CHECK_MODULES` bounds and `docker/setup.sh` hands them to
+`apt-get satisfy`, so a release outside the window fails the image build instead
+of being installed silently. `docs/decisions.md` has the full reasoning,
+including why an exact version pin against a rolling repository is an expiry
+date rather than a pin.
 
 ## Required autopilot configuration
 

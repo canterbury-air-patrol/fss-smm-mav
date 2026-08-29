@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-# Static code checks: formatting, cppcheck, clang-tidy, and shellcheck.
+# Static code checks: image pins, shellcheck, formatting, cppcheck and
+# clang-tidy.
 #
 # Run from the top of the source tree after building with a compile database
 # (e.g. `bear -- make`), which clang-tidy needs via compile_commands.json.
@@ -10,6 +11,12 @@ set -euo pipefail
 # File sets are globbed rather than enumerated so new sources are covered by
 # the gate automatically. The vendored MAVLink submodule lives outside src/
 # and tests/, so it is never picked up here.
+
+# The base image the aircraft is built on is configuration, not code, but it is
+# the one input to the build that nothing in src/ can constrain and that no test
+# can observe. Checked first because it needs no build, no toolchain and no
+# network -- just two files agreeing.
+./tools/check-image-pins.sh
 
 # The docker/ scripts are production deployment code -- they are what actually
 # launches cap-fmu on an aircraft -- but `bash -n` (all the CI smoke test used
@@ -27,11 +34,12 @@ if ! command -v shellcheck >/dev/null 2>&1; then
 	echo "check-code.sh: shellcheck not found; install it (Debian: apt install shellcheck)" >&2
 	exit 1
 fi
-# docker/ is globbed, so a script added there is covered automatically. The tree
-# root cannot be: autotools drops ltmain.sh next to our own scripts, and it is
-# generated, third-party, and not ours to fix (shellcheck finds ~40 problems in
-# it). So the two top-level scripts we do own are named explicitly.
-mapfile -t sh_files < <(find docker -name '*.sh' | sort)
+# docker/ and tools/ are globbed, so a script added to either is covered
+# automatically. The tree root cannot be: autotools drops ltmain.sh next to our
+# own scripts, and it is generated, third-party, and not ours to fix (shellcheck
+# finds ~40 problems in it). So the two top-level scripts we do own are named
+# explicitly.
+mapfile -t sh_files < <(find docker tools -name '*.sh' | sort)
 shellcheck --severity=warning "${sh_files[@]}" autogen.sh check-code.sh
 
 # clang-format output is not stable across major versions. The tree is
