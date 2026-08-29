@@ -304,7 +304,18 @@ Required:
 | `SERVER1_ADDR` / `SERVER1_PORT` | The FSS server |
 
 Optional: `SERVER2_ADDR` / `SERVER2_PORT` (a second, independent FSS server for
-redundancy), `LOG_DIR`, `CLOCK_OFFSET_MS`, and `RUN_IN_VALGRIND=yes`.
+redundancy), `LOG_DIR`, and `CLOCK_OFFSET_MS`.
+
+`RUN_IN_VALGRIND=yes` also exists, but the published image does not carry
+valgrind — it is a memory-debugging toolchain on an airborne node for a path
+nobody takes in flight. Build a debug image for it and run that:
+
+```
+docker build -f docker/Dockerfile --build-arg INCLUDE_VALGRIND=yes -t cap-fmu:valgrind .
+```
+
+Asking for `RUN_IN_VALGRIND=yes` on an image without it fails at startup saying
+so, rather than launching without the debugger or dying at exit 127.
 
 Every key in the `fmu` block above also has an environment variable, named as
 the uppercased key — `ALTITUDE_CAP_FT`, `LOWBAT_THRESHOLD`, `CAMERA_FOV_DEG`,
@@ -358,11 +369,25 @@ neither the Dockerfile nor `docker/setup.sh` runs `apt upgrade`, but
 each package, so a rebuild resolves the FSS libraries to whatever is current
 *now* — not to what was current on build day. Those installs are bounded rather
 than pinned: `docker/dep-constraints.sh` derives the terms from
-`configure.ac`'s `PKG_CHECK_MODULES` bounds and `docker/setup.sh` hands them to
-`apt-get satisfy`, so a release outside the window fails the image build instead
-of being installed silently. `docs/decisions.md` has the full reasoning,
-including why an exact version pin against a rolling repository is an expiry
-date rather than a pin.
+`configure.ac`'s `PKG_CHECK_MODULES` bounds, and both stages of the build hand
+them to `apt-get satisfy` — `docker/setup.sh` for the headers it compiles
+against, `docker/runtime-setup.sh` for the shared libraries the image ships — so
+a release outside the window fails the image build instead of being installed
+silently. The two stages resolve independently, so `runtime-setup.sh` also
+checks that they resolved the *same* versions and fails if a release landed
+between them. `docs/decisions.md` has the full reasoning, including why an exact
+version pin against a rolling repository is an expiry date rather than a pin.
+
+The image is built in two stages, and only the second one ships. The builder
+holds the source tree, the toolchain and the `-dev` packages; the runtime stage
+starts from the same pinned base and takes only `make install`'s output
+(`/usr/bin/cap-fmu`, the same path the `.deb` uses) plus the shared libraries
+that binary loads. So the published image has no compiler, no source tree, no
+`curl` or `gnupg`, and no apt package lists — which matters on a Pi-class
+SD-backed node that is network-facing on three protocols. `docker/manifest.sh`
+runs in the runtime stage for the same reason: a manifest captured in the
+builder would list a toolchain the flight image does not have while looking
+exactly as authoritative.
 
 ## Required autopilot configuration
 

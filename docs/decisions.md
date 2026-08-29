@@ -142,3 +142,28 @@ solving is recorded in package metadata — was not taken. It moves the same
 unpinned resolution into `debian/control`'s `Depends` and adds a packaging step
 to the image build, for a record the manifest already provides. Revisit it if
 the image ever needs to be installable rather than merely reproducible.
+
+### The two stages must agree, and are compared rather than pinned
+
+todo/114 split the image into a builder and a runtime stage, which gives the
+rolling repository a second bite: the builder resolves `libfss-client-ssl` for
+the compile, the runtime stage resolves it again minutes later for the shipped
+filesystem, and a release published in between satisfies the same window at both
+ends. Nothing would report it. The image would fly a library the binary was
+never linked against, and the manifest — correctly recording the runtime
+stage — would say so without anything noticing.
+
+Pinning the runtime stage to the builder's exact versions is the obvious fix and
+is the expiry date again, one stage further in. So the runtime stage installs
+under the same derived window and then **compares**:
+`docker/dep-constraints.sh --versions` writes what the builder linked against,
+`docker/runtime-setup.sh` diffs the runtime stage's resolution against it and
+fails the build on any difference. A mid-build release is then a build failure
+with an explanation, and rebuilding takes the new version in both stages.
+
+The comparison is keyed by pkg-config module, not by Debian package, because the
+two stages deliberately install different packages for `smm-asset`
+(`libsmm-asset-dev` to compile against, `libsmmasset0` to run against). They are
+published from one source at one version, which is what makes the two version
+strings comparable; if that ever stops being true this check is where it
+surfaces.

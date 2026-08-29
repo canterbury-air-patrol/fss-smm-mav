@@ -40,6 +40,37 @@ if [[ "$base" != *"@sha256:"* ]]; then
 	exit 1
 fi
 
+# The Dockerfile is multi-stage, and only one of its stages ships. A `FROM' that
+# names an image directly instead of ${BASE_IMAGE} would leave everything below
+# checking a base the flight image is not built on -- the same class of drift as
+# the bookworm/trixie split, but now invisible because the pinned line is still
+# there and still agrees with CI. Stages that build on an earlier stage by name
+# are how a multi-stage build works and are not bases, so they are exempt.
+mapfile -t stage_names < <(sed -n 's/^FROM .* [Aa][Ss] \([A-Za-z0-9_.-]*\).*$/\1/p' "$dockerfile")
+
+stage_status=0
+while read -r image; do
+	[ -n "$image" ] || continue
+	if [ "$image" = '${BASE_IMAGE}' ]; then
+		continue
+	fi
+	is_stage=0
+	for stage in ${stage_names[@]+"${stage_names[@]}"}; do
+		if [ "$image" = "$stage" ]; then
+			is_stage=1
+		fi
+	done
+	if [ "$is_stage" -eq 0 ]; then
+		echo "check-image-pins.sh: ${dockerfile} has 'FROM ${image}'" >&2
+		echo "                    every stage must build on \${BASE_IMAGE}" >&2
+		stage_status=1
+	fi
+done < <(sed -n 's/^FROM \([^ ]*\).*$/\1/p' "$dockerfile")
+
+if [ "$stage_status" -ne 0 ]; then
+	exit "$stage_status"
+fi
+
 mapfile -t containers < <(sed -n 's/^ *container: *\(.*\)$/\1/p' "$verify_yml")
 
 if [ "${#containers[@]}" -eq 0 ]; then
