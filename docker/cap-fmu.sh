@@ -18,7 +18,23 @@ export CONFIG_FILE
 DEBUGGER=()
 if [ "${RUN_IN_VALGRIND}" == "yes" ]
 then
+    # The flight image does not ship valgrind (docker/runtime-setup.sh installs
+    # it only under --build-arg INCLUDE_VALGRIND=yes). Say which image to use
+    # rather than letting `set -e` abort on a command not found, which is the
+    # same silent 127 the SC2037 bug produced.
+    if ! command -v valgrind >/dev/null 2>&1
+    then
+        echo "cap-fmu.sh: RUN_IN_VALGRIND=yes, but this image has no valgrind." >&2
+        echo "            The flight image deliberately omits it; rebuild with" >&2
+        echo "            docker build --build-arg INCLUDE_VALGRIND=yes and run" >&2
+        echo "            that image instead." >&2
+        exit 1
+    fi
     DEBUGGER=(valgrind --leak-check=full -v)
 fi
 
-"${DEBUGGER[@]}" /src/src/cap-fmu --terminate-action="${TERMINATE_ACTION}" "${CONFIG_FILE}"
+# /usr/bin/cap-fmu, not /src/src/cap-fmu: the image installs the binary
+# (docker/build.sh's `make install' with --prefix=/usr, staged into the runtime
+# stage) rather than running it out of a build tree that then has to ship. Same
+# path the .deb installs to.
+"${DEBUGGER[@]}" /usr/bin/cap-fmu --terminate-action="${TERMINATE_ACTION}" "${CONFIG_FILE}"

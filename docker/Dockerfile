@@ -18,11 +18,37 @@
 #     exercised: the gates were green for a build nobody shipped. That drift was
 #     only ever prevented by this comment, which is why it happened.
 #
+# Both stages below build on it, and check-image-pins.sh requires that too: a
+# runtime stage on some other base would be a flight image built on something
+# neither CI nor the compile ever saw, with this file still looking pinned.
+#
 # It is a multi-arch index digest, so it still resolves on the arm64/armhf nodes
 # the FMU flies on. To bump it, resolve the tag and update both files:
 #   docker buildx imagetools inspect debian:trixie | head -2
 ARG BASE_IMAGE=debian:trixie@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
-FROM ${BASE_IMAGE}
+
+# ---------------------------------------------------------------------------
+# Builder: toolchain, headers, and the compile. None of it ships.
+# ---------------------------------------------------------------------------
+FROM ${BASE_IMAGE} AS builder
+
+# Only what docker/setup.sh reads, before the source: the apt work below is the
+# expensive layer, and copying the whole tree first would re-run every install
+# on any source change.
+COPY docker /src/docker
+COPY configure.ac /src/configure.ac
+WORKDIR /src
+RUN ./docker/setup.sh
+
+COPY . /src
+RUN ./docker/build.sh
+
+# ---------------------------------------------------------------------------
+# Runtime: the flight image. The same base again, the shared libraries the
+# binary loads, and the installed binary -- no compiler, no -dev package, no
+# source tree, no apt lists.
+# ---------------------------------------------------------------------------
+FROM ${BASE_IMAGE} AS runtime
 
 # Re-declared with no value so the global default above comes into scope inside
 # the stage: docker/manifest.sh records the base the image was actually built
@@ -31,42 +57,30 @@ ARG BASE_IMAGE
 # The git SHA being built. CI passes it; a local build leaves it unknown rather
 # than guessing, since there is no .git in the build context to ask.
 ARG SOURCE_REVISION=unknown
+# Debug images only. valgrind exists in this image for RUN_IN_VALGRIND=yes and
+# nothing else, so the flight image does not carry it; docker/cap-fmu.sh names
+# this arg when it is asked for and absent.
+ARG INCLUDE_VALGRIND=no
 
-# Update the database
-RUN apt update
+# The build-time scripts and the two inputs they read: configure.ac (the version
+# bounds docker/dep-constraints.sh derives from) and, from the builder, the apt
+# repository files and the versions the compile linked against. /build is
+# removed once the last of them has run.
+COPY docker /build/docker
+COPY configure.ac /build/configure.ac
+COPY --from=builder /etc/apt/sources.list.d/cap.list /build/docker/cap.list
+COPY --from=builder /etc/apt/trusted.gpg.d/cap.gpg /build/docker/cap.gpg
+COPY --from=builder /build-versions /build/docker/build-versions
+RUN /build/docker/runtime-setup.sh
 
-# Make sure lsb-release is present
-RUN apt install -y lsb-release
+# `make install' output only -- /staging/usr/bin/cap-fmu, and nothing else the
+# builder touched.
+COPY --from=builder /staging/ /
 
-RUN apt install -y ca-certificates curl gnupg
-
-# CAP repo: dearmored keyring over HTTPS, matching CI (no deprecated apt-key)
-RUN echo "deb https://apt.canterburyairpatrol.org/apt/$(lsb_release -sc)/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/cap.list
-RUN curl -fsSL https://apt.canterburyairpatrol.org/repository.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/cap.gpg
-
-# Update the database
-RUN apt update
-
-RUN apt install -y valgrind
-
-# jq generates the FSS client config from environment variables at container
-# start (docker/generate-config.sh), so string values are properly
-# JSON-escaped instead of hand-built with echo.
-RUN apt install -y jq
-
-RUN apt install -y build-essential libtool automake pkg-config libcurl4-openssl-dev libtidy-dev libjansson-dev
-
-COPY . /src
-
-WORKDIR /src
-
-RUN ./docker/setup.sh
-RUN ./docker/build.sh
-RUN ./docker/install.sh
-
-# Last, so it records the tree as it ships: every apt layer above has run, and
-# the versions it captures are the ones the built binary linked against.
-RUN ./docker/manifest.sh
+# One layer, so /build does not outlive the scripts in it. manifest.sh last, so
+# it records the tree as it ships: every install above has run, and the versions
+# it captures are the ones the binary will actually load.
+RUN /build/docker/install.sh && /build/docker/manifest.sh && rm -rf /build
 
 USER autopilot
 WORKDIR /home/autopilot

@@ -1,9 +1,15 @@
 #!/bin/bash -e
 
-# Emit the Canterbury Air Patrol dependency version bounds as Debian dependency
-# terms, one per line, ready to hand to `apt-get satisfy`.
+# Report the Canterbury Air Patrol dependencies the image needs: as Debian
+# dependency terms ready for `apt-get satisfy`, as bare package names, or as the
+# versions currently installed.
 #
-# These bounds are *derived from configure.ac*, not written here. That is the
+#   dep-constraints.sh                  build-stage terms (the -dev packages)
+#   dep-constraints.sh --runtime        runtime-stage terms (the shared libs)
+#   dep-constraints.sh --packages       bare package names, one per line
+#   dep-constraints.sh --versions       "module<TAB>version" for what is installed
+#
+# The bounds are *derived from configure.ac*, not written here. That is the
 # whole point of the script: the fss-client-ssl floor is a semantic requirement
 # (see configure.ac's comment on the 1.3.0 break), and until this existed it was
 # enforced only where the source was compiled. `apt install -y
@@ -24,15 +30,47 @@
 
 CONFIGURE_AC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/configure.ac"
 
+mode=constraints
+runtime=0
+for arg in "$@"; do
+	case "$arg" in
+	--runtime) runtime=1 ;;
+	--packages) mode=packages ;;
+	--versions) mode=versions ;;
+	*)
+		echo "dep-constraints.sh: unknown argument '${arg}'" >&2
+		exit 1
+		;;
+	esac
+done
+
 # pkg-config module name -> Debian binary package. Unavoidable duplication: the
 # two namespaces are genuinely different, and debian/control carries the same
-# mapping. Modules with no entry (jsoncpp) are Debian's own and are installed
-# unconstrained by docker/build.sh.
+# mapping. Modules with no entry (jsoncpp) are Debian's own; the build stage
+# installs it unconstrained (docker/setup.sh) and the runtime stage gets it as a
+# dependency of libfss-client-ssl, which uses it in its own API.
+#
+# smm-asset is the one module whose two stages want different packages:
+# libsmm-asset-dev is headers plus the -dev dependency chain (libtidy-dev,
+# libjansson-dev, libcurl4-openssl-dev), none of which belongs in a flight
+# image, and libsmmasset0 is the shared library the binary actually loads. The
+# two are published from one source at one version -- libsmm-asset-dev depends
+# on `libsmmasset0 (= <same version>)' -- which is what makes the cross-stage
+# version comparison in docker/runtime-setup.sh meaningful. The FSS packages
+# need no such split: libfss-client-ssl and libfss-transport are themselves the
+# runtime packages (debian/control's `Depends' names them), and are what
+# `cap-fmu' the .deb depends on.
 deb_package() {
 	case "$1" in
 	fss-client-ssl) echo "libfss-client-ssl" ;;
 	fss-transport) echo "libfss-transport" ;;
-	smm-asset) echo "libsmm-asset-dev" ;;
+	smm-asset)
+		if [ "$runtime" -eq 1 ]; then
+			echo "libsmmasset0"
+		else
+			echo "libsmm-asset-dev"
+		fi
+		;;
 	*) echo "" ;;
 	esac
 }
@@ -71,6 +109,25 @@ while read -r spec; do
 		package="$(deb_package "$module")"
 		[ -n "$package" ] || continue
 		emitted="${emitted} ${module}"
+
+		case "$mode" in
+		packages)
+			echo "$package"
+			continue
+			;;
+		versions)
+			# Deliberately keyed by pkg-config module, not by package:
+			# the whole reason this mode exists is to compare the build
+			# stage against the runtime stage, and those two stages
+			# install different package names for the same module.
+			if ! installed="$(dpkg-query -W -f='${Version}' "$package" 2>/dev/null)"; then
+				echo "dep-constraints.sh: ${package} is not installed" >&2
+				exit 1
+			fi
+			printf '%s\t%s\n' "$module" "$installed"
+			continue
+			;;
+		esac
 
 		if [ -z "$operator" ]; then
 			echo "$package"

@@ -88,9 +88,12 @@ jobs:
       - name: Smoke test the built image
         run: |
           # The entrypoint refuses to start without a valid TERMINATE_ACTION, so
-          # drive the binary directly for the CLI checks.
-          docker run --rm --entrypoint /src/src/cap-fmu cap-fmu:ci-smoke --version
-          docker run --rm --entrypoint /src/src/cap-fmu cap-fmu:ci-smoke --help
+          # drive the binary directly for the CLI checks. /usr/bin/cap-fmu is
+          # the installed path --- the image used to run the binary out of its
+          # own build tree at /src/src/cap-fmu, which is what obliged it to ship
+          # that tree.
+          docker run --rm --entrypoint /usr/bin/cap-fmu cap-fmu:ci-smoke --version
+          docker run --rm --entrypoint /usr/bin/cap-fmu cap-fmu:ci-smoke --help
 
           # The entrypoint must fail loudly on a missing TERMINATE_ACTION rather
           # than launching with an unset flight-termination action.
@@ -114,6 +117,38 @@ jobs:
           docker run --rm --entrypoint sh cap-fmu:ci-smoke \
             -c 'test -w /var/log/cap-fmu'
 
+      # What separates the runtime stage from the builder is not visible in a
+      # working image: one that had quietly collapsed back into a single stage
+      # would pass every check above. These are the difference itself.
+      - name: The runtime stage carries no build tree or toolchain
+        run: |
+          status=0
+          # /src is the builder's source tree, /build the runtime stage's own
+          # scratch copy of docker/ --- both are removed by the time the image
+          # ships, and either one present means a stage boundary was lost.
+          for path in /src /build; do
+            if docker run --rm --entrypoint sh cap-fmu:ci-smoke \
+                 -c "test -e ${path}"; then
+              echo "::error::${path} is present in the runtime image"
+              status=1
+            fi
+          done
+          # A compiler on a network-facing airborne node, and the apt lists that
+          # nothing at runtime reads.
+          for tool in cc gcc make ld curl gpg valgrind; do
+            if docker run --rm --entrypoint sh cap-fmu:ci-smoke \
+                 -c "command -v ${tool}" >/dev/null 2>&1; then
+              echo "::error::${tool} is present in the runtime image"
+              status=1
+            fi
+          done
+          if docker run --rm --entrypoint sh cap-fmu:ci-smoke \
+               -c 'test -n "$(ls -A /var/lib/apt/lists)"'; then
+            echo "::error::apt package lists were left in the runtime image"
+            status=1
+          fi
+          exit "$status"
+
       # The image records its own dependency set (docker/manifest.sh). Extract
       # it here so the versions that went into a published tag are recoverable
       # from the CI run as well as from the image --- and check it is actually
@@ -124,7 +159,10 @@ jobs:
           docker run --rm --entrypoint cat cap-fmu:ci-smoke \
             /etc/cap-fmu-manifest > cap-fmu-manifest.txt
           cat cap-fmu-manifest.txt
-          for pkg in libfss-client-ssl libfss-transport libsmm-asset-dev; do
+          # The *runtime* library names. libsmm-asset-dev is the builder's
+          # package; the flight image has libsmmasset0, the shared library the
+          # binary loads (docker/dep-constraints.sh --runtime).
+          for pkg in libfss-client-ssl libfss-transport libsmmasset0; do
             if ! grep -q "^${pkg}\s" cap-fmu-manifest.txt; then
               echo "::error::manifest does not record ${pkg}"
               exit 1
@@ -135,6 +173,16 @@ jobs:
           # commit.
           if grep -q '^source-revision: unknown$' cap-fmu-manifest.txt; then
             echo "::error::manifest has no source revision"
+            exit 1
+          fi
+          # docker/manifest.sh runs in the runtime stage. Left in the builder it
+          # would describe a package set the shipped image does not have, while
+          # looking exactly as authoritative --- and a build-only package listed
+          # here is the tell that it has drifted back.
+          if grep -Eq '^(build-essential|[^[:space:]]*-dev)[[:space:]]' \
+               cap-fmu-manifest.txt; then
+            echo "::error::manifest lists build-only packages; it was captured in the builder stage"
+            grep -E '^(build-essential|[^[:space:]]*-dev)[[:space:]]' cap-fmu-manifest.txt
             exit 1
           fi
 
